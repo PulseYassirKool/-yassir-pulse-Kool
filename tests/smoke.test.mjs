@@ -112,9 +112,11 @@ const toCsv = (rows) => rows.map((r) => r.map(csvEsc).join(',')).join('\n');
 const koolCsvData = toCsv([
   ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
   ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
-  ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '0'],
+  ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '5'],
   ['', '', '', '17/11/2026', '1003', '', 'Resto Beta', '', '', '18.00', '2', '0'],
-  ['oui', '', 'Client absent', '18/11/2026', '1004', '', 'Resto Alpha', '', '', '22.00', '3', '0']
+  ['oui', '', 'Client absent', '18/11/2026', '1004', '', 'Resto Alpha', '', '', '22.00', '3', '0'],
+  // 1005 : livrée le 18/11 mais SANS ligne dans la feuille « détails articles » (cas réel : couverture incomplète).
+  ['', '', '', '18/11/2026', '1005', '', 'Resto Alpha', '', '', '10.00', '2', '0']
 ]);
 const koolCsvItems = toCsv([
   ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
@@ -153,6 +155,10 @@ function bootKool() {
   w.addEventListener('error', (e) => errors.push(e.message));
   w.addEventListener('unhandledrejection', (e) => errors.push(String(e.reason)));
   w.eval(bundle);
+  // jsdom n'a pas de canvas : le vrai Chart.js enregistre une instance cassée (canvas null)
+  // puis plante au 2e graphique (« Canvas is already in use »). Faux neutre : les valeurs
+  // des KPI et des cartes sont déjà dans le DOM, seuls les graphiques sont neutralisés.
+  w.Chart = class { constructor() {} destroy() {} };
   return w;
 }
 
@@ -186,5 +192,51 @@ test('Kool : bascule de marque (favicon K jaune), moteur sans crash et Top des v
   assert.notEqual(badge, '0 article(s)', 'Top des ventes vide pour ' + firstKey);
   const topHtml = w.document.getElementById('restoTopItemsTableBody').innerHTML;
   assert.ok(topHtml.includes('Pizza Margherita') || topHtml.includes('Tacos Poulet'), 'aucun article attendu dans le Top');
+
+  // Synthèse Kool : GMV Brut (J+L) ≠ GMV After (J), CA HT > 0 (ex-bug : libellé « CA YASSIR »).
+  // Livrées : 1001 (25.50+0), 1002 (40+5 remise), 1003 (18+0), 1005 (10+0).
+  // Brut = 98.5, After = 93.5, CA KOOL = 20 % × 75.5 + 15 % × 18 = 17.8, CA HT = 17.8 / 1.19 ≈ 15.
+  w.yassirSwitchTab('synth_global');
+  await wait(600);
+  const kpi = {};
+  w.document.querySelectorAll('#synthGlobalKpisBody tr').forEach((tr) => {
+    const tds = tr.querySelectorAll('td');
+    if (tds.length >= 2) kpi[tds[0].textContent.trim()] = tds[1].textContent.trim();
+  });
+  assert.equal(kpi['GMV Brut (Item total)'], '98.5', 'GMV Brut Kool (J+L) : ' + JSON.stringify(kpi));
+  assert.equal(kpi['GMV (Total Food VF)'], '93.5', 'GMV After Kool (J) : ' + JSON.stringify(kpi));
+  assert.equal(kpi['CA KOOL'], '17.8', 'CA KOOL : ' + JSON.stringify(kpi));
+  const numTxt = (s) => Number(String(s).replace(/[^0-9-]/g, ''));
+  assert.equal(numTxt(w.document.getElementById('execGmvBrutVal').textContent), 99, 'carte GMV Brut');
+  assert.equal(numTxt(w.document.getElementById('execGmvAfterVal').textContent), 94, 'carte GMV After');
+  assert.equal(numTxt(w.document.getElementById('execCardCaVal').textContent), 15, 'carte CA HT (ex 0)');
+
+  // Top AVEC filtre de date : 16/11 uniquement → commande 1001 (3 articles, pas de Burger).
+  w.document.getElementById('filterDateStart').value = '2026-11-16';
+  w.document.getElementById('filterDateEnd').value = '2026-11-16';
+  w.yassirOnDateRangeChange();
+  await wait(600);
+  w.yassirSwitchTab('resto_analytics');
+  await wait(600);
+  w.yassirOnSelectRestoAnalytics('resto alpha');
+  await wait(400);
+  assert.equal(w.document.getElementById('restoItemsCountBadge').textContent, '3 article(s)', 'Top filtré 16/11');
+  const top16Html = w.document.getElementById('restoTopItemsTableBody').innerHTML;
+  assert.ok(top16Html.includes('Pizza Margherita'), 'Pizza Margherita attendue le 16/11');
+  assert.ok(!top16Html.includes('Burger Classic'), 'Burger Classic (17/11) ne doit pas apparaître le 16/11');
+
+  // Top sur une période NON couverte par les détails articles (18/11 : 1005 livrée, sans article) :
+  // message explicite avec la fin de couverture (17/11/2026), pas le message générique.
+  w.document.getElementById('filterDateStart').value = '2026-11-18';
+  w.document.getElementById('filterDateEnd').value = '2026-11-18';
+  w.yassirOnDateRangeChange();
+  await wait(600);
+  w.yassirOnSelectRestoAnalytics('resto alpha');
+  await wait(400);
+  assert.equal(w.document.getElementById('restoItemsCountBadge').textContent, '0 article(s)', 'Top 18/11 doit être vide');
+  const top18Html = w.document.getElementById('restoTopItemsTableBody').innerHTML;
+  assert.ok(top18Html.includes('17/11/2026'), 'message de couverture attendu (fin au 17/11/2026) : ' + top18Html.slice(0, 200));
+  assert.ok(!top18Html.includes('Aucun article trouvé pour ce restaurant.'), 'le message générique ne doit pas apparaître quand c’est un manque de couverture');
+
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

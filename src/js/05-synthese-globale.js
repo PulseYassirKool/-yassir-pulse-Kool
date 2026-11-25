@@ -613,7 +613,7 @@
         var gmvAfter26 = kpiMap['GMV (Total Food VF)'] || kpiMap['GMV (Total Market VF)'] || 0;
         var aovAfter26 = del26 > 0 ? (gmvAfter26 / del26) : 0;
         var aovBrut26 = del26 > 0 ? (gmvBrut26 / del26) : 0;
-        var ca26 = kpiMap['CA YASSIR'] || 0;
+        var ca26 = kpiMap['CA YASSIR'] || kpiMap['CA KOOL'] || 0;
         var promo26 = kpiMap['Promo Order'] || 0;
         var promoPct26 = del26 > 0 ? ((promo26 / del26) * 100) : 0;
         var activeStores26 = kpiMap['Active Store'] || 0;

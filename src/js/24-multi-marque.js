@@ -118,6 +118,8 @@
           window.koolOrderItemsByOrderId = byOrder;
           window.koolOrderItemsByResto = byResto;
           window.koolOrderItemsRawCount = 0;
+          window.koolOrderItemsMinDate = '';
+          window.koolOrderItemsMaxDate = '';
           return 0;
         }
         var hdr = (rows[0] || []).map(function (h) { return normalizeText(h).replace(/[_\-]+/g, ' ').trim(); });
@@ -143,6 +145,8 @@
         if (idxType === -1) idxType = 9;
 
         var totalLines = 0;
+        var minDateIso = '';
+        var maxDateIso = '';
         for (var r = 1; r < rows.length; r++) {
           var row = rows[r];
           if (!row) continue;
@@ -164,6 +168,15 @@
             continue;
           }
           var dateStr = String(row[idxDate] || '').trim();
+          // Couverture temporelle des détails articles (ex. octobre uniquement) :
+          // sert à expliquer un Top vide sur une période non couverte.
+          if (dateStr) {
+            var dIso = parseOrderDayToIsoDate(dateStr);
+            if (dIso) {
+              if (!minDateIso || dIso < minDateIso) minDateIso = dIso;
+              if (!maxDateIso || dIso > maxDateIso) maxDateIso = dIso;
+            }
+          }
 
           var entry = {
             orderId: oid,
@@ -191,6 +204,8 @@
         window.koolOrderItemsByOrderId = byOrder;
         window.koolOrderItemsByResto = byResto;
         window.koolOrderItemsRawCount = totalLines;
+        window.koolOrderItemsMinDate = minDateIso;
+        window.koolOrderItemsMaxDate = maxDateIso;
         if (typeof _koolRulesIndex !== 'undefined') _koolRulesIndex.evalCache.clear();
         return totalLines;
       }
@@ -634,15 +649,17 @@
           // Service Food uniquement (jamais Market pour Kool)
           outRow[idxMap['services']] = 'Food';
 
-          // Colonne J (9) : Montant Hors Frais De Livraison = GMV uniquement
-          // Colonne L (11) : Remise (informative uniquement, non ajoutée au GMV et non utilisée pour les offres)
+          // Colonne J (9) : Montant Hors Frais De Livraison = montant payé (net de remise).
+          // Colonne L (11) : Remise accordée. Vérifié sur les données : Montant Total = J + K,
+          // donc la remise n'est pas déduite de J : le brut vaut J + L.
+          // GMV Brut (item total) = J + L ; GMV After (Total Food VF) = J.
           var montantJ = sRow.length > COL_J_MONTANT_HORS_LIV ? purgerNombre(sRow[COL_J_MONTANT_HORS_LIV]) : 0;
           var remiseL = sRow.length > COL_L_REMISE ? purgerNombre(sRow[COL_L_REMISE]) : 0;
 
-          outRow[idxMap['item total']] = montantJ;
-          outRow[idxMap['item total.1']] = montantJ;
+          outRow[idxMap['item total']] = montantJ + remiseL;
+          outRow[idxMap['item total.1']] = montantJ + remiseL;
           outRow[idxMap['Total Food']] = montantJ;
-          outRow[idxMap['Total Food.1']] = montantJ;
+          outRow[idxMap['Total Food.1']] = montantJ + remiseL;
           outRow[idxMap['Total Food VF']] = montantJ;
           outRow[idxMap['Discount Amount']] = remiseL;
 

@@ -4,6 +4,10 @@
       var selectedAnalyticsRestoKey = '';
       var restoWeeklyChartInstance = null;
       var currentRestoTopItemsList = [];
+      // Message affiché quand le Top est vide faute de détails articles pour la période
+      // (ex. feuille « détails articles » Kool = octobre uniquement) : sinon l'utilisateur
+      // croit que le restaurant n'a rien vendu. Vide quand le Top n'est pas dans ce cas.
+      var restoTopEmptyCoverageNote = '';
 
       // Cache de la liste des restaurants : le calcul rescanne toutes les commandes
       // (marketRows + foodRows) et était refait 3 fois par rendu du panneau + à chaque
@@ -397,6 +401,20 @@
           }
         });
 
+        // Message ciblé quand le Top est vide faute de détails articles pour la période
+        // (commandes livrées présentes mais aucune ligne d'article les concernant).
+        restoTopEmptyCoverageNote = '';
+        if (typeof currentBrand !== 'undefined' && currentBrand === 'kool' && deliveredOrders.length > 0 && itemsMap.size === 0) {
+          if (!window.koolOrderItemsByOrderId || window.koolOrderItemsByOrderId.size === 0) {
+            restoTopEmptyCoverageNote = 'Aucun détail article chargé : faites un « Sync Kool » pour charger la feuille des détails articles.';
+          } else {
+            var covMax = window.koolOrderItemsMaxDate || '';
+            restoTopEmptyCoverageNote = covMax
+              ? 'Aucun détail article pour cette période : la feuille « détails articles » Kool s’arrête au ' + covMax.split('-').reverse().join('/') + '. Ajoutez les lignes manquantes pour voir le Top.'
+              : 'Aucun détail article pour cette période : la feuille « détails articles » Kool ne couvre pas ces commandes.';
+          }
+        }
+
         // 2. Mise à jour des 4 KPIs du restaurant
         var aovVal = deliveredOrders.length > 0 ? (totalGmv / deliveredOrders.length) : 0;
         document.getElementById('raKpiDelivered').textContent = deliveredOrders.length.toLocaleString('fr-FR');
@@ -547,7 +565,10 @@
         }
 
         if (filtered.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">Aucun article trouvé pour ce restaurant.</td></tr>';
+          var emptyMsg = (currentRestoTopItemsList.length === 0 && restoTopEmptyCoverageNote)
+            ? restoTopEmptyCoverageNote
+            : 'Aucun article trouvé pour ce restaurant.';
+          tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">' + escapeHtml(emptyMsg) + '</td></tr>';
           return;
         }
 
