@@ -5,6 +5,20 @@
       var restoWeeklyChartInstance = null;
       var currentRestoTopItemsList = [];
 
+      // Cache de la liste des restaurants : le calcul rescanne toutes les commandes
+      // (marketRows + foodRows) et était refait 3 fois par rendu du panneau + à chaque
+      // frappe dans la recherche. La liste ne change qu'avec les données (révision).
+      var _analyticsRestoListCache = { key: '', list: [] };
+      function getAnalyticsRestoListCacheKey() {
+        return String(state._calcRevision || 0) + '|' +
+          (typeof currentBrand !== 'undefined' ? currentBrand : 'yassir') + '|' +
+          getEffectiveAmFilter() + '|' +
+          (currentUser ? currentUser.username + ':' + currentUser.role : '') + '|' +
+          Object.keys(state.amPortfolios || {}).length + '|' +
+          (state.marketRows ? state.marketRows.length : 0) + '|' +
+          (state.foodRows ? state.foodRows.length : 0);
+      }
+
       var restoListZeroFilterMode = 'all';
 
       window.yassirSetRestoListZeroFilter = function (mode) {
@@ -22,6 +36,10 @@
       };
 
       function getAvailableRestaurantsForAnalytics() {
+        var cacheKey = getAnalyticsRestoListCacheKey();
+        if (_analyticsRestoListCache.key === cacheKey && _analyticsRestoListCache.list.length > 0) {
+          return _analyticsRestoListCache.list;
+        }
         var allowedAms = getAllowedAmListForCurrentUser();
         var activeAm = getEffectiveAmFilter();
         var idxResto = TARGET_HEADERS.indexOf('restaurant name');
@@ -76,9 +94,11 @@
           }
         });
 
-        return Array.from(map.values()).sort(function (a, b) {
+        var sortedList = Array.from(map.values()).sort(function (a, b) {
           return (b.deliveredCount - a.deliveredCount) || (b.orderCount - a.orderCount) || a.name.localeCompare(b.name, 'fr');
         });
+        _analyticsRestoListCache = { key: getAnalyticsRestoListCacheKey(), list: sortedList };
+        return sortedList;
       }
 
       function getFilteredRestoOrdersList(filterText) {

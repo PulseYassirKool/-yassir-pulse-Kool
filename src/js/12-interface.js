@@ -13,6 +13,11 @@
         mettreAJourInterface();
       };
 
+      // Cache du nombre d'annulations du badge : le calcul concatène marketRows +
+      // foodRows et rescanne tout à chaque mise à jour de l'interface. Le nombre ne
+      // change qu'avec les données (révision) ou le filtre AM effectif.
+      var _cancCountCache = { key: '', count: 0 };
+
       function renderAmFilterPills() {
         var container = document.getElementById('amQuickFilterPills');
         if (!container) return;
@@ -252,13 +257,23 @@
         document.getElementById('tabCountStat').textContent = filteredStatList.length;
         var elCancCnt = document.getElementById('tabCountCancellations');
         if (elCancCnt) {
-          var idxStCanc = TARGET_HEADERS.indexOf('status');
-          var amAllOrders = filtrerParAmSelectionne(state.marketRows.concat(state.foodRows));
-          var totalCancOrders = amAllOrders.filter(function (rec) {
-            var s = String(rec.cells[idxStCanc] || '').trim().toLowerCase();
-            return s && !s.includes('delivered');
-          }).length;
-          elCancCnt.textContent = totalCancOrders;
+          var cancCacheKey = String(state._calcRevision || 0) + '|' +
+            (typeof currentBrand !== 'undefined' ? currentBrand : 'yassir') + '|' +
+            getEffectiveAmFilter() + '|' +
+            (state.marketRows ? state.marketRows.length : 0) + '|' +
+            (state.foodRows ? state.foodRows.length : 0);
+          if (_cancCountCache.key !== cancCacheKey) {
+            var idxStCanc = TARGET_HEADERS.indexOf('status');
+            var amAllOrders = filtrerParAmSelectionne(state.marketRows.concat(state.foodRows));
+            _cancCountCache = {
+              key: cancCacheKey,
+              count: amAllOrders.filter(function (rec) {
+                var s = String(rec.cells[idxStCanc] || '').trim().toLowerCase();
+                return s && !s.includes('delivered');
+              }).length
+            };
+          }
+          elCancCnt.textContent = _cancCountCache.count;
         }
         document.getElementById('tabCountAm').textContent = visibleRestosCount;
         document.getElementById('tabCountComm').textContent = commCount;

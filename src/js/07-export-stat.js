@@ -27,6 +27,8 @@
         var idxCT_AcceptedBy = TARGET_HEADERS.indexOf('Accepted By');
         var idxCZ_Provider = TARGET_HEADERS.indexOf('Discount Type Provider');
         var idxArea = TARGET_HEADERS.indexOf('Area');
+        var idxOrigDelivStat = TARGET_HEADERS.indexOf('original delivery amount');
+        var idxDelivAmtStat = TARGET_HEADERS.indexOf('delivery amount');
 
         // 1. Calcul de totDelivGlobal : COUNTIF(LOWER(Data!AP2:AP), "*delivered*")
         var totDelivGlobal = 0;

@@ -638,28 +638,37 @@
         return Number.isFinite(parsed) ? parsed : 0;
       }
 
+      // Cache des heures normalisées : les mêmes valeurs d'heure reviennent des centaines
+      // de fois dans Data exp (4 appels par ligne dans le moteur) — évite regex + new Date.
+      var _heureNormCache = new Map();
       function extraireObjetHeureNormalise(valeur) {
         if (valeur === null || valeur === undefined || valeur === '') return null;
+        var cacheKey = (valeur instanceof Date) ? ('d:' + valeur.getTime()) : (typeof valeur === 'number' ? ('n:' + valeur) : ('s:' + String(valeur)));
+        if (_heureNormCache.has(cacheKey)) return _heureNormCache.get(cacheKey);
+        var res = null;
         if (valeur instanceof Date && !isNaN(valeur.getTime())) {
-          return new Date(1970, 0, 1, valeur.getHours(), valeur.getMinutes(), valeur.getSeconds(), 0);
-        }
-        if (typeof valeur === 'number' && Number.isFinite(valeur)) {
+          res = new Date(1970, 0, 1, valeur.getHours(), valeur.getMinutes(), valeur.getSeconds(), 0);
+        } else if (typeof valeur === 'number' && Number.isFinite(valeur)) {
           var fraction = valeur % 1;
           var totalSec = Math.round(Math.abs(fraction) * 86400);
           var h = Math.floor(totalSec / 3600) % 24;
           var m = Math.floor((totalSec % 3600) / 60);
           var s = totalSec % 60;
-          return new Date(1970, 0, 1, h, m, s, 0);
+          res = new Date(1970, 0, 1, h, m, s, 0);
+        } else {
+          var str = String(valeur).trim();
+          if (str && str.toLowerCase() !== 'n/a') {
+            var idxSlash = str.lastIndexOf('/');
+            if (idxSlash !== -1) str = str.substring(idxSlash + 1).trim();
+            var match = str.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+            if (match) {
+              res = new Date(1970, 0, 1, parseInt(match[1], 10), parseInt(match[2], 10), match[3] ? parseInt(match[3], 10) : 0, 0);
+            }
+          }
         }
-        var str = String(valeur).trim();
-        if (!str || str.toLowerCase() === 'n/a') return null;
-        var idxSlash = str.lastIndexOf('/');
-        if (idxSlash !== -1) str = str.substring(idxSlash + 1).trim();
-        var match = str.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-        if (match) {
-          return new Date(1970, 0, 1, parseInt(match[1], 10), parseInt(match[2], 10), match[3] ? parseInt(match[3], 10) : 0, 0);
-        }
-        return null;
+        if (_heureNormCache.size > 20000) _heureNormCache.clear();
+        _heureNormCache.set(cacheKey, res);
+        return res;
       }
 
       function calculerDifferenceTemps(fin, debut) {

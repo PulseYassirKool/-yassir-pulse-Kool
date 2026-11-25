@@ -95,3 +95,87 @@ test('propriétaire : liste des comptes via API, sans hash', async () => {
   assert.equal(w.document.getElementById('accessManagerModal').classList.contains('hidden'), false);
   assert.equal(w.document.getElementById('accountsTableBody').innerHTML.includes('pbkdf2'), false);
 });
+
+// ---- Régression Kool : bascule de marque, moteur (ex-crash stat) et Top des ventes ----
+// Données simulées (semaine 16-22 nov 2026) servies à la place des feuilles Google Kool.
+const csvEsc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const toCsv = (rows) => rows.map((r) => r.map(csvEsc).join(',')).join('\n');
+const koolCsvData = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
+  ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '0'],
+  ['', '', '', '17/11/2026', '1003', '', 'Resto Beta', '', '', '18.00', '2', '0'],
+  ['oui', '', 'Client absent', '18/11/2026', '1004', '', 'Resto Alpha', '', '', '22.00', '3', '0']
+]);
+const koolCsvItems = toCsv([
+  ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+  ['1001', '16/11/2026', 'Resto Alpha', 'Pizza', 'Pizza Margherita', 2, 12, 0, 12, 'Food'],
+  ['1001', '16/11/2026', 'Resto Alpha', 'Boisson', 'Coca Cola', 1, 3, 0, 3, 'Food'],
+  ['1001', '16/11/2026', 'Resto Alpha', 'Extra', 'Sauce Fromage', 1, 2, 0, 2, 'Extra'],
+  ['1002', '17/11/2026', 'Resto Alpha', 'Burger', 'Burger Classic', 1, 15, 0, 15, 'Food'],
+  ['1003', '17/11/2026', 'Resto Beta', 'Tacos', 'Tacos Poulet', 3, 9, 0, 9, 'Food']
+]);
+const koolCsvComm = toCsv([['Restaurant', 'Commission'], ['Resto Alpha', '20'], ['Resto Beta', '15']]);
+const koolCsvPort = toCsv([['Restaurant', 'Ville', 'AM'], ['Resto Alpha', 'Tunis', 'Omar Beldi'], ['Resto Beta', 'Ariana', 'Nour Ali']]);
+const koolCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], ['Resto Alpha', '10', 'Toute la carte', '01/11/2026 - 30/11/2026']]);
+
+function bootKool() {
+  const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w = dom.window;
+  w.__PULSE_API__ = 'https://api.test';
+  w.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.startsWith('https://api.test')) {
+      const r = await handle(new Request(u, { method: opts.method || 'GET', body: opts.body, headers: { Origin: 'http://localhost', ...(opts.headers || {}) } }), env);
+      return { ok: r.ok, status: r.status, json: () => r.json(), text: () => r.text() };
+    }
+    if (u.includes('format=xlsx')) return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    const kc = seed.kool || {};
+    const match = (id) => id && u.includes(id);
+    let body = null;
+    if (match(kc.DATA_SHEET_ID)) body = koolCsvData;
+    else if (match(kc.ORDER_ITEMS_SHEET_ID)) body = koolCsvItems;
+    else if (match(kc.COMMISSION_SHEET_ID)) body = koolCsvComm;
+    else if (match(kc.PORTFOLIOS_SHEET_ID)) body = koolCsvPort;
+    else if (match(kc.OFFRE_PARTICIPATION_SHEET_ID)) body = koolCsvOffre;
+    if (body !== null) return { ok: true, status: 200, text: async () => body, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+  };
+  w.addEventListener('error', (e) => errors.push(e.message));
+  w.addEventListener('unhandledrejection', (e) => errors.push(String(e.reason)));
+  w.eval(bundle);
+  return w;
+}
+
+test('Kool : bascule de marque (favicon K jaune), moteur sans crash et Top des ventes', async () => {
+  const w = bootKool();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false);
+
+  await w.yassirSyncKoolSheets(true);
+  assert.ok(w.koolOrderItemsByOrderId.size > 0, 'aucun détail article Kool indexé');
+  assert.ok(w.koolOrderItemsRawCount > 0, '0 ligne de détail article');
+
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  assert.ok(w.document.title.startsWith('Kool Pulse'), 'titre non basculé sur Kool : ' + w.document.title);
+  const fav = w.document.getElementById('appFavicon');
+  assert.ok(fav, 'lien favicon #appFavicon absent');
+  const favHref = String(fav.getAttribute('href') || fav.href || '');
+  assert.ok(favHref.startsWith('data:image/svg+xml'), 'favicon Kool non appliqué');
+  assert.ok(favHref.includes('FFD100'), 'favicon Kool non jaune');
+
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+  w.yassirSwitchTab('resto_analytics');
+  await wait(600);
+  const firstKey = [...w.document.querySelectorAll('#selectRestoAnalytics option')].map((o) => o.value).filter(Boolean)[0];
+  assert.ok(firstKey, 'aucun restaurant proposé en analyse');
+  w.yassirOnSelectRestoAnalytics(firstKey);
+  await wait(400);
+  const badge = w.document.getElementById('restoItemsCountBadge').textContent;
+  assert.notEqual(badge, '0 article(s)', 'Top des ventes vide pour ' + firstKey);
+  const topHtml = w.document.getElementById('restoTopItemsTableBody').innerHTML;
+  assert.ok(topHtml.includes('Pizza Margherita') || topHtml.includes('Tacos Poulet'), 'aucun article attendu dans le Top');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});

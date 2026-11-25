@@ -860,6 +860,13 @@
             }
           }
           saveCurrentStateToBrandCache('kool');
+          // Les lignes calculées (market/food/offres/stat) datent d'avant cette synchro :
+          // on les invalide pour que la prochaine bascule vers Kool recalcule le moteur
+          // sur les données fraîches au lieu de réafficher les anciennes.
+          brandArchives.kool.marketRows = [];
+          brandArchives.kool.foodRows = [];
+          brandArchives.kool.offresRows = [];
+          brandArchives.kool.statRows = [];
 
           if (wasBrand !== 'kool') {
             currentBrand = wasBrand;

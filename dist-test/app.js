@@ -47145,7 +47145,7 @@ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "sy
   Chart$1.register(...registerables);
   window.XLSX = XLSX$2;
   window.Chart = Chart$1;
-  window.__PULSE_API__ = "https://yassir-pulse-api.tun-omar.workers.dev";
+  window.__PULSE_API__ = "";
   window.__PULSE_API__ = "https://api.test";
   (function() {
     var memoryStorage = {};
