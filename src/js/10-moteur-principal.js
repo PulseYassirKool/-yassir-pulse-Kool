@@ -461,9 +461,9 @@
           if (canSeeGlobalSynth()) prevBar.classList.remove('hidden');
           else prevBar.classList.add('hidden');
         }
-        var btnHistSync = document.getElementById('btnSyncHistoricalSheets');
-        if (btnHistSync) {
-          if (isOwnerAdmin()) { btnHistSync.classList.remove('hidden'); } else { btnHistSync.classList.add('hidden'); }
+        var btnSyncYassir = document.getElementById('btnSyncYassirAll');
+        if (btnSyncYassir) {
+          if (isOwnerAdmin()) { btnSyncYassir.classList.remove('hidden'); } else { btnSyncYassir.classList.add('hidden'); }
         }
         var btnReset = document.getElementById('btnResetAll');
         if (btnReset) {

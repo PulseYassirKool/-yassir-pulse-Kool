@@ -273,7 +273,7 @@
         if (icon) icon.classList.add('fa-spin');
         if (label) label.textContent = 'Sync Participation...';
 
-        fetchGoogleWorkbookXlsx(sheetId)
+        return fetchGoogleWorkbookXlsx(sheetId)
           .then(function (wb) {
             var sName = wb.SheetNames[0];
             var rows = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });

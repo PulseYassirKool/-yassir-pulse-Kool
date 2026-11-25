@@ -216,7 +216,7 @@
         document.getElementById('headerUserBadge').textContent = account.displayName || account.username;
         var roleBadge = document.getElementById('headerRoleBadge');
         var btnAccess = document.getElementById('btnOpenAccessManager');
-        var btnSync = document.getElementById('btnSyncSheetsNow');
+        var btnSync = document.getElementById('btnSyncYassirAll');
         var mainSourceCard = document.getElementById('mainSourceImportCard');
         var commImportCard = document.getElementById('commissionsImportCard');
         var tabBtnComm = document.getElementById('tabBtnCommissions');
@@ -247,10 +247,6 @@
           roleBadge.className = 'ml-1 px-2 py-0.2 rounded-full text-[10px] bg-[#FF2A6D] text-white font-extrabold';
           btnAccess.classList.remove('hidden');
           if (btnSync) btnSync.classList.remove('hidden');
-          var btnSyncB = document.getElementById('btnSyncBudgetNow'); if (btnSyncB) btnSyncB.classList.remove('hidden');
-          var btnSyncH = document.getElementById('btnSyncHistoricalSheets'); if (btnSyncH) btnSyncH.classList.remove('hidden');
-          var btnSyncS = document.getElementById('btnSyncRestoStatusSidebar'); if (btnSyncS) btnSyncS.classList.remove('hidden');
-          var btnSyncOP = document.getElementById('btnSyncOffrePartSidebar'); if (btnSyncOP) btnSyncOP.classList.remove('hidden'); var btnSync25 = document.getElementById('btnSync2025Sidebar'); if (btnSync25) btnSync25.classList.remove('hidden');
           if (mainSourceCard) mainSourceCard.classList.remove('lg:col-span-2');
           if (commImportCard) commImportCard.classList.remove('hidden');
           if (tabBtnComm) tabBtnComm.classList.remove('hidden');
@@ -272,10 +268,6 @@
           roleBadge.className = 'ml-1 px-2 py-0.2 rounded-full text-[10px] bg-[#00BFA5] text-[#1A1A2E] font-extrabold';
           btnAccess.classList.add('hidden');
           if (btnSync) btnSync.classList.add('hidden');
-          var btnSyncB = document.getElementById('btnSyncBudgetNow'); if (btnSyncB) btnSyncB.classList.add('hidden');
-          var btnSyncH = document.getElementById('btnSyncHistoricalSheets'); if (btnSyncH) btnSyncH.classList.add('hidden');
-          var btnSyncS = document.getElementById('btnSyncRestoStatusSidebar'); if (btnSyncS) btnSyncS.classList.add('hidden');
-          var btnSyncOP = document.getElementById('btnSyncOffrePartSidebar'); if (btnSyncOP) btnSyncOP.classList.add('hidden'); var btnSync25 = document.getElementById('btnSync2025Sidebar'); if (btnSync25) btnSync25.classList.add('hidden');
           if (mainSourceCard) mainSourceCard.classList.add('lg:col-span-2');
           if (commImportCard) commImportCard.classList.add('hidden');
           if (tabBtnComm) tabBtnComm.classList.add('hidden');
@@ -299,10 +291,6 @@
           roleBadge.className = 'ml-1 px-2 py-0.2 rounded-full text-[10px] bg-[#00BFA5] text-[#1A1A2E] font-extrabold';
           btnAccess.classList.add('hidden');
           if (btnSync) btnSync.classList.add('hidden');
-          var btnSyncB = document.getElementById('btnSyncBudgetNow'); if (btnSyncB) btnSyncB.classList.add('hidden');
-          var btnSyncH = document.getElementById('btnSyncHistoricalSheets'); if (btnSyncH) btnSyncH.classList.add('hidden');
-          var btnSyncS = document.getElementById('btnSyncRestoStatusSidebar'); if (btnSyncS) btnSyncS.classList.add('hidden');
-          var btnSyncOP = document.getElementById('btnSyncOffrePartSidebar'); if (btnSyncOP) btnSyncOP.classList.add('hidden'); var btnSync25 = document.getElementById('btnSync2025Sidebar'); if (btnSync25) btnSync25.classList.add('hidden');
           if (mainSourceCard) mainSourceCard.classList.add('lg:col-span-2');
           if (commImportCard) commImportCard.classList.add('hidden');
           if (tabBtnComm) tabBtnComm.classList.add('hidden');
@@ -325,10 +313,6 @@
           roleBadge.className = 'ml-1 px-2 py-0.2 rounded-full text-[10px] bg-[#00BFA5] text-[#1A1A2E] font-extrabold';
           btnAccess.classList.add('hidden');
           if (btnSync) btnSync.classList.add('hidden');
-          var btnSyncB = document.getElementById('btnSyncBudgetNow'); if (btnSyncB) btnSyncB.classList.add('hidden');
-          var btnSyncH = document.getElementById('btnSyncHistoricalSheets'); if (btnSyncH) btnSyncH.classList.add('hidden');
-          var btnSyncS = document.getElementById('btnSyncRestoStatusSidebar'); if (btnSyncS) btnSyncS.classList.add('hidden');
-          var btnSyncOP = document.getElementById('btnSyncOffrePartSidebar'); if (btnSyncOP) btnSyncOP.classList.add('hidden'); var btnSync25 = document.getElementById('btnSync2025Sidebar'); if (btnSync25) btnSync25.classList.add('hidden');
           if (mainSourceCard) mainSourceCard.classList.add('lg:col-span-2');
           if (commImportCard) commImportCard.classList.add('hidden');
           if (tabBtnComm) tabBtnComm.classList.add('hidden');
@@ -354,9 +338,9 @@
           if (canSeeGlobalSynth()) prevBar.classList.remove('hidden');
           else prevBar.classList.add('hidden');
         }
-        var btnHistSync = document.getElementById('btnSyncHistoricalSheets');
-        if (btnHistSync) {
-          if (isOwnerAdmin()) { btnHistSync.classList.remove('hidden'); } else { btnHistSync.classList.add('hidden'); }
+        var btnSyncYassir = document.getElementById('btnSyncYassirAll');
+        if (btnSyncYassir) {
+          if (isOwnerAdmin()) { btnSyncYassir.classList.remove('hidden'); } else { btnSyncYassir.classList.add('hidden'); }
         }
         // Sync Kool et section Synchronisation : strictement réservées au propriétaire.
         var btnSyncKool = document.getElementById('btnSyncKoolSheetsNow');

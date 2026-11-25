@@ -158,7 +158,9 @@ function bootKool() {
   // jsdom n'a pas de canvas : le vrai Chart.js enregistre une instance cassée (canvas null)
   // puis plante au 2e graphique (« Canvas is already in use »). Faux neutre : les valeurs
   // des KPI et des cartes sont déjà dans le DOM, seuls les graphiques sont neutralisés.
-  w.Chart = class { constructor() {} destroy() {} };
+  // On enregistre quand même les configurations pour vérifier les couleurs des séries.
+  w.__chartConfigs = [];
+  w.Chart = class { constructor(ctx, cfg) { w.__chartConfigs.push(cfg); } destroy() {} };
   return w;
 }
 
@@ -210,6 +212,23 @@ test('Kool : bascule de marque (favicon K jaune), moteur sans crash et Top des v
   assert.equal(numTxt(w.document.getElementById('execGmvBrutVal').textContent), 99, 'carte GMV Brut');
   assert.equal(numTxt(w.document.getElementById('execGmvAfterVal').textContent), 94, 'carte GMV After');
   assert.equal(numTxt(w.document.getElementById('execCardCaVal').textContent), 15, 'carte CA HT (ex 0)');
+
+  // Promo.Order Kool (ex 0) : seule la commande 1002 a une remise > 0, sur 4 livrées.
+  assert.equal(kpi['Promo Order'], '1', 'Promo Order Kool (remise > 0) : ' + JSON.stringify(kpi));
+  assert.equal(w.document.getElementById('execCardPromoVal').textContent, '1(25%)', 'carte Promo.Order : ' + w.document.getElementById('execCardPromoVal').textContent);
+
+  // Couleurs des graphiques en mode Kool : jaune/noir, pas violet/rose (Yassir).
+  const chartWithLabels = (labels) => w.__chartConfigs.find((c) => c && c.data && Array.isArray(c.data.datasets) && labels.every((lb, i) => c.data.datasets[i] && c.data.datasets[i].label === lb));
+  const aovCfg = chartWithLabels(['AOV Before %', 'AOV After %']);
+  assert.ok(aovCfg, 'graphique AOV non créé');
+  assert.equal(aovCfg.data.datasets[0].backgroundColor, '#FFD100', 'AOV Before % doit être jaune en mode Kool');
+  assert.equal(aovCfg.data.datasets[1].backgroundColor, '#111111', 'AOV After % doit être noir en mode Kool');
+  const yoyCfgs = w.__chartConfigs.filter((c) => c && c.data && Array.isArray(c.data.datasets) && c.data.datasets.length === 2 && c.data.datasets[0].label === '2025' && c.data.datasets[1].label === '2026');
+  assert.ok(yoyCfgs.length >= 2, 'graphiques YoY (Delivered + GMV) non créés : ' + yoyCfgs.length);
+  yoyCfgs.forEach((c) => {
+    assert.equal(c.data.datasets[0].borderColor, '#FFD100', 'YoY 2025 doit être jaune en mode Kool');
+    assert.equal(c.data.datasets[1].borderColor, '#111111', 'YoY 2026 doit être noir en mode Kool');
+  });
 
   // Top AVEC filtre de date : 16/11 uniquement → commande 1001 (3 articles, pas de Burger).
   w.document.getElementById('filterDateStart').value = '2026-11-16';
@@ -273,7 +292,11 @@ test('sidebar : Synthèse dans Weekly & Growth, Sync Kool réservé au proprio, 
   assert.equal(syncSec.classList.contains('hidden'), false, 'section Synchronisation masquée pour le proprio');
   assert.ok(w.document.getElementById('syncYassirBlock'), 'bloc Yassir absent');
   assert.ok(w.document.getElementById('syncKoolBlock'), 'bloc Kool absent');
-  assert.ok(w.document.getElementById('btnSyncSheetsNow').closest('#syncYassirBlock'), 'Sync Portefeuilles pas dans le bloc Yassir');
+  assert.ok(w.document.getElementById('btnSyncYassirAll').closest('#syncYassirBlock'), 'Sync Yassir pas dans le bloc Yassir');
+  assert.equal(w.document.getElementById('btnSyncYassirAll').classList.contains('hidden'), false, 'Sync Yassir masqué pour le proprio');
+  ['btnSyncSheetsNow', 'btnSyncBudgetNow', 'btnSyncHistoricalSheets', 'btnSyncRestoStatusSidebar', 'btnSyncOffrePartSidebar', 'btnSync2025Sidebar'].forEach(function (id) {
+    assert.equal(w.document.getElementById(id), null, 'ancien bouton ' + id + ' encore présent');
+  });
   assert.ok(w.document.getElementById('btnSyncKoolSheetsNow').closest('#syncKoolBlock'), 'Sync Kool pas dans le bloc Kool');
   assert.equal(w.document.getElementById('btnSyncKoolSheetsNow').classList.contains('hidden'), false, 'Sync Kool masqué pour le proprio');
   // Onglet Synthèse accessible depuis son nouvel emplacement.
@@ -284,9 +307,42 @@ test('sidebar : Synthèse dans Weekly & Growth, Sync Kool réservé au proprio, 
   const wAm = bootKool();
   await login(wAm, 'omar.beldi', 'Omar-Test-12345');
   assert.equal(wAm.document.getElementById('syncSection').classList.contains('hidden'), true, 'section Synchronisation visible pour un AM');
+  assert.equal(wAm.document.getElementById('btnSyncYassirAll').classList.contains('hidden'), true, 'Sync Yassir visible pour un AM');
   assert.equal(wAm.document.getElementById('btnSyncKoolSheetsNow').classList.contains('hidden'), true, 'Sync Kool visible pour un AM');
   const labelBefore = wAm.document.getElementById('labelSyncKoolSheets').textContent;
   wAm.yassirSyncKoolSheets(true);
   assert.equal(wAm.document.getElementById('labelSyncKoolSheets').textContent, labelBefore, 'synchro manuelle Kool lancée par un AM');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Sync Yassir unique : les 6 synchros enchaînées en ordre, progression puis statut final', async () => {
+  const w = bootKool();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  // On remplace les 6 synchros par des doublures qui enregistrent l'ordre d'appel.
+  const calls = [];
+  const stub = (name) => () => { calls.push(name); return Promise.resolve(); };
+  w.yassirSyncAllFromGoogleSheets = stub('portefeuilles');
+  w.yassirSyncHistoricalSheets = stub('historique');
+  w.yassirSyncBudgetSheet = stub('budget');
+  w.yassirSyncRestoStatusSheet = stub('statut');
+  w.yassirSyncOffreParticipationSheet = stub('offres');
+  w.yassirSync2025Sheet = stub('2025');
+  const label = w.document.getElementById('labelSyncYassirAll');
+  w.yassirSyncYassirAll();
+  // Deuxième appel pendant l'exécution : ignoré (garde anti double-clic).
+  w.yassirSyncYassirAll();
+  assert.ok(label.textContent.indexOf('(1/6)') !== -1, 'pas de progression 1/6 : ' + label.textContent);
+  await wait(300);
+  assert.deepEqual(calls, ['portefeuilles', 'historique', 'budget', 'statut', 'offres', '2025'], 'ordre des 6 synchros incorrect');
+  assert.ok(/^Yassir OK \(\d{2}:\d{2}\)$/.test(label.textContent), 'statut final inattendu : ' + label.textContent);
+  assert.equal(w.document.getElementById('iconSyncYassirAll').classList.contains('fa-spin'), false, 'icône toujours en rotation après la fin');
+
+  // Échec d'une étape : statut partiel, les autres étapes continuent.
+  calls.length = 0;
+  w.yassirSyncBudgetSheet = () => { calls.push('budget'); return Promise.reject(new Error('feuille inaccessible')); };
+  w.yassirSyncYassirAll();
+  await wait(300);
+  assert.deepEqual(calls, ['portefeuilles', 'historique', 'budget', 'statut', 'offres', '2025'], 'une étape en échec a interrompu la chaîne');
+  assert.equal(label.textContent, 'Yassir partiel (5/6)', 'statut partiel inattendu : ' + label.textContent);
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

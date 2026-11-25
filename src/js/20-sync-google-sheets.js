@@ -432,7 +432,7 @@
             });
         });
 
-        Promise.all(promises).then(function (results) {
+        return Promise.all(promises).then(function (results) {
           var loadedMonths = [];
           var failedMonths = [];
           var totalAddedRows = 0;
@@ -547,7 +547,7 @@
         if (icon) icon.classList.add('fa-spin');
         if (label) label.textContent = 'Sync Budget...';
 
-        fetchGoogleSheetByGidSmart(
+        return fetchGoogleSheetByGidSmart(
           LIVE_SHEETS_CONFIG.BUDGET_SHEET_ID,
           LIVE_SHEETS_CONFIG.BUDGET_GID,
           LIVE_SHEETS_CONFIG.BUDGET_TAB
@@ -790,7 +790,7 @@
           .then(function (rows) { return { rows: rows, ok: true }; })
           .catch(function () { return { rows: [], ok: false }; });
 
-        Promise.all([portfoliosPromise, commPromise]).then(function (results) {
+        return Promise.all([portfoliosPromise, commPromise]).then(function (results) {
           var pResult = results[0];
           var commResult = results[1];
 
@@ -867,4 +867,57 @@
             }
           }
         });
+      };
+
+      // Un seul bouton « Sync Yassir » : enchaîne les 6 synchros Yassir séquentiellement.
+      // Les 6 fonctions sont appelées avec manualTrigger=false (silencieuses : pas de toast
+      // individuel) ; le bouton unique affiche la progression puis un résumé. Chaque fonction
+      // retourne désormais sa promesse, ce qui permet d'attendre sa fin réelle avant de
+      // passer à la suivante (évite les écritures concurrentes dans IndexedDB/localStorage).
+      window.yassirSyncYassirAll = function () {
+        if (!isOwnerAdmin()) return;
+        if (window._yassirSyncAllRunning) return;
+        window._yassirSyncAllRunning = true;
+        var icon = document.getElementById('iconSyncYassirAll');
+        var label = document.getElementById('labelSyncYassirAll');
+        var steps = [
+          { name: 'Portefeuilles & Comm.', fn: window.yassirSyncAllFromGoogleSheets },
+          { name: 'Octobre & Novembre', fn: window.yassirSyncHistoricalSheets },
+          { name: 'Budget', fn: window.yassirSyncBudgetSheet },
+          { name: 'Statut Active/Inactive', fn: window.yassirSyncRestoStatusSheet },
+          { name: 'Participation Offres', fn: window.yassirSyncOffreParticipationSheet },
+          { name: 'Données 2025 (YoY)', fn: window.yassirSync2025Sheet }
+        ];
+        var failed = [];
+        var i = 0;
+        if (icon) icon.classList.add('fa-spin');
+        function setLabel(txt) { if (label) label.textContent = txt; }
+        function next() {
+          if (i >= steps.length) {
+            window._yassirSyncAllRunning = false;
+            if (icon) icon.classList.remove('fa-spin');
+            var now = new Date();
+            var hh = String(now.getHours()).padStart(2, '0');
+            var mm = String(now.getMinutes()).padStart(2, '0');
+            if (failed.length === 0) {
+              setLabel('Yassir OK (' + hh + ':' + mm + ')');
+              showToast('<strong>Synchronisation Yassir terminée !</strong> (6/6 : Portefeuilles & Comm., Octobre & Novembre, Budget, Statut, Participation Offres, Données 2025).', 'success');
+            } else {
+              setLabel('Yassir partiel (' + (steps.length - failed.length) + '/6)');
+              showToast('<strong>Synchronisation Yassir partielle :</strong> en échec : ' + failed.join(', ') + '.', 'error');
+            }
+            return;
+          }
+          var step = steps[i];
+          setLabel('Sync Yassir… (' + (i + 1) + '/6)');
+          var done;
+          try {
+            done = Promise.resolve(step.fn(false));
+          } catch (err) {
+            done = Promise.reject(err);
+          }
+          i++;
+          done.then(function () { next(); }, function () { failed.push(step.name); next(); });
+        }
+        next();
       };

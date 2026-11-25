@@ -738,7 +738,7 @@
             return fetchGoogleSheetByGidSmart(LIVE_SHEETS_CONFIG.RESTO_STATUS_SHEET_ID, LIVE_SHEETS_CONFIG.RESTO_STATUS_GID, '');
           });
 
-        statusRowsPromise
+        return statusRowsPromise
           .then(function (rows) {
             if (!rows || rows.length < 2) throw new Error('Feuille statut vide');
 

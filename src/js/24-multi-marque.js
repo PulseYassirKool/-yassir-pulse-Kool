@@ -432,10 +432,6 @@
           }
         });
 
-        var btnSyncSt = document.getElementById('btnSyncRestoStatusSidebar');
-        if (btnSyncSt && isOwnerAdmin()) {
-          btnSyncSt.classList.toggle('hidden', isKool);
-        }
         var zeroStSel = document.getElementById('zeroOrdersStatusFilterSelect');
         if (zeroStSel) {
           zeroStSel.classList.toggle('hidden', isKool);

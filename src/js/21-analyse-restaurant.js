@@ -478,10 +478,10 @@
                 {
                   label: 'GMV (TND)',
                   data: dayGmvSums.map(function (v) { return Number(v.toFixed(2)); }),
-                  borderColor: '#6C2BD9',
-                  backgroundColor: 'rgba(108, 43, 217, 0.10)',
+                  borderColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9',
+                  backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? 'rgba(255, 209, 0, 0.10)' : 'rgba(108, 43, 217, 0.10)',
                   borderWidth: 3,
-                  pointBackgroundColor: '#FF2A6D',
+                  pointBackgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF2A6D',
                   pointRadius: 5,
                   tension: 0.35,
                   fill: false,

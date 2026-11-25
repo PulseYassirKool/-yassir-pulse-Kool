@@ -126,17 +126,22 @@
 
             // Formule exacte =ARRAYFORMULA :
             // Promo Order = (SEARCH("Super Promo", Extract!CQ) + SEARCH("Percentage", Extract!CO)) * Delivered
+            // Kool : le normaliseur ne remplit jamais 'Discount Type' / 'Food Category' / 'Time Taken',
+            // mais la remise (Discount Amount) est bien renseignée : une commande livrée Kool avec
+            // remise > 0 est une commande promo.
             var colCQ_TimeTaken = TARGET_HEADERS.indexOf('Time Taken');
             var cqStr = colCQ_TimeTaken !== -1 ? String(c[colCQ_TimeTaken] || '') : '';
             var discTypeStr = idxCO_DiscType !== -1 ? String(c[idxCO_DiscType] || '') : '';
-            if (/super\s*promo/i.test(cqStr) || /percentage/i.test(discTypeStr)) {
+            var discAmtNum = idxCN_DiscAmt !== -1 ? purgerNombre(c[idxCN_DiscAmt]) : 0;
+            var isKoolDiscounted = (typeof currentBrand !== 'undefined' && currentBrand === 'kool') && discAmtNum > 0;
+            if (/super\s*promo/i.test(cqStr) || /percentage/i.test(discTypeStr) || isKoolDiscounted) {
               promoOrder++;
             }
 
             // Prop Promo Order = (SEARCH("Super Promo", Extract!CR) + SEARCH("Percentage", Extract!CN)) * Delivered
             var foodCatStr = idxCR_FoodCat !== -1 ? String(c[idxCR_FoodCat] || '') : '';
             var discAmtRawStr = idxCN_DiscAmt !== -1 ? String(c[idxCN_DiscAmt] || '') : '';
-            if (/super\s*promo/i.test(foodCatStr) || /percentage/i.test(discAmtRawStr)) {
+            if (/super\s*promo/i.test(foodCatStr) || /percentage/i.test(discAmtRawStr) || isKoolDiscounted) {
               propPromoNumerator++;
             }
           }
@@ -236,12 +241,23 @@
       var yoyDeliveredChartInst = null;
       var yoyGmvChartInst = null;
 
+      // Palette des séries de graphiques selon la marque : Yassir violet/rose, Kool jaune/noir.
+      // series = couleurs des barres/courbes ; labels = couleurs des valeurs affichées dessus.
+      function brandChartPalette() {
+        if (typeof currentBrand !== 'undefined' && currentBrand === 'kool') {
+          return { series: ['#FFD100', '#111111'], labels: ['#FFD100', '#111111'] };
+        }
+        return { series: ['#6C2BD9', '#FF1E6E'], labels: ['#5B21B6', '#FF1E6E'] };
+      }
+
       // Plugin Chart.js pour afficher toutes les valeurs directement sur les barres et courbes (comme les captures)
       var yassirSlideDataLabelsPlugin = {
         id: 'yassirSlideDataLabelsPlugin',
         afterDatasetsDraw: function (chart) {
           var ctx = chart.ctx;
           var chartTypeMode = chart.options && chart.options.yassirLabelMode ? chart.options.yassirLabelMode : 'default';
+          var chartPal = brandChartPalette();
+          var chartIsKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
           ctx.save();
           chart.data.datasets.forEach(function (dataset, dsIndex) {
             var meta = chart.getDatasetMeta(dsIndex);
@@ -268,7 +284,7 @@
                   ctx.strokeStyle = '#FFFFFF';
                   ctx.lineWidth = 3;
                   ctx.strokeText(labelStr, element.x, midY + 4);
-                  ctx.fillStyle = dataset.label === 'Req' ? '#5B21B6' : '#FF1E6E';
+                  ctx.fillStyle = dataset.label === 'Req' ? chartPal.labels[0] : chartPal.labels[1];
                   ctx.fillText(labelStr, element.x, midY + 4);
                 }
               } else if (chartTypeMode === 'wow_perf') {
@@ -287,7 +303,7 @@
                   ctx.strokeStyle = '#FFFFFF';
                   ctx.lineWidth = 3;
                   ctx.strokeText(labelStr, element.x, midY2 + 4);
-                  ctx.fillStyle = dataset.label === 'Received' ? '#5B21B6' : '#FF1E6E';
+                  ctx.fillStyle = dataset.label === 'Received' ? chartPal.labels[0] : chartPal.labels[1];
                   ctx.fillText(labelStr, element.x, midY2 + 4);
                 }
               } else if (chartTypeMode === 'aov_bars') {
@@ -297,13 +313,19 @@
                 ctx.strokeStyle = '#FFFFFF';
                 ctx.lineWidth = 3;
                 ctx.strokeText(labelStr, element.x, midY3 + 4);
-                ctx.fillStyle = dsIndex === 0 ? '#5B21B6' : '#FF1E6E';
+                ctx.fillStyle = dsIndex === 0 ? chartPal.labels[0] : chartPal.labels[1];
                 ctx.fillText(labelStr, element.x, midY3 + 4);
               } else if (chartTypeMode === 'yoy_line') {
                 ctx.font = '800 10px "Plus Jakarta Sans", sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillStyle = dsIndex === 0 ? '#5B21B6' : '#FF1E6E';
+                ctx.fillStyle = dsIndex === 0 ? chartPal.labels[0] : chartPal.labels[1];
                 var yOffset = dsIndex === 0 ? -9 : 16;
+                if (chartIsKool && dsIndex === 0) {
+                  // Jaune sur fond blanc peu lisible : contour noir pour le libellé 2025 en mode Kool.
+                  ctx.strokeStyle = '#111111';
+                  ctx.lineWidth = 3;
+                  ctx.strokeText(labelStr, element.x, element.y + yOffset);
+                }
                 ctx.fillText(labelStr, element.x, element.y + yOffset);
               }
             });
@@ -584,7 +606,9 @@
 
             var dtStr = idxDiscType !== -1 ? String(row[idxDiscType] || '') : '';
             var fcStr = idxFoodCat !== -1 ? String(row[idxFoodCat] || '') : '';
-            if (/super\s*promo/i.test(fcStr) || /percentage/i.test(dtStr)) {
+            // Kool : 'Discount Type' / 'Food Category' ne sont jamais remplis, mais la remise
+            // (Discount Amount, déjà calculée dans dAmt) l'est : remise > 0 = commande promo.
+            if (/super\s*promo/i.test(fcStr) || /percentage/i.test(dtStr) || ((typeof currentBrand !== 'undefined' && currentBrand === 'kool') && dAmt > 0)) {
               entry.promo += 1;
             }
           }
@@ -1065,14 +1089,14 @@
                 {
                   label: 'AOV Before %',
                   data: w26AovBeforeArr,
-                  backgroundColor: '#6C2BD9',
+                  backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9',
                   borderRadius: 2,
                   formatLabel: function (v) { return Number(v).toFixed(1).replace('.', ','); }
                 },
                 {
                   label: 'AOV After %',
                   data: w26AovAfterArr,
-                  backgroundColor: '#FF1E6E',
+                  backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF1E6E',
                   borderRadius: 2,
                   formatLabel: function (v) { return Number(v).toFixed(1).replace('.', ','); }
                 }
@@ -1100,8 +1124,8 @@
             data: {
               labels: wLabelsUpper,
               datasets: [
-                { label: '2025', data: w25DelArr, borderColor: '#6C2BD9', backgroundColor: '#6C2BD9', borderWidth: 2, tension: 0.35, pointRadius: 3.5, spanGaps: true },
-                { label: '2026', data: w26DelArr, borderColor: '#FF1E6E', backgroundColor: '#FF1E6E', borderWidth: 2, tension: 0.35, pointRadius: 3.5 }
+                { label: '2025', data: w25DelArr, borderColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9', backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9', borderWidth: 2, tension: 0.35, pointRadius: 3.5, spanGaps: true },
+                { label: '2026', data: w26DelArr, borderColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF1E6E', backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF1E6E', borderWidth: 2, tension: 0.35, pointRadius: 3.5 }
               ]
             },
             options: {
@@ -1127,8 +1151,8 @@
             data: {
               labels: wLabelsUpper,
               datasets: [
-                { label: '2025', data: w25GmvArr, borderColor: '#6C2BD9', backgroundColor: '#6C2BD9', borderWidth: 2, tension: 0.35, pointRadius: 3.5, spanGaps: true },
-                { label: '2026', data: w26GmvArr, borderColor: '#FF1E6E', backgroundColor: '#FF1E6E', borderWidth: 2, tension: 0.35, pointRadius: 3.5 }
+                { label: '2025', data: w25GmvArr, borderColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9', backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9', borderWidth: 2, tension: 0.35, pointRadius: 3.5, spanGaps: true },
+                { label: '2026', data: w26GmvArr, borderColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF1E6E', backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF1E6E', borderWidth: 2, tension: 0.35, pointRadius: 3.5 }
               ]
             },
             options: {

@@ -125,7 +125,7 @@
             if (btn.id === 'tabBtnCommissions' && !isOwnerAdmin()) return;
             if (btn.id === 'tabBtnFood' && isMarketOnlyViewer()) return;
             if (btn.id === 'tabBtnMarket' && isFoodOnlyAm()) return;
-            if ((btn.id === 'btnOpenAccessManager' || btn.id === 'btnSyncSheetsNow' || btn.id === 'btnSyncBudgetNow' || btn.id === 'btnSyncHistoricalSheets' || btn.id === 'btnSyncKoolSheetsNow' || btn.id === 'btnSyncRestoStatusSidebar' || btn.id === 'btnSyncOffrePartSidebar') && !isOwnerAdmin()) return;
+            if ((btn.id === 'btnOpenAccessManager' || btn.id === 'btnSyncYassirAll' || btn.id === 'btnSyncKoolSheetsNow') && !isOwnerAdmin()) return;
             var txt = btn.textContent.toLowerCase();
             if (!query || txt.includes(query)) {
               btn.style.display = '';
@@ -156,9 +156,9 @@
           if (canSeeGlobalSynth()) prevBar.classList.remove('hidden');
           else prevBar.classList.add('hidden');
         }
-        var btnHistSync = document.getElementById('btnSyncHistoricalSheets');
-        if (btnHistSync) {
-          if (isOwnerAdmin()) { btnHistSync.classList.remove('hidden'); } else { btnHistSync.classList.add('hidden'); }
+        var btnSyncYassir = document.getElementById('btnSyncYassirAll');
+        if (btnSyncYassir) {
+          if (isOwnerAdmin()) { btnSyncYassir.classList.remove('hidden'); } else { btnSyncYassir.classList.add('hidden'); }
         }
         var btnReset = document.getElementById('btnResetAll');
         if (btnReset) {
