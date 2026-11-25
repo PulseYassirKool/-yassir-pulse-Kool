@@ -1,0 +1,153 @@
+    /* ==========================================================================
+       THÈME MARQUE KOOL (JAUNE #FFD100 & NOIR #111111 UNIQUEMENT — ZÉRO VIOLET)
+       ========================================================================== */
+    body.brand-kool {
+      background-color: #FFFDF5 !important;
+      color: #111111 !important;
+    }
+    body.brand-kool .yassir-header-gradient {
+      background: linear-gradient(135deg, #FFD100 0%, #F5B800 100%) !important;
+      color: #111111 !important;
+    }
+    body.brand-kool .yassir-header-gradient h3,
+    body.brand-kool .yassir-header-gradient p,
+    body.brand-kool .yassir-header-gradient i,
+    body.brand-kool .yassir-header-gradient span {
+      color: #111111 !important;
+    }
+    body.brand-kool .yassir-lmd-sidebar {
+      background: linear-gradient(180deg, #18181B 0%, #111111 65%, #09090B 100%) !important;
+      border-right: 3px solid #FFD100 !important;
+    }
+    /* Pied de sidebar profil en noir pur (supprime le fond violet #3B1378) */
+    body.brand-kool #lmdSidebar > div:last-child {
+      background-color: #09090B !important;
+      border-top-color: rgba(255, 209, 0, 0.28) !important;
+    }
+    body.brand-kool .yassir-lmd-group-open {
+      background: rgba(255, 209, 0, 0.08) !important;
+      border-color: rgba(255, 209, 0, 0.35) !important;
+    }
+    body.brand-kool .yassir-lmd-item-active {
+      background: #FFD100 !important;
+      color: #111111 !important;
+      font-weight: 800 !important;
+    }
+    body.brand-kool .yassir-lmd-item-active i,
+    body.brand-kool .yassir-lmd-item-active span {
+      color: #111111 !important;
+    }
+    body.brand-kool .yassir-lmd-item-active .lmd-radio-dot {
+      border-color: #111111 !important;
+    }
+    body.brand-kool .yassir-lmd-item-active .lmd-radio-dot span {
+      background-color: #111111 !important;
+    }
+    body.brand-kool .yassir-login-bg {
+      background: radial-gradient(circle at top right, #FFD100 0%, #272005 55%, #0D0D0D 100%) !important;
+    }
+    body.brand-kool .custom-scrollbar::-webkit-scrollbar-track {
+      background: #FEF9C3 !important;
+    }
+    body.brand-kool .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #EAB308 !important;
+    }
+    body.brand-kool .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #111111 !important;
+    }
+    /* Remplacement complet des classes Tailwind violettes/magentas par Jaune & Noir Kool */
+    body.brand-kool .bg-\[\#6C2BD9\],
+    body.brand-kool .bg-\[\#5B21B6\],
+    body.brand-kool .bg-\[\#5521B5\] {
+      background-color: #FFD100 !important;
+      color: #111111 !important;
+    }
+    body.brand-kool .bg-\[\#6C2BD9\] *,
+    body.brand-kool .bg-\[\#5B21B6\] *,
+    body.brand-kool .bg-\[\#5521B5\] * {
+      color: #111111 !important;
+    }
+    body.brand-kool .hover\:bg-\[\#5521B5\]:hover {
+      background-color: #EAB308 !important;
+      color: #111111 !important;
+    }
+    body.brand-kool .bg-\[\#FF2A6D\],
+    body.brand-kool .bg-\[\#FF1E6E\] {
+      background-color: #111111 !important;
+      color: #FFD100 !important;
+    }
+    body.brand-kool .bg-\[\#FF2A6D\] *,
+    body.brand-kool .bg-\[\#FF1E6E\] * {
+      color: #FFD100 !important;
+    }
+    body.brand-kool .bg-\[\#F3EBFF\],
+    body.brand-kool .bg-\[\#E4DFF5\] {
+      background-color: #FEF9C3 !important;
+      color: #111111 !important;
+    }
+    body.brand-kool .bg-\[\#E4DFF5\] * {
+      color: #111111 !important;
+    }
+    body.brand-kool .hover\:bg-\[\#F3EBFF\]:hover,
+    body.brand-kool .hover\:bg-purple-200:hover,
+    body.brand-kool .hover\:bg-purple-200\/70:hover,
+    body.brand-kool .hover\:bg-purple-200\/80:hover {
+      background-color: #FEF08A !important;
+    }
+    body.brand-kool .text-\[\#6C2BD9\],
+    body.brand-kool .text-\[\#5B21B6\],
+    body.brand-kool .text-purple-100,
+    body.brand-kool .text-purple-200,
+    body.brand-kool .text-indigo-700 {
+      color: #111111 !important;
+    }
+    body.brand-kool #lmdSidebar .text-purple-200,
+    body.brand-kool #lmdSidebar .text-purple-200\/75 {
+      color: #FDE047 !important;
+    }
+    body.brand-kool .text-\[\#FF2A6D\],
+    body.brand-kool .text-\[\#FF1E6E\] {
+      color: #B45309 !important;
+    }
+    body.brand-kool .border-purple-100,
+    body.brand-kool .border-purple-200,
+    body.brand-kool .border-purple-300,
+    body.brand-kool .border-indigo-200,
+    body.brand-kool .border-indigo-300,
+    body.brand-kool .border-pink-200 {
+      border-color: #FDE047 !important;
+    }
+    body.brand-kool .ring-\[\#6C2BD9\],
+    body.brand-kool .ring-\[\#6C2BD9\]\/30,
+    body.brand-kool .focus\:ring-\[\#6C2BD9\]:focus {
+      --tw-ring-color: #EAB308 !important;
+    }
+    body.brand-kool thead.bg-\[\#6C2BD9\] th,
+    body.brand-kool thead tr.bg-\[\#5B21B6\] th {
+      background-color: #111111 !important;
+      color: #FFD100 !important;
+      border-color: rgba(255, 209, 0, 0.25) !important;
+    }
+    body.brand-kool #lmdSidebar .lmd-nav-group button i.text-purple-200 {
+      color: #FFD100 !important;
+    }
+    body.brand-kool #btnSyncKoolSheetsNow {
+      background: rgba(255, 209, 0, 0.16);
+      border: 1px solid rgba(255, 209, 0, 0.45);
+    }
+    body.brand-kool .bg-indigo-50\/50 {
+      background-color: #FEFCE8 !important;
+    }
+    body.brand-kool .bg-indigo-700,
+    body.brand-kool .bg-indigo-800 {
+      background-color: #111111 !important;
+      color: #FFD100 !important;
+    }
+
+    html, body {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+    }

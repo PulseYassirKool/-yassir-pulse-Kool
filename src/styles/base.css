@@ -1,0 +1,67 @@
+    :root {
+      --yassir-purple: #6C2BD9;
+      --yassir-purple-dark: #5521B5;
+      --yassir-deep: #1E0B36;
+      --yassir-purple-light: #F3EBFF;
+      --yassir-magenta: #FF2A6D;
+      --yassir-mint: #00BFA5;
+      --yassir-dark: #1A1A2E;
+      --yassir-bg: #F8F9FC;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--yassir-bg);
+      color: var(--yassir-dark);
+    }
+
+    .yassir-header-gradient {
+      background: linear-gradient(135deg, #6C2BD9 0%, #5521B5 100%);
+    }
+
+    .yassir-lmd-sidebar {
+      background: linear-gradient(180deg, #5B21B6 0%, #4C1D95 55%, #3B1378 100%);
+    }
+
+    .yassir-lmd-group-open {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 1rem;
+    }
+
+    .yassir-lmd-item-active {
+      background: rgba(255, 255, 255, 0.14);
+      color: #FFFFFF !important;
+      font-weight: 700;
+    }
+
+    .yassir-login-bg {
+      background: radial-gradient(circle at top right, #6C2BD9 0%, #1E0B36 62%, #130624 100%);
+    }
+
+    .custom-scrollbar::-webkit-scrollbar {
+      height: 8px;
+      width: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #F3EBFF;
+      border-radius: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #C4B5FD;
+      border-radius: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #6C2BD9;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+    .animate-shake {
+      animation: shake 0.35s ease-in-out;
+    }
+
+

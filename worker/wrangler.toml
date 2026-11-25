@@ -1,0 +1,11 @@
+name = "yassir-pulse-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "PULSE_KV"
+id = "8be04a891ffd42229324c1f890a1c0e8"
+
+[vars]
+ALLOWED_ORIGIN = "https://pulseyassirkool.github.io"   # plusieurs origines : séparées par des virgules
+# Secrets (jamais dans ce fichier) : npx wrangler secret put JWT_SECRET   |   npx wrangler secret put LEGACY_SALT
