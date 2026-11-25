@@ -6,6 +6,15 @@ import { JSDOM } from 'jsdom';
 import { handle, hashPassword } from '../worker/src/index.js';
 
 const seed = existsSync('private/seed.json') ? JSON.parse(readFileSync('private/seed.json', 'utf8')) : { live: { PORTFOLIOS_SHEET_ID: 'SHEET_TEST_ID_000000000000000000000000000' }, kool: {}, commissions: { 'test resto': 20 }, portfolios: {} };
+// IDs Kool simulés : le test ne doit pas dépendre de private/seed.json (gitignoré, absent en CI).
+// Sans eux, la config Kool du bootstrap est vide et le mock ne répond à aucune feuille.
+const koolTestIds = {
+  DATA_SHEET_ID: 'KOOL_DATA_TEST_ID_000000000001', ORDER_ITEMS_SHEET_ID: 'KOOL_ITEMS_TEST_ID_000000000002',
+  COMMISSION_SHEET_ID: 'KOOL_COMM_TEST_ID_000000000003', PORTFOLIOS_SHEET_ID: 'KOOL_PORT_TEST_ID_000000000004',
+  OFFRE_PARTICIPATION_SHEET_ID: 'KOOL_OFFRE_TEST_ID_000000000005',
+  DATA_GID: '0', ORDER_ITEMS_GID: '0', COMMISSION_GID: '0', PORTFOLIOS_GID: '0', OFFRE_PARTICIPATION_GID: '0',
+};
+const koolCfg = { ...koolTestIds, ...(seed.kool || {}) };
 const store = new Map();
 const kv = { get: async (k, t) => (store.has(k) ? (t === 'json' ? JSON.parse(store.get(k)) : store.get(k)) : null), put: async (k, v) => void store.set(k, v), delete: async (k) => void store.delete(k) };
 const env = { PULSE_KV: kv, JWT_SECRET: 'j'.repeat(48), LEGACY_SALT: 's', ALLOWED_ORIGIN: 'http://localhost' };
@@ -13,7 +22,7 @@ store.set('accounts', JSON.stringify([
   { username: 'proprio', hash: await hashPassword('Proprio-Test-123'), role: 'owner', displayName: 'Propriétaire Admin', amName: null, protected: true },
   { username: 'omar.beldi', hash: await hashPassword('Omar-Test-12345'), role: 'am', displayName: 'Omar Beldi', amName: 'Omar Beldi', protected: true }
 ]));
-store.set('config', JSON.stringify({ live: seed.live, kool: seed.kool }));
+store.set('config', JSON.stringify({ live: seed.live, kool: koolCfg }));
 store.set('defaults', JSON.stringify({ commissions: seed.commissions, portfolios: seed.portfolios }));
 
 const html = readFileSync('index.html', 'utf8').replace(/<script type="module"[^>]*><\/script>/, '').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
@@ -130,7 +139,7 @@ function bootKool() {
       return { ok: r.ok, status: r.status, json: () => r.json(), text: () => r.text() };
     }
     if (u.includes('format=xlsx')) return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-    const kc = seed.kool || {};
+    const kc = koolCfg;
     const match = (id) => id && u.includes(id);
     let body = null;
     if (match(kc.DATA_SHEET_ID)) body = koolCsvData;
