@@ -118,14 +118,14 @@
       window.yassirFilterSidebarMenu = function (q) {
         var query = String(q || '').trim().toLowerCase();
         document.querySelectorAll('#lmdSidebarNav .lmd-nav-group').forEach(function (grp) {
-          var items = grp.querySelectorAll('.lmd-group-items > button');
+          var items = grp.querySelectorAll('.lmd-group-items button');
           var anyVisible = false;
           items.forEach(function (btn) {
             if (btn.id === 'tabBtnSynthGlobal' && (!canSeeGlobalSynth() || (!isMarketOnlyViewer() && getEffectiveAmFilter() !== 'ALL'))) return;
             if (btn.id === 'tabBtnCommissions' && !isOwnerAdmin()) return;
             if (btn.id === 'tabBtnFood' && isMarketOnlyViewer()) return;
             if (btn.id === 'tabBtnMarket' && isFoodOnlyAm()) return;
-            if ((btn.id === 'btnOpenAccessManager' || btn.id === 'btnSyncSheetsNow' || btn.id === 'btnSyncBudgetNow' || btn.id === 'btnSyncHistoricalSheets' || btn.id === 'btnSyncRestoStatusSidebar' || btn.id === 'btnSyncOffrePartSidebar') && !isOwnerAdmin()) return;
+            if ((btn.id === 'btnOpenAccessManager' || btn.id === 'btnSyncSheetsNow' || btn.id === 'btnSyncBudgetNow' || btn.id === 'btnSyncHistoricalSheets' || btn.id === 'btnSyncKoolSheetsNow' || btn.id === 'btnSyncRestoStatusSidebar' || btn.id === 'btnSyncOffrePartSidebar') && !isOwnerAdmin()) return;
             var txt = btn.textContent.toLowerCase();
             if (!query || txt.includes(query)) {
               btn.style.display = '';

@@ -378,10 +378,10 @@
         if (lBtnY && lBtnK) {
           if (isKool) {
             lBtnY.className = 'flex-1 py-2 px-3 rounded-xl flex items-center justify-center gap-2 font-extrabold text-xs bg-white text-slate-600 border border-slate-200 transition cursor-pointer';
-            lBtnK.className = 'flex-1 py-1.5 px-3 rounded-xl flex items-center justify-center gap-2 font-extrabold text-xs bg-[#FFD100] text-[#111111] ring-2 ring-[#111111] shadow-sm transition cursor-pointer';
+            lBtnK.className = 'flex-1 py-2 px-3 rounded-xl flex items-center justify-center gap-2 font-extrabold text-xs bg-[#FFD100] text-[#111111] ring-2 ring-[#111111] shadow-sm transition cursor-pointer';
           } else {
             lBtnY.className = 'flex-1 py-2 px-3 rounded-xl flex items-center justify-center gap-2 font-extrabold text-xs bg-[#6C2BD9] text-white shadow-sm transition cursor-pointer';
-            lBtnK.className = 'flex-1 py-1.5 px-3 rounded-xl flex items-center justify-center gap-2 font-extrabold text-xs bg-white text-[#111111] hover:bg-[#FEF9C3] border border-transparent transition cursor-pointer';
+            lBtnK.className = 'flex-1 py-2 px-3 rounded-xl flex items-center justify-center gap-2 font-extrabold text-xs bg-white text-[#111111] hover:bg-[#FEF9C3] border border-transparent transition cursor-pointer';
           }
         }
         if (lLogoY) lLogoY.classList.toggle('hidden', isKool);
@@ -684,6 +684,13 @@
       }
 
       window.yassirSyncKoolSheets = function (manualTrigger) {
+        // Synchro Kool manuelle réservée au Propriétaire Admin (le bouton est
+        // masqué pour les autres comptes). La synchro automatique en arrière-plan
+        // (manualTrigger=false) reste ouverte à tous pour afficher les données.
+        if (manualTrigger && !isOwnerAdmin()) {
+          showToast('La synchronisation Kool est réservée au Propriétaire Admin.', 'error');
+          return;
+        }
         var icon = document.getElementById('iconSyncKoolSheets');
         var label = document.getElementById('labelSyncKoolSheets');
         if (icon) icon.classList.add('fa-spin');
@@ -966,7 +973,8 @@
           }
 
           if (currentBrand === 'kool' && !brandArchives.kool.syncedFromSheet) {
-            window.yassirSyncKoolSheets(true);
+            // Chargement automatique (silencieux) : la synchro manuelle est réservée au propriétaire.
+            window.yassirSyncKoolSheets(false);
           }
         });
       };

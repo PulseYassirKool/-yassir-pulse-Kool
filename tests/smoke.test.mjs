@@ -240,3 +240,53 @@ test('Kool : bascule de marque (favicon K jaune), moteur sans crash et Top des v
 
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
+
+test('page de connexion : carte compacte, sélecteur Kool (un seul Kool + point noir), bascule de marque', () => {
+  const w = boot();
+  const card = w.document.getElementById('loginCard');
+  assert.ok(card.className.includes('max-w-[330px]'), 'carte de connexion non compacte : ' + card.className);
+  const btnK = w.document.getElementById('loginBrandBtnKool');
+  assert.equal(btnK.textContent.trim(), 'Kool', 'sélecteur Kool : texte inattendu');
+  assert.equal(btnK.querySelectorAll('img').length, 0, 'sélecteur Kool : logo image encore présent');
+  const dot = btnK.querySelector('span');
+  assert.ok(dot && dot.className.includes('bg-[#111111]'), 'sélecteur Kool : point noir absent');
+  // Bascule de marque depuis la page de connexion (sans session).
+  w.yassirSwitchBrand('kool');
+  assert.ok(w.document.title.startsWith('Kool Pulse'), 'titre non basculé sur Kool : ' + w.document.title);
+  assert.equal(w.document.getElementById('loginLogoContainerKool').classList.contains('hidden'), false);
+  assert.equal(w.document.getElementById('loginLogoContainerYassir').classList.contains('hidden'), true);
+  w.yassirSwitchBrand('yassir');
+  assert.ok(w.document.title.startsWith('Yassir Pulse'), 'titre non revenu sur Yassir : ' + w.document.title);
+  assert.equal(w.document.getElementById('loginLogoContainerYassir').classList.contains('hidden'), false);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('sidebar : Synthèse dans Weekly & Growth, Sync Kool réservé au proprio, section Synchronisation', async () => {
+  // Propriétaire : tout visible.
+  const w = bootKool();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  const synthBtn = w.document.getElementById('tabBtnSynthGlobal');
+  assert.equal(synthBtn.closest('.lmd-nav-group').getAttribute('data-group'), 'weekly_growth', 'Synthèse pas dans Weekly & Growth');
+  assert.equal(w.document.querySelector('[data-group="analytics"] #tabBtnSynthGlobal'), null, 'Synthèse encore dans Operation & Analytics');
+  const syncSec = w.document.getElementById('syncSection');
+  assert.ok(syncSec, 'section Synchronisation absente');
+  assert.equal(syncSec.classList.contains('hidden'), false, 'section Synchronisation masquée pour le proprio');
+  assert.ok(w.document.getElementById('syncYassirBlock'), 'bloc Yassir absent');
+  assert.ok(w.document.getElementById('syncKoolBlock'), 'bloc Kool absent');
+  assert.ok(w.document.getElementById('btnSyncSheetsNow').closest('#syncYassirBlock'), 'Sync Portefeuilles pas dans le bloc Yassir');
+  assert.ok(w.document.getElementById('btnSyncKoolSheetsNow').closest('#syncKoolBlock'), 'Sync Kool pas dans le bloc Kool');
+  assert.equal(w.document.getElementById('btnSyncKoolSheetsNow').classList.contains('hidden'), false, 'Sync Kool masqué pour le proprio');
+  // Onglet Synthèse accessible depuis son nouvel emplacement.
+  w.yassirSwitchTab('synth_global');
+  assert.ok(w.document.getElementById('activeSectionTitle').textContent.startsWith('Synthèse Food'), 'titre Synthèse non affiché : ' + w.document.getElementById('activeSectionTitle').textContent);
+
+  // AM : Sync Kool et section Synchronisation masqués, synchro manuelle bloquée.
+  const wAm = bootKool();
+  await login(wAm, 'omar.beldi', 'Omar-Test-12345');
+  assert.equal(wAm.document.getElementById('syncSection').classList.contains('hidden'), true, 'section Synchronisation visible pour un AM');
+  assert.equal(wAm.document.getElementById('btnSyncKoolSheetsNow').classList.contains('hidden'), true, 'Sync Kool visible pour un AM');
+  const labelBefore = wAm.document.getElementById('labelSyncKoolSheets').textContent;
+  wAm.yassirSyncKoolSheets(true);
+  assert.equal(wAm.document.getElementById('labelSyncKoolSheets').textContent, labelBefore, 'synchro manuelle Kool lancée par un AM');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});

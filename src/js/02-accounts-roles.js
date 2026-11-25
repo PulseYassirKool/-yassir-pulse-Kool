@@ -358,6 +358,15 @@
         if (btnHistSync) {
           if (isOwnerAdmin()) { btnHistSync.classList.remove('hidden'); } else { btnHistSync.classList.add('hidden'); }
         }
+        // Sync Kool et section Synchronisation : strictement réservées au propriétaire.
+        var btnSyncKool = document.getElementById('btnSyncKoolSheetsNow');
+        if (btnSyncKool) {
+          if (isOwnerAdmin()) { btnSyncKool.classList.remove('hidden'); } else { btnSyncKool.classList.add('hidden'); }
+        }
+        var syncSection = document.getElementById('syncSection');
+        if (syncSection) {
+          if (isOwnerAdmin()) { syncSection.classList.remove('hidden'); } else { syncSection.classList.add('hidden'); }
+        }
         var btnReset = document.getElementById('btnResetAll');
         if (btnReset) {
           if (isOwnerAdmin() && state.rawSourceRows && state.rawSourceRows.length > 1) { btnReset.classList.remove('hidden'); btnReset.style.display = 'inline-flex'; } else { btnReset.classList.add('hidden'); btnReset.style.display = 'none'; }
