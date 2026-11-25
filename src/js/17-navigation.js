@@ -6,6 +6,7 @@
           market: { title: 'Market VF (109 colonnes)', sub: 'Commandes Market filtrées et recalculées automatiquement', icon: 'fa-solid fa-basket-shopping' },
           food: { title: 'Food VF (109 colonnes)', sub: 'Commandes Food filtrées avec calcul des temps, commissions et CA', icon: 'fa-solid fa-utensils' },
           offres: { title: 'Export Offres (Commandes Livrées)', sub: 'Récapitulatif par restaurant des remises articles, promos Admin et promos Restaurant', icon: 'fa-solid fa-tags' },
+          participation: { title: 'Participation des Offres', sub: 'Remise totale et partage restaurant / plateforme par restaurant, sur la période filtrée', icon: 'fa-solid fa-hand-holding-dollar' },
           stat: { title: 'Stat Restaurants (VSTACK / QUERY)', sub: 'Performance détaillée par restaurant : Requested, Delivered, Success Rate, GMV, AOV, CA', icon: 'fa-solid fa-chart-column' },
           synth_global: { title: 'Synthèse Food & Variation entre Périodes', sub: '17 KPIs ARRAYFORMULA, répartition Lundi–Dimanche et comparatif avec Data préc', icon: 'fa-solid fa-table-cells' },
           resto_analytics: { title: 'Analyse Restaurant (Top Items & Courbe Lundi–Dimanche)', sub: 'Classement des articles vendus et évolution journalière par restaurant', icon: 'fa-solid fa-store' },

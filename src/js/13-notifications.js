@@ -441,14 +441,22 @@
         var panelRestaurantAnalysis = document.getElementById('panelRestaurantAnalysis');
         var panelPortefeuilles = document.getElementById('panelPortefeuilles');
         var panelComm = document.getElementById('panelCommissions');
+        var panelParticipation = document.getElementById('panelParticipation');
 
         panelData.classList.add('hidden');
         if (panelSynthGlobal) panelSynthGlobal.classList.add('hidden');
         if (panelRestoAnalytics) panelRestoAnalytics.classList.add('hidden');
         if (panelGlobalAnalysis) panelGlobalAnalysis.classList.add('hidden');
         if (panelRestaurantAnalysis) panelRestaurantAnalysis.classList.add('hidden');
+        if (panelParticipation) panelParticipation.classList.add('hidden');
         panelPortefeuilles.classList.add('hidden');
         panelComm.classList.add('hidden');
+
+        if (state.activeTab === 'participation') {
+          if (panelParticipation) panelParticipation.classList.remove('hidden');
+          renderParticipationPanel();
+          return;
+        }
 
         if (state.activeTab === 'synth_global') {
           if (panelSynthGlobal) panelSynthGlobal.classList.remove('hidden');
@@ -603,35 +611,44 @@
           return;
         }
 
-        // Cas 2 : Onglet Offres
+        // Cas 2 : Onglet Offres (colonne « Promo Admin » masquée en mode Kool : toujours 0)
         if (state.activeTab === 'offres') {
-          thead.innerHTML = '<tr>' +
+          var offresHeadersVisibles = getOffresVisibleHeaders();
+          var offresHeadHtml = '<tr>' +
             '<th class="px-3 py-3 text-left bg-[#5521B5] text-white sticky left-0 z-20">#</th>' +
-            OFFRES_HEADERS.map(function (h, idx) {
+            offresHeadersVisibles.map(function (h, idx) {
               var isMetric = idx >= 3;
               return '<th class="px-4 py-3 ' + (isMetric ? 'text-right bg-[#5521B5] text-[#00BFA5] border-b-2 border-[#00BFA5]' : 'text-left bg-[#6C2BD9] text-white') + ' whitespace-nowrap">' + escapeHtml(h) + '</th>';
             }).join('') +
             '</tr>';
+          thead.innerHTML = offresHeadHtml;
 
           if (pageRecords.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-10 text-center text-slate-400">Aucune offre trouvée pour cette recherche.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="' + Number(offresHeadersVisibles.length + 1) + '" class="px-4 py-10 text-center text-slate-400">Aucune offre trouvée pour cette recherche.</td></tr>';
           } else {
+            var offresMetricStyles = {
+              3: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-extrabold bg-pink-50/70 text-[#FF2A6D]',
+              4: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#1A1A2E]',
+              5: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#00897B]',
+              6: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#6C2BD9]'
+            };
+            var offresVisibleMetricIdx = [3, 4, 5, 6].filter(function (oi) { return oi !== OFFRES_PROMO_ADMIN_IDX || (typeof currentBrand === 'undefined' || currentBrand !== 'kool'); });
             tbody.innerHTML = pageRecords.map(function (rec, rOffset) {
               var num = startIdx + rOffset + 1;
               var row = rec.cells;
               var amBadge = row[0] === 'Non attribué'
                 ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">Non attribué</span>'
                 : '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#F3EBFF] text-[#6C2BD9]">' + escapeHtml(row[0]) + '</span>';
+              var metricCells = offresVisibleMetricIdx.map(function (oi) {
+                return '<td class="' + offresMetricStyles[oi] + '">' + Number(row[oi] || 0) + '</td>';
+              }).join('');
 
               return '<tr class="hover:bg-[#F3EBFF]/40 transition-colors">' +
                 '<td class="px-3 py-2.5 text-slate-400 font-mono bg-slate-50 sticky left-0 z-10 border-r border-slate-100">' + num + '</td>' +
                 '<td class="px-4 py-2.5 whitespace-nowrap">' + amBadge + '</td>' +
                 '<td class="px-4 py-2.5 whitespace-nowrap font-semibold text-[#1A1A2E]">' + escapeHtml(String(row[1] || '')) + '</td>' +
                 '<td class="px-4 py-2.5 whitespace-nowrap font-bold text-[#6C2BD9]">' + escapeHtml(String(row[2] || '')) + '</td>' +
-                '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-extrabold bg-pink-50/70 text-[#FF2A6D]">' + Number(row[3] || 0) + '</td>' +
-                '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#1A1A2E]">' + Number(row[4] || 0) + '</td>' +
-                '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#00897B]">' + Number(row[5] || 0) + '</td>' +
-                '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#6C2BD9]">' + Number(row[6] || 0) + '</td>' +
+                metricCells +
                 '</tr>';
             }).join('');
           }

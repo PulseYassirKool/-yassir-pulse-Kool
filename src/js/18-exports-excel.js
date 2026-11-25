@@ -11,10 +11,11 @@
       }
 
       function construireFeuilleOffres(offresRecords) {
-        var rows = offresRecords.map(function (rec) { return rec.cells; });
-        var aoa = [OFFRES_HEADERS].concat(rows);
+        var headers = getOffresVisibleHeaders();
+        var rows = offresRecords.map(function (rec) { return filtrerCellulesOffresVisibles(rec.cells); });
+        var aoa = [headers].concat(rows);
         var ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = [{ wch: 22 }, { wch: 24 }, { wch: 32 }, { wch: 15 }, { wch: 18 }, { wch: 16 }, { wch: 18 }];
+        ws['!cols'] = headers.map(function (h) { return { wch: Math.max(15, h.length + 4) }; });
         return ws;
       }
 
@@ -232,7 +233,7 @@
         } else if (state.activeTab === 'offres') {
           var oList = filtrerParAmSelectionne(state.offresRows);
           if (oList.length === 0) return;
-          aoa = [OFFRES_HEADERS].concat(oList.map(function (r) { return r.cells; }));
+          aoa = [getOffresVisibleHeaders()].concat(oList.map(function (r) { return filtrerCellulesOffresVisibles(r.cells); }));
           fileName = 'Export_Offres_' + suffix + '.csv';
         } else if (state.activeTab === 'stat') {
           var sList = filtrerParAmSelectionne(state.statRows);

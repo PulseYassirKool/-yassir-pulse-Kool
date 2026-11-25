@@ -361,12 +361,13 @@
 
       // Calcul de participation d'offre sur les articles d'une commande Kool (détails Sheet 15D9KM6G...)
       function calculerParticipationArticlesCommandeKool(orderId, articleRules) {
-        if (!orderId || !window.koolOrderItemsByOrderId) return { costTnd: 0, matchedItemsCount: 0, breakdown: [] };
+        if (!orderId || !window.koolOrderItemsByOrderId) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [] };
         var oidKey = String(orderId).trim().toLowerCase();
         var items = window.koolOrderItemsByOrderId.get(oidKey);
-        if (!items || items.length === 0) return { costTnd: 0, matchedItemsCount: 0, breakdown: [] };
+        if (!items || items.length === 0) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [] };
 
         var costTnd = 0;
+        var discountTotalTnd = 0;
         var matchedItemsCount = 0;
         var breakdown = [];
 
@@ -378,6 +379,11 @@
           var catNorm = normalizeText(it.category);
           var artNorm = normalizeText(it.article);
           var isDiscountedItem = (it.discountPrice > 0 && it.discountPrice < (it.originalPrice || it.unitPrice)) || catNorm.includes('super promo');
+          // Remise réellement accordée sur la ligne : (prix original − prix remisé) × quantité.
+          var effUnitPrice = (it.discountPrice > 0 && it.discountPrice < (it.originalPrice || it.unitPrice))
+            ? it.discountPrice
+            : (it.unitPrice || it.originalPrice || 0);
+          var lineDiscountTnd = Math.max(0, (origLineTotal - effUnitPrice * (it.quantity || 1)));
 
           // Chercher une règle article correspondante (par nom d'article/détail, Super Promo, ou règle article générique du restaurant)
           var appliedRule = null;
@@ -400,12 +406,14 @@
           if (appliedRule && appliedRule.partPct > 0 && (isDiscountedItem || appliedRule.details)) {
             var linePart = (appliedRule.partPct / 100) * origLineTotal;
             costTnd += linePart;
+            discountTotalTnd += lineDiscountTnd;
             matchedItemsCount += (it.quantity || 1);
             breakdown.push({
               article: it.article,
               category: it.category,
               quantity: it.quantity || 1,
               originalTotal: origLineTotal,
+              discountTnd: Number(lineDiscountTnd.toFixed(3)),
               partPct: appliedRule.partPct,
               partTnd: Number(linePart.toFixed(3))
             });
@@ -414,6 +422,7 @@
 
         return {
           costTnd: Number(costTnd.toFixed(3)),
+          discountTotalTnd: Number(discountTotalTnd.toFixed(3)),
           matchedItemsCount: matchedItemsCount,
           breakdown: breakdown
         };
@@ -456,7 +465,7 @@
 
         var articleEval = (oidStr && matchedArticleRules.length > 0)
           ? calculerParticipationArticlesCommandeKool(oidStr, matchedArticleRules)
-          : { costTnd: 0, matchedItemsCount: 0, breakdown: [] };
+          : { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [] };
 
         if (matchedTouteLaCarte.length === 0 && articleEval.matchedItemsCount === 0) {
           _koolRulesIndex.evalCache.set(cacheKey, null);
@@ -477,6 +486,7 @@
           isPromoRestaurant: matchedTouteLaCarte.length > 0 ? 1 : 0,
           partPct: matchedTouteLaCarte.length > 0 ? Number(best.partPct || 0) : 0,
           articlePartTnd: articleEval.costTnd,
+          articleDiscountTnd: articleEval.discountTotalTnd || 0,
           articleBreakdown: articleEval.breakdown,
           label: formaterLibelleOffreKool(best)
         };

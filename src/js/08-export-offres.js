@@ -137,3 +137,338 @@
             };
           });
       }
+
+      // Index des règles Yassir par restaurant (même construction que
+      // calculerCoutParticipationOffresLivrees, 04-state.js) : seules les règles
+      // avec une participation > 0 % définissent un partage resto / plateforme.
+      function indexerReglesParticipationYassir() {
+        var rulesByResto = new Map();
+        var rules = state.offreParticipationRules || [];
+        for (var i = 0; i < rules.length; i++) {
+          var rl = rules[i];
+          if (!rl || !rl.partPct || rl.partPct <= 0) continue;
+          var k1 = rl.restaurant;
+          var k2 = rl.restaurantNorm || normalizeText(rl.restaurant);
+          if (k1) {
+            if (!rulesByResto.has(k1)) rulesByResto.set(k1, []);
+            rulesByResto.get(k1).push(rl);
+          }
+          if (k2 && k2 !== k1) {
+            if (!rulesByResto.has(k2)) rulesByResto.set(k2, []);
+            rulesByResto.get(k2).push(rl);
+          }
+        }
+        return rulesByResto;
+      }
+
+      // Première règle applicable à une commande Yassir (mêmes contrôles de dates
+      // et de TAG que calculerCoutParticipationOffresLivrees, 04-state.js).
+      function trouverRegleParticipationYassir(rulesByResto, rawResto, orderIso, dTypeLower, fCatLower, dAmt) {
+        var candidateRules = rulesByResto.get(rawResto) || rulesByResto.get(normalizeText(rawResto));
+        if (!candidateRules || candidateRules.length === 0) return null;
+        for (var j = 0; j < candidateRules.length; j++) {
+          var cand = candidateRules[j];
+          if (orderIso) {
+            if (cand.startDate && orderIso < cand.startDate) continue;
+            if (cand.endDate && orderIso > cand.endDate) continue;
+          }
+          var tagLow = (cand.tag || '').toLowerCase();
+          if (tagLow === 'pack' && !/super\s*promo/i.test(fCatLower) && !/pack/i.test(dTypeLower)) continue;
+          if (tagLow === 'discount' && !/(percentage|pourcentage)/i.test(dTypeLower) && dAmt <= 0) continue;
+          return cand;
+        }
+        return null;
+      }
+
+      // Calcul de la participation par restaurant, sur les commandes livrées déjà
+      // filtrées par date par le moteur (state.marketRows + state.foodRows) : la
+      // section réagit donc au filtre de date comme les autres sections.
+      // viewMode : 'carte' (offres sur toute la carte) ou 'article' (offres sur articles).
+      // Règle de calcul (cohérente avec calculerCoutParticipationOffresLivrees) :
+      // - Remise totale = montant réellement accordé au client : « Discount Amount »
+      //   de la commande (Yassir comme Kool) ; en vue « Par article » (Kool) : somme
+      //   sur les lignes remisées de (Original Price − Discount Price) × Quantity.
+      // - Participation restaurant = partPct % × base : base = Total Food VF (ou item
+      //   total) pour « toute la carte », total original des lignes pour les articles.
+      // - Participation plateforme = remise − participation restaurant, par commande
+      //   (le reste de la remise, à la charge de la plateforme), bornée à 0. Le total
+      //   resto + plateforme peut donc dépasser la remise totale quand la participation
+      //   contractuelle du restaurant dépasse la remise sur certaines commandes.
+      //   Yassir n'a pas de détail par article avec prix : la vue
+      //   « Par article » y est calculée au niveau commande (offres Super Promo).
+      // - Seules les commandes avec une règle de participation partPct > 0 sont
+      //   comptées : sans règle, le partage resto / plateforme n'est pas défini (ces
+      //   commandes restent visibles dans l'onglet Offres).
+      function calculerParticipationParRestaurant(viewMode) {
+        var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        var view = viewMode === 'article' ? 'article' : 'carte';
+        var idxResto = TARGET_HEADERS.indexOf('restaurant name');
+        var idxStatus = TARGET_HEADERS.indexOf('status');
+        var idxOrderDay = TARGET_HEADERS.indexOf('order day');
+        var idxOrderId = TARGET_HEADERS.indexOf('order id');
+        var idxServices = TARGET_HEADERS.indexOf('services');
+        var idxDiscAmt = TARGET_HEADERS.indexOf('Discount Amount');
+        var idxGmv = TARGET_HEADERS.indexOf('Total Food VF');
+        var idxItemTot = TARGET_HEADERS.indexOf('item total');
+        var idxTotalFood = TARGET_HEADERS.indexOf('Total Food');
+        var idxDiscType = TARGET_HEADERS.indexOf('Discount Type');
+        var idxFoodCat = TARGET_HEADERS.indexOf('Food Category');
+        var idxArea = TARGET_HEADERS.indexOf('Area');
+
+        var rulesByRestoYassir = isKool ? null : indexerReglesParticipationYassir();
+        var rulesCount = (state.offreParticipationRules || []).length;
+
+        var groupedMap = new Map();
+        var deliveredCount = 0;
+        var totals = { totalOffres: 0, remiseTnd: 0, partRestoTnd: 0, partPlateformeTnd: 0 };
+
+        function getEntry(am, area, resto) {
+          var key = am + '|||' + area + '|||' + resto;
+          if (!groupedMap.has(key)) {
+            groupedMap.set(key, { am: am, area: area, resto: resto, totalOffres: 0, remiseTnd: 0, partRestoTnd: 0, partPlateformeTnd: 0 });
+          }
+          return groupedMap.get(key);
+        }
+
+        var allRecords = filtrerParAmSelectionne(state.marketRows.concat(state.foodRows));
+        for (var r = 0; r < allRecords.length; r++) {
+          var rec = allRecords[r];
+          var c = rec.cells;
+          if (!estCommandeLivree(c[idxStatus])) continue;
+          var srv = String(c[idxServices] || '').trim().toLowerCase();
+          var rawResto = String(c[idxResto] || '').trim();
+          if (!rawResto) continue;
+          if (srv.includes('market') || rawResto.toLowerCase().includes('mg market') || rawResto.toLowerCase().includes('market')) continue;
+          deliveredCount++;
+
+          var rawArea = String(c[idxArea] || '').trim();
+          if (!rawArea) {
+            var cfgA = state.amPortfolios[rawResto.toLowerCase()];
+            rawArea = (cfgA && cfgA.ville) ? cfgA.ville : 'Non spécifié';
+          }
+          var dAmt = purgerNombre(c[idxDiscAmt]);
+          var itemTotVal = purgerNombre(c[idxItemTot]);
+          var baseCarteYassir = itemTotVal > 0 ? itemTotVal : (purgerNombre(c[idxTotalFood]) + dAmt);
+          var baseCarteKool = purgerNombre(c[idxGmv]) || purgerNombre(c[idxItemTot]);
+
+          if (isKool) {
+            var evK = evaluerOffreKoolPourCommande(rawResto, c[idxOrderDay], c[idxOrderId]);
+            if (!evK) continue;
+            if (view === 'carte') {
+              if (!(evK.partPct > 0)) continue;
+              var partRestoCarte = (evK.partPct / 100) * baseCarteKool;
+              var partPlatCarte = Math.max(0, dAmt - partRestoCarte);
+              var e1 = getEntry(rec.am, rawArea, rawResto);
+              e1.totalOffres += 1;
+              e1.remiseTnd += dAmt;
+              e1.partRestoTnd += partRestoCarte;
+              e1.partPlateformeTnd += partPlatCarte;
+            } else {
+              if (!(evK.articlePartTnd > 0)) continue;
+              var discArt = evK.articleDiscountTnd || 0;
+              var partPlatArt = Math.max(0, discArt - evK.articlePartTnd);
+              var e2 = getEntry(rec.am, rawArea, rawResto);
+              e2.totalOffres += 1;
+              e2.remiseTnd += discArt;
+              e2.partRestoTnd += evK.articlePartTnd;
+              e2.partPlateformeTnd += partPlatArt;
+            }
+          } else {
+            var dTypeLower = String(c[idxDiscType] || '').toLowerCase();
+            var fCatLower = String(c[idxFoodCat] || '').toLowerCase();
+            var hasOffer = dAmt > 0 || /(percentage|pourcentage|pack|discount)/i.test(dTypeLower) || /super\s*promo/i.test(fCatLower);
+            if (!hasOffer) continue;
+            var orderIso = parseOrderDayToIsoDate(c[idxOrderDay]);
+            var matchedRule = trouverRegleParticipationYassir(rulesByRestoYassir, rawResto.toLowerCase(), orderIso, dTypeLower, fCatLower, dAmt);
+            if (!matchedRule) continue;
+            var isCarteRule = estOffreTouteLaCarteKool(matchedRule);
+            if (view === 'carte' && !isCarteRule) continue;
+            if (view === 'article' && isCarteRule) continue;
+            if (view === 'article' && !(/super\s*promo/i.test(fCatLower) || /pack/i.test(dTypeLower))) continue;
+            var partRestoY = (matchedRule.partPct / 100) * baseCarteYassir;
+            var partPlatY = Math.max(0, dAmt - partRestoY);
+            var e3 = getEntry(rec.am, rawArea, rawResto);
+            e3.totalOffres += 1;
+            e3.remiseTnd += dAmt;
+            e3.partRestoTnd += partRestoY;
+            e3.partPlateformeTnd += partPlatY;
+          }
+        }
+
+        var rows = Array.from(groupedMap.values())
+          .sort(function (a, b) { return (b.remiseTnd - a.remiseTnd) || a.resto.localeCompare(b.resto, 'fr'); })
+          .map(function (it) {
+            it.remiseTnd = Number(it.remiseTnd.toFixed(2));
+            it.partRestoTnd = Number(it.partRestoTnd.toFixed(2));
+            it.partPlateformeTnd = Number(it.partPlateformeTnd.toFixed(2));
+            totals.totalOffres += it.totalOffres;
+            totals.remiseTnd += it.remiseTnd;
+            totals.partRestoTnd += it.partRestoTnd;
+            totals.partPlateformeTnd += it.partPlateformeTnd;
+            return it;
+          });
+        totals.remiseTnd = Number(totals.remiseTnd.toFixed(2));
+        totals.partRestoTnd = Number(totals.partRestoTnd.toFixed(2));
+        totals.partPlateformeTnd = Number(totals.partPlateformeTnd.toFixed(2));
+
+        // Note de couverture (même logique que le Top des ventes) : vue « Par article »
+        // Kool sans aucune ligne alors que des commandes livrées existent sur la période.
+        var note = '';
+        var hasData = (state.marketRows.length + state.foodRows.length) > 0;
+        if (!hasData) {
+          note = 'no_data';
+        } else if (rulesCount === 0) {
+          note = 'no_rules';
+        } else if (isKool && view === 'article' && rows.length === 0 && deliveredCount > 0) {
+          if (!window.koolOrderItemsByOrderId || window.koolOrderItemsByOrderId.size === 0) {
+            note = 'no_items_loaded';
+          } else {
+            var covMin = window.koolOrderItemsMinDate || '';
+            var covMax = window.koolOrderItemsMaxDate || '';
+            var outOfCoverage = (state.dateStart && covMax && state.dateStart > covMax) ||
+              (state.dateEnd && covMin && state.dateEnd < covMin);
+            note = outOfCoverage ? 'items_out_of_coverage' : 'no_article_offer';
+          }
+        }
+
+        return { view: view, rows: rows, totals: totals, note: note, deliveredCount: deliveredCount };
+      }
+
+      // Colonnes visibles du tableau des offres : « Promo Admin » est toujours à 0
+      // pour Kool (evaluerOffreKoolPourCommande renvoie isPromoAdmin: 0), la colonne
+      // est donc masquée en mode Kool uniquement (elle reste pour Yassir).
+      var OFFRES_PROMO_ADMIN_IDX = OFFRES_HEADERS.indexOf('Promo Admin');
+      function getOffresVisibleHeaders() {
+        var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        return isKool
+          ? OFFRES_HEADERS.filter(function (h) { return h !== 'Promo Admin'; })
+          : OFFRES_HEADERS.slice();
+      }
+      function filtrerCellulesOffresVisibles(cells) {
+        var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        if (!isKool || !cells) return cells;
+        return cells.filter(function (c, idx) { return idx !== OFFRES_PROMO_ADMIN_IDX; });
+      }
+      window.yassirGetOffresVisibleHeaders = getOffresVisibleHeaders;
+
+      // ---- Rendu de la section Participation (panneau dédié) ----
+      var participationViewMode = 'carte';
+      var _participationCache = { key: '', result: null };
+      var currentParticipationRows = [];
+      var currentParticipationTotals = { totalOffres: 0, remiseTnd: 0, partRestoTnd: 0, partPlateformeTnd: 0 };
+
+      function getParticipationPeriodLabel() {
+        if (state.dateStart && state.dateEnd) {
+          return 'du ' + state.dateStart.split('-').reverse().join('/') + ' au ' + state.dateEnd.split('-').reverse().join('/');
+        }
+        return 'toute la période';
+      }
+
+      function renderParticipationPanel() {
+        var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        var cacheKey = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + participationViewMode + '|' + getEffectiveAmFilter() + '|' + state.marketRows.length + '|' + state.foodRows.length;
+        if (_participationCache.key !== cacheKey) {
+          _participationCache = { key: cacheKey, result: calculerParticipationParRestaurant(participationViewMode) };
+        }
+        var res = _participationCache.result;
+        currentParticipationRows = res.rows;
+        currentParticipationTotals = res.totals;
+
+        var btnCarte = document.getElementById('partViewCarteBtn');
+        var btnArticle = document.getElementById('partViewArticleBtn');
+        var activeCls = 'px-3.5 py-1.5 rounded-full text-xs font-bold bg-[#6C2BD9] text-white shadow-sm transition cursor-pointer';
+        var idleCls = 'px-3.5 py-1.5 rounded-full text-xs font-bold text-[#6C2BD9] hover:text-[#5521B5] transition cursor-pointer';
+        if (btnCarte) btnCarte.className = res.view === 'carte' ? activeCls : idleCls;
+        if (btnArticle) btnArticle.className = res.view === 'article' ? activeCls : idleCls;
+
+        var viewLabel = document.getElementById('partViewLabel');
+        if (viewLabel) {
+          viewLabel.textContent = (res.view === 'carte' ? 'Vue : Toute la carte' : 'Vue : Par article') + ' • Période : ' + getParticipationPeriodLabel() +
+            (res.view === 'article' && !isKool ? ' • Montants au niveau commande (pas de détail par article pour Yassir)' : '');
+        }
+
+        var elOffres = document.getElementById('partKpiOffres');
+        if (elOffres) elOffres.textContent = Number(res.totals.totalOffres).toLocaleString('fr-FR');
+        var elRemise = document.getElementById('partKpiRemise');
+        if (elRemise) elRemise.textContent = Number(res.totals.remiseTnd).toFixed(2) + ' TND';
+        var elResto = document.getElementById('partKpiResto');
+        if (elResto) elResto.textContent = Number(res.totals.partRestoTnd).toFixed(2) + ' TND';
+        var elPlat = document.getElementById('partKpiPlateforme');
+        if (elPlat) elPlat.textContent = Number(res.totals.partPlateformeTnd).toFixed(2) + ' TND';
+
+        var banner = document.getElementById('partNoteBanner');
+        if (banner) {
+          var msg = '';
+          if (res.note === 'no_data') msg = 'Aucune donnée chargée : importez d’abord votre fichier Data exp (ou lancez « Sync Yassir » / « Sync Kool »).';
+          else if (res.note === 'no_rules') msg = 'Aucune règle de participation chargée : lancez « Sync Yassir » (ou « Sync Kool ») pour charger la feuille « Offre Participation ».';
+          else if (res.note === 'no_items_loaded') msg = 'Aucun détail article chargé : faites un « Sync Kool » pour charger la feuille des détails articles.';
+          else if (res.note === 'items_out_of_coverage') {
+            var covMax = window.koolOrderItemsMaxDate || '';
+            msg = covMax
+              ? 'Aucun détail article pour cette période : la feuille « détails articles » Kool s’arrête au ' + covMax.split('-').reverse().join('/') + '. Ajoutez les lignes manquantes pour voir la participation par article.'
+              : 'Aucun détail article pour cette période : la feuille « détails articles » Kool ne couvre pas ces commandes.';
+          } else if (res.note === 'no_article_offer') msg = 'Aucune participation sur articles pour cette période : les détails articles couvrent bien la période, mais aucune commande livrée n’a d’offre article avec participation.';
+          if (msg) {
+            banner.textContent = msg;
+            banner.classList.remove('hidden');
+          } else {
+            banner.classList.add('hidden');
+          }
+        }
+
+        window.yassirRenderParticipationTable();
+      }
+
+      window.yassirSetParticipationView = function (view) {
+        if (view !== 'carte' && view !== 'article') return;
+        if (participationViewMode === view) return;
+        participationViewMode = view;
+        renderParticipationPanel();
+      };
+
+      window.yassirRenderParticipationTable = function () {
+        var tbody = document.getElementById('partTableBody');
+        var tfoot = document.getElementById('partTableFoot');
+        if (!tbody) return;
+        var q = '';
+        var searchEl = document.getElementById('partSearchInput');
+        if (searchEl) q = searchEl.value.trim().toLowerCase();
+        var filtered = currentParticipationRows.filter(function (it) {
+          if (!q) return true;
+          return it.am.toLowerCase().includes(q) || it.area.toLowerCase().includes(q) || it.resto.toLowerCase().includes(q);
+        });
+
+        if (filtered.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-10 text-center text-slate-400">Aucune participation pour cette vue et cette période.</td></tr>';
+        } else {
+          var rowsHtml = filtered.map(function (it, idx) {
+            var num = idx + 1;
+            var amBadge = it.am === 'Non attribué'
+              ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">Non attribué</span>'
+              : '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#F3EBFF] text-[#6C2BD9]">' + escapeHtml(it.am) + '</span>';
+            return '<tr class="hover:bg-[#F3EBFF]/40 transition-colors">' +
+              '<td class="px-3 py-2.5 text-slate-400 font-mono bg-slate-50 sticky left-0 z-10 border-r border-slate-100">' + num + '</td>' +
+              '<td class="px-4 py-2.5 whitespace-nowrap">' + amBadge + '</td>' +
+              '<td class="px-4 py-2.5 whitespace-nowrap font-semibold text-[#1A1A2E]">' + escapeHtml(it.area) + '</td>' +
+              '<td class="px-4 py-2.5 whitespace-nowrap font-bold text-[#6C2BD9]">' + escapeHtml(it.resto) + '</td>' +
+              '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-extrabold bg-pink-50/70 text-[#FF2A6D]">' + Number(it.totalOffres).toLocaleString('fr-FR') + '</td>' +
+              '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#1A1A2E]">' + Number(it.remiseTnd).toFixed(2) + '</td>' +
+              '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#00897B]">' + Number(it.partRestoTnd).toFixed(2) + '</td>' +
+              '<td class="px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#6C2BD9]">' + Number(it.partPlateformeTnd).toFixed(2) + '</td>' +
+              '</tr>';
+          }).join('');
+          tbody.innerHTML = rowsHtml;
+        }
+
+        if (tfoot) {
+          var t = currentParticipationTotals;
+          var footHtml = '<tr class="bg-[#F3EBFF]/60 font-extrabold">' +
+            '<td colspan="4" class="px-4 py-2.5 text-right text-[#1A1A2E]">Total</td>' +
+            '<td class="px-4 py-2.5 text-right font-mono text-[#FF2A6D]">' + Number(t.totalOffres).toLocaleString('fr-FR') + '</td>' +
+            '<td class="px-4 py-2.5 text-right font-mono text-[#1A1A2E]">' + Number(t.remiseTnd).toFixed(2) + '</td>' +
+            '<td class="px-4 py-2.5 text-right font-mono text-[#00897B]">' + Number(t.partRestoTnd).toFixed(2) + '</td>' +
+            '<td class="px-4 py-2.5 text-right font-mono text-[#6C2BD9]">' + Number(t.partPlateformeTnd).toFixed(2) + '</td>' +
+            '</tr>';
+          tfoot.innerHTML = footHtml;
+        }
+      };

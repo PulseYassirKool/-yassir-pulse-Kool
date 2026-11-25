@@ -130,7 +130,23 @@ const koolCsvComm = toCsv([['Restaurant', 'Commission'], ['Resto Alpha', '20'], 
 const koolCsvPort = toCsv([['Restaurant', 'Ville', 'AM'], ['Resto Alpha', 'Tunis', 'Omar Beldi'], ['Resto Beta', 'Ariana', 'Nour Ali']]);
 const koolCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], ['Resto Alpha', '10', 'Toute la carte', '01/11/2026 - 30/11/2026']]);
 
-function bootKool() {
+// Variantes pour le test Participation : le Burger de la commande 1002 est remisé
+// (12 au lieu de 15) et Resto Alpha a en plus une règle article « Super Promo » à 10 %.
+const koolCsvItemsPart = toCsv([
+  ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+  ['1001', '16/11/2026', 'Resto Alpha', 'Pizza', 'Pizza Margherita', 2, 12, 0, 12, 'Food'],
+  ['1001', '16/11/2026', 'Resto Alpha', 'Boisson', 'Coca Cola', 1, 3, 0, 3, 'Food'],
+  ['1001', '16/11/2026', 'Resto Alpha', 'Extra', 'Sauce Fromage', 1, 2, 0, 2, 'Extra'],
+  ['1002', '17/11/2026', 'Resto Alpha', 'Burger', 'Burger Classic', 1, 15, 12, 15, 'Food'],
+  ['1003', '17/11/2026', 'Resto Beta', 'Tacos', 'Tacos Poulet', 3, 9, 0, 9, 'Food']
+]);
+const koolCsvOffrePart = toCsv([
+  ['Restaurant', 'Participation', 'Tag', 'Période'],
+  ['Resto Alpha', '10', 'Toute la carte', '01/11/2026 - 30/11/2026'],
+  ['Resto Alpha', '10', 'Super Promo', '01/11/2026 - 30/11/2026']
+]);
+
+function bootKool(overrides) {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
   w.__PULSE_API__ = 'https://api.test';
@@ -142,13 +158,14 @@ function bootKool() {
     }
     if (u.includes('format=xlsx')) return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     const kc = koolCfg;
+    const ov = overrides || {};
     const match = (id) => id && u.includes(id);
     let body = null;
-    if (match(kc.DATA_SHEET_ID)) body = koolCsvData;
-    else if (match(kc.ORDER_ITEMS_SHEET_ID)) body = koolCsvItems;
-    else if (match(kc.COMMISSION_SHEET_ID)) body = koolCsvComm;
-    else if (match(kc.PORTFOLIOS_SHEET_ID)) body = koolCsvPort;
-    else if (match(kc.OFFRE_PARTICIPATION_SHEET_ID)) body = koolCsvOffre;
+    if (match(kc.DATA_SHEET_ID)) body = ov.data || koolCsvData;
+    else if (match(kc.ORDER_ITEMS_SHEET_ID)) body = ov.items || koolCsvItems;
+    else if (match(kc.COMMISSION_SHEET_ID)) body = ov.comm || koolCsvComm;
+    else if (match(kc.PORTFOLIOS_SHEET_ID)) body = ov.port || koolCsvPort;
+    else if (match(kc.OFFRE_PARTICIPATION_SHEET_ID)) body = ov.offre || koolCsvOffre;
     if (body !== null) return { ok: true, status: 200, text: async () => body, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
   };
@@ -344,5 +361,85 @@ test('Sync Yassir unique : les 6 synchros enchaînées en ordre, progression pui
   await wait(300);
   assert.deepEqual(calls, ['portefeuilles', 'historique', 'budget', 'statut', 'offres', '2025'], 'une étape en échec a interrompu la chaîne');
   assert.equal(label.textContent, 'Yassir partiel (5/6)', 'statut partiel inattendu : ' + label.textContent);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Kool : section Participation (toute la carte / par article) et colonne Promo Admin masquée', async () => {
+  const w = bootKool({ items: koolCsvItemsPart, offre: koolCsvOffrePart });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+
+  // Demande 2 — tableau Offres en mode Kool : pas de colonne « Promo Admin ».
+  w.yassirSwitchTab('offres');
+  await wait(600);
+  const headTxt = w.document.getElementById('previewTableHead').textContent;
+  assert.equal(headTxt.includes('Promo Admin'), false, 'colonne Promo Admin encore affichée en mode Kool : ' + headTxt);
+  assert.equal(headTxt.includes('Promo Restaurant'), true, 'colonne Promo Restaurant absente en mode Kool');
+  assert.equal(w.document.querySelectorAll('#previewTableBody tr td').length, 7, 'une ligne Offres Kool doit avoir 7 cellules (sans Promo Admin)');
+  assert.deepEqual([...w.yassirGetOffresVisibleHeaders()], ['Portefeuille AM', 'Area', 'Nom du restaurant', 'Total Offres', 'Discount Article', 'Promo Restaurant']);
+  // En mode Yassir, la colonne est toujours là.
+  w.yassirSwitchBrand('yassir');
+  assert.deepEqual([...w.yassirGetOffresVisibleHeaders()], ['Portefeuille AM', 'Area', 'Nom du restaurant', 'Total Offres', 'Discount Article', 'Promo Admin', 'Promo Restaurant']);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+
+  // Demande 1 — section Participation, vue « Toute la carte » (par défaut).
+  // Resto Alpha : 3 commandes livrées avec offre (1001, 1002, 1005), remise totale 5
+  // (seule 1002), participation resto 10 % × (25.50 + 40 + 10) = 7.55, plateforme 1.00
+  // (seule 1002 a une remise : 5 − 4.00 = 1.00 ; les autres ont une remise de 0).
+  w.yassirSwitchTab('participation');
+  await wait(600);
+  assert.equal(w.document.getElementById('activeSectionTitle').textContent, 'Participation des Offres');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '3', 'Total Offres (carte)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '5.00 TND', 'Remise totale (carte)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '7.55 TND', 'Participation restaurant (carte)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '1.00 TND', 'Participation plateforme (carte)');
+  const bodyTxt = w.document.getElementById('partTableBody').textContent;
+  assert.ok(bodyTxt.includes('Resto Alpha'), 'Resto Alpha absent du tableau Participation');
+  assert.ok(!bodyTxt.includes('Resto Beta'), 'Resto Beta (sans règle) ne doit pas apparaître');
+  assert.ok(w.document.getElementById('partTableFoot').textContent.includes('7.55'), 'total Participation restaurant absent du pied de tableau');
+
+  // Vue « Par article » : seule la commande 1002 a un article remisé (Burger 15 → 12).
+  // Discount article = 3.00, participation resto = 10 % × 15 = 1.50, plateforme = 1.50.
+  w.yassirSetParticipationView('article');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres (article)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '3.00 TND', 'Discount article');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '1.50 TND', 'Participation restaurant (article)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '1.50 TND', 'Participation plateforme (article)');
+  assert.ok(w.document.getElementById('partTableBody').textContent.includes('Resto Alpha'), 'Resto Alpha absent en vue article');
+
+  // Filtre de date : 16/11 uniquement → seule 1001 (carte : remise 0, resto 2.55).
+  w.yassirSetParticipationView('carte');
+  w.document.getElementById('filterDateStart').value = '2026-11-16';
+  w.document.getElementById('filterDateEnd').value = '2026-11-16';
+  w.yassirOnDateRangeChange();
+  await wait(600);
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres 16/11 (carte)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '0.00 TND', 'Remise 16/11 (carte)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '2.55 TND', 'Participation restaurant 16/11 (carte)');
+  // Même jour en vue article : détails couverts mais aucune offre article → message neutre, pas de couverture.
+  w.yassirSetParticipationView('article');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '0', 'Total Offres 16/11 (article)');
+  const note16 = w.document.getElementById('partNoteBanner').textContent;
+  assert.ok(note16.includes('Aucune participation sur articles pour cette période'), 'message neutre attendu le 16/11 : ' + note16);
+  assert.ok(!note16.includes('17/11/2026'), 'pas de message de couverture le 16/11');
+
+  // 18/11 : commande 1005 livrée sans détail article → message de couverture (fin au 17/11).
+  // La vue « Toute la carte » fonctionne sans détails articles : resto = 10 % × 10 = 1.00.
+  w.document.getElementById('filterDateStart').value = '2026-11-18';
+  w.document.getElementById('filterDateEnd').value = '2026-11-18';
+  w.yassirOnDateRangeChange();
+  await wait(600);
+  w.yassirSetParticipationView('carte');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres 18/11 (carte)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '1.00 TND', 'Participation restaurant 18/11 (carte)');
+  w.yassirSetParticipationView('article');
+  const note18 = w.document.getElementById('partNoteBanner').textContent;
+  assert.ok(note18.includes('17/11/2026'), 'message de couverture attendu (fin au 17/11/2026) : ' + note18);
+
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

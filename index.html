@@ -388,6 +388,14 @@
                 </span>
                 <span class="lmd-radio-dot w-4 h-4 rounded-full border border-white/45 flex items-center justify-center shrink-0"></span>
               </button>
+
+              <button type="button" data-tab="participation" onclick="window.yassirSwitchTab('participation')" class="tab-btn w-full flex items-center justify-between px-3 py-2 rounded-xl text-white/80 hover:bg-white/10 transition cursor-pointer">
+                <span class="flex items-center gap-2.5 min-w-0">
+                  <i class="fa-solid fa-hand-holding-dollar text-xs w-4 text-center"></i>
+                  <span class="lmd-nav-label truncate">Participation</span>
+                </span>
+                <span class="lmd-radio-dot w-4 h-4 rounded-full border border-white/45 flex items-center justify-center shrink-0"></span>
+              </button>
             </div>
           </div>
 
@@ -1099,6 +1107,80 @@
               <button id="btnPrevPage" type="button" onclick="window.yassirPrevPage()" class="px-3.5 py-1.5 rounded-full border border-purple-200 bg-white text-[#6C2BD9] font-semibold hover:bg-[#F3EBFF] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed">Précédent</button>
               <span id="pageIndicator" class="font-bold text-[#1A1A2E]">Page 1 / 1</span>
               <button id="btnNextPage" type="button" onclick="window.yassirNextPage()" class="px-3.5 py-1.5 rounded-full border border-purple-200 bg-white text-[#6C2BD9] font-semibold hover:bg-[#F3EBFF] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed">Suivant</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================================================================
+             VUE 1A : ONGLET PARTICIPATION (PARTAGE RESTO / PLATEFORME PAR RESTAURANT)
+             VUE GLOBALE, TOUTE LA CARTE OU PAR ARTICLE, SUR LA PÉRIODE FILTRÉE
+             ====================================================================== -->
+        <div id="panelParticipation" class="hidden p-4 sm:p-5 space-y-6">
+          <div class="bg-[#F8F9FC] p-4 sm:p-5 rounded-2xl border border-purple-100 space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-extrabold text-[#1A1A2E]">
+                  <i class="fa-solid fa-hand-holding-dollar text-[#FF2A6D] mr-1.5"></i> Participation des offres par restaurant
+                </h3>
+                <p id="partViewLabel" class="text-xs text-slate-500">Vue : Toute la carte • Période : toute la période</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">Remise totale = montant accordé au client • Participation restaurant = partPct % de la valeur (règle « Offre Participation ») • Participation plateforme = le reste de la remise sur chaque commande (0 si la participation restaurant dépasse la remise). Seules les offres avec une participation &gt; 0 % sont comptées.</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="inline-flex rounded-full bg-[#F3EBFF] p-1 border border-purple-200">
+                  <button id="partViewCarteBtn" type="button" onclick="window.yassirSetParticipationView('carte')" class="px-3.5 py-1.5 rounded-full text-xs font-bold bg-[#6C2BD9] text-white shadow-sm transition cursor-pointer">Toute la carte</button>
+                  <button id="partViewArticleBtn" type="button" onclick="window.yassirSetParticipationView('article')" class="px-3.5 py-1.5 rounded-full text-xs font-bold text-[#6C2BD9] hover:text-[#5521B5] transition cursor-pointer">Par article</button>
+                </div>
+                <div class="relative">
+                  <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#6C2BD9]/60 text-xs"></i>
+                  <input id="partSearchInput" type="text" oninput="window.yassirRenderParticipationTable()" placeholder="Rechercher un restaurant ou AM..." class="pl-8 pr-3 py-1.5 text-xs bg-white border border-purple-200 rounded-full focus:outline-none focus:ring-2 focus:ring-[#6C2BD9]" />
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Total Offres</p>
+                <p id="partKpiOffres" class="text-xl font-extrabold text-[#FF2A6D] mt-0.5">0</p>
+                <p class="text-[11px] text-slate-500">commandes livrées avec offre</p>
+              </div>
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Remise totale</p>
+                <p id="partKpiRemise" class="text-xl font-extrabold text-[#1A1A2E] mt-0.5">0.00 TND</p>
+                <p class="text-[11px] text-slate-500">montant accordé aux clients</p>
+              </div>
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Participation Restaurant</p>
+                <p id="partKpiResto" class="text-xl font-extrabold text-[#00897B] mt-0.5">0.00 TND</p>
+                <p class="text-[11px] text-slate-500">à la charge des restaurants</p>
+              </div>
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Participation Plateforme</p>
+                <p id="partKpiPlateforme" class="text-xl font-extrabold text-[#6C2BD9] mt-0.5">0.00 TND</p>
+                <p class="text-[11px] text-slate-500">à la charge de la plateforme</p>
+              </div>
+            </div>
+
+            <div id="partNoteBanner" class="hidden px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800"></div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-purple-100 overflow-hidden">
+            <div class="max-h-[540px] overflow-y-auto overflow-x-auto custom-scrollbar">
+              <table class="min-w-full divide-y divide-purple-100 text-xs">
+                <thead class="bg-[#6C2BD9] text-white font-bold uppercase sticky top-0 z-10">
+                  <tr>
+                    <th class="px-3 py-3 text-left bg-[#5521B5]">#</th>
+                    <th class="px-4 py-3 text-left">Portefeuille AM</th>
+                    <th class="px-4 py-3 text-left">Area</th>
+                    <th class="px-4 py-3 text-left">Nom du restaurant</th>
+                    <th class="px-4 py-3 text-right bg-[#5521B5] text-[#00BFA5] border-b-2 border-[#00BFA5]">Total Offres</th>
+                    <th class="px-4 py-3 text-right bg-[#5521B5] text-[#00BFA5] border-b-2 border-[#00BFA5]">Remise (TND)</th>
+                    <th class="px-4 py-3 text-right bg-[#5521B5] text-[#00BFA5] border-b-2 border-[#00BFA5]">Part. Restaurant (TND)</th>
+                    <th class="px-4 py-3 text-right bg-[#5521B5] text-[#00BFA5] border-b-2 border-[#00BFA5]">Part. Plateforme (TND)</th>
+                  </tr>
+                </thead>
+                <tbody id="partTableBody" class="divide-y divide-slate-100 bg-white"></tbody>
+                <tfoot id="partTableFoot" class="border-t-2 border-purple-200"></tfoot>
+              </table>
             </div>
           </div>
         </div>
