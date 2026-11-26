@@ -1563,8 +1563,8 @@
         <!-- ======================================================================
              VUE CLIENTS KOOL : NOUVEAUX VS RETOURS VS RÉACTIVÉS (slides 34, 37-38 du deck)
              Kool uniquement. Définitions : Nouveau = New Client = 1 ; Retour = ancien
-             (New Client = 0) avec une commande précédente il y a moins de 60 jours ;
-             Réactivé = ancien avec une commande précédente il y a plus de 60 jours.
+             (New Client = 0) avec une commande précédente il y a moins de 7 jours ;
+             Réactivé = ancien avec une commande précédente il y a plus de 7 jours.
              Par ville du portefeuille (Area) — les zones du deck ne correspondent
              pas aux villes, aucun mapping n'est inventé.
              ====================================================================== -->
@@ -1576,7 +1576,7 @@
                 <span class="ml-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#FFD100] text-[#111111]">Kool</span>
               </h3>
               <p class="text-xs text-slate-500 mt-1">Comptage par <strong>client distinct</strong> (ID Client), sur les commandes <strong>livrées Food</strong> de la période filtrée.</p>
-              <p class="text-[11px] text-slate-400 mt-0.5"><strong>Nouveau :</strong> New Client = 1 sur sa première commande livrée de la période. <strong>Retour :</strong> New Client = 0 et commande précédente dans l'archive il y a moins de 60 jours. <strong>Réactivé :</strong> New Client = 0 et commande précédente il y a plus de 60 jours (seuil de 60 jours par défaut — modifiable sur demande). La commande précédente est cherchée dans l'archive chargée (oct.–nov. 2026) : avec 2 mois d'archive, un écart de plus de 60 jours est presque impossible, les réactivés resteront à 0 tant que l'archive ne couvrira pas plus de 60 jours. Par zone : ville du portefeuille (Area).</p>
+              <p class="text-[11px] text-slate-400 mt-0.5"><strong>Nouveau :</strong> New Client = 1 sur sa première commande livrée de la période. <strong>Retour :</strong> New Client = 0 et commande précédente dans l'archive il y a moins de 7 jours. <strong>Réactivé :</strong> New Client = 0 et commande précédente il y a plus de 7 jours (seuil de 7 jours). La commande précédente est cherchée dans l'archive chargée (oct.–nov. 2026) : avec 2 mois d'archive, un écart de plus de 7 jours est fréquent, les réactivés sont donc bien remplis. Par zone : ville du portefeuille (Area).</p>
               <p id="koolCliCoverage" class="text-[11px] font-semibold text-slate-500 mt-1"></p>
             </div>
 
@@ -1605,7 +1605,12 @@
           </div>
 
           <div class="bg-white rounded-2xl border border-purple-100 p-4">
-            <h4 class="text-sm font-extrabold text-[#1A1A2E] mb-2">Nouveaux vs Retours vs Réactivés par ville (top 10 villes)</h4>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <h4 class="text-sm font-extrabold text-[#1A1A2E]">Nouveaux vs Retours vs Réactivés par ville (top 10 villes)</h4>
+              <button id="btnDownloadKoolClientsChart" type="button" onclick="window.yassirDownloadKoolClientsChart()" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-white hover:bg-[#F3EBFF] text-[#6C2BD9] border border-purple-200 transition cursor-pointer whitespace-nowrap" title="Télécharger ce graphique en image PNG">
+                <i class="fa-solid fa-download"></i> Télécharger le graphique (.png)
+              </button>
+            </div>
             <div class="relative w-full h-72">
               <canvas id="koolCliAreaChartCanvas"></canvas>
             </div>

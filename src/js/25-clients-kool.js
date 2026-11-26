@@ -8,21 +8,21 @@
          - Nouveau : New Client = 1 sur la première commande livrée du client
            dans la période filtrée.
          - Retour : New Client = 0 et commande précédente dans l'archive
-           moins de 60 jours avant la première commande de la période.
+           moins de 7 jours avant la première commande de la période.
          - Réactivé : New Client = 0 et commande précédente dans l'archive
-           plus de 60 jours avant la première commande de la période
-           (seuil de 60 jours par défaut).
+           plus de 7 jours avant la première commande de la période
+           (seuil de 7 jours).
          Comptage par client distinct, sur les commandes livrées Food
          uniquement, dans la période filtrée (filtre de date + filtre AM).
          La commande précédente est cherchée dans l'archive chargée
-         (oct.–nov. 2026) : avec une archive qui ne couvre que 2 mois, un
-         écart de plus de 60 jours est presque impossible — les réactivés
-         resteront à 0 tant que l'archive ne couvrira pas plus de 60 jours.
+         (oct.–nov. 2026) : avec une archive qui couvre 2 mois, un
+         écart de plus de 7 jours est fréquent — les réactivés sont donc
+         bien remplis.
          Par zone : ville du portefeuille (Area) — les zones du deck
          (Banlieue Nord/Sud, Bardo & CV…) ne correspondent pas aux villes,
          aucun mapping n'est inventé.
          ======================================================================== */
-      var KOOL_CLIENT_REACTIVATION_DAYS = 60;
+      var KOOL_CLIENT_REACTIVATION_DAYS = 7;
       var koolClientsCache = { key: '', result: null };
 
       // Classifie un client : 'new' | 'returning' | 'reactivated'.
@@ -267,3 +267,32 @@
         renderTop10('koolCliTopReaBody', res.topRea, 'reactives');
       }
       window.yassirRenderKoolClientsPanel = renderKoolClientsPanel;
+
+      // Télécharger le graphique Clients Kool en image PNG (même mécanisme que
+      // les slides : lien de téléchargement temporaire sur l'image du graphique).
+      window.yassirDownloadKoolClientsChart = function () {
+        var dateStr = new Date().toISOString().slice(0, 10);
+        var img = null;
+        try {
+          if (koolClientsChartInst && typeof koolClientsChartInst.toBase64Image === 'function') {
+            img = koolClientsChartInst.toBase64Image('image/png', 1);
+          }
+        } catch (e) { img = null; }
+        if (!img) {
+          try {
+            var cv = document.getElementById('koolCliAreaChartCanvas');
+            if (cv && cv.toDataURL) img = cv.toDataURL('image/png');
+          } catch (e2) { img = null; }
+        }
+        if (!img) {
+          showToast('Graphique Clients Kool <strong>non disponible</strong> pour le moment (aucune donnée ou graphique non dessiné).', 'warning');
+          return;
+        }
+        var link = document.createElement('a');
+        link.download = 'KOOL_Clients_Nouveaux-Retours-Reactivés_' + dateStr + '.png';
+        link.href = img;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('Graphique <strong>Clients Kool (.png)</strong> téléchargé.', 'success');
+      };

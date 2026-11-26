@@ -521,7 +521,7 @@ const koolCsvDataDeck = toCsv([
   deckRow('10/11/2026', '2001', 101, 'Resto Alpha', '30.00', '3', '5', 1),
   deckRow('11/11/2026', '2002', 102, 'Resto Alpha', '20.00', '2', '0', 0),
   deckRow('12/11/2026', '2003', 103, 'Resto Alpha', '25.00', '3', '0', 0),
-  deckRow('14/11/2026', '2009', 105, 'Resto Alpha', '12.00', '2', '0', 0),
+  deckRow('09/11/2026', '2009', 105, 'Resto Alpha', '12.00', '2', '0', 0),
   deckRow('10/11/2026', '2004', 201, 'Resto Beta', '40.00', '4', '0', 1),
   deckRow('13/11/2026', '2005', 202, 'Resto Beta', '15.00', '2', '0', 0),
   // W47 (période courante) : Alpha 4 (GMV After 117), Beta 1 (40), Gamma 2 (80).
@@ -545,14 +545,14 @@ test('Kool : vues du deck (Executive Summary, Daily Orders vs Avg Daily GMV, Top
   w.yassirApplyDatePreset('ALL');
   await wait(600);
 
-  // Classifieur client (règle des 60 jours) — test unitaire direct : l'archive ne
-  // couvre qu'oct.–nov. 2026, un écart > 60 jours est impossible via les données
-  // synchronisées (le test d'intégration ci-dessous a donc 0 réactivé, ce qui est
-  // le résultat honnête pour 2 mois d'archive).
+  // Classifieur client (règle des 7 jours) — test unitaire direct : l'archive
+  // couvre oct.–nov. 2026, un écart > 7 jours est fréquent via les données
+  // synchronisées (le test d'intégration ci-dessous a donc 1 réactivé).
   assert.equal(w.yassirClassifierClientKool(1, '', '2026-11-16'), 'new', 'New Client = 1 → nouveau');
-  assert.equal(w.yassirClassifierClientKool(0, '2026-10-20', '2026-11-16'), 'returning', 'ancien, 27 jours → retour');
+  assert.equal(w.yassirClassifierClientKool(0, '2026-11-09', '2026-11-16'), 'returning', 'ancien, 7 jours exactement → retour (seuil > 7)');
+  assert.equal(w.yassirClassifierClientKool(0, '2026-11-08', '2026-11-16'), 'reactivated', 'ancien, 8 jours → réactivé');
+  assert.equal(w.yassirClassifierClientKool(0, '2026-10-20', '2026-11-16'), 'reactivated', 'ancien, 27 jours → réactivé');
   assert.equal(w.yassirClassifierClientKool(0, '2026-09-10', '2026-11-16'), 'reactivated', 'ancien, 67 jours → réactivé');
-  assert.equal(w.yassirClassifierClientKool(0, '2026-09-17', '2026-11-16'), 'returning', 'ancien, 60 jours exactement → retour (seuil > 60)');
   assert.equal(w.yassirClassifierClientKool(0, '', '2026-11-16'), 'returning', 'ancien sans commande précédente → retour');
 
   // Période courante W47 (16-22/11/2026).
@@ -632,29 +632,34 @@ test('Kool : vues du deck (Executive Summary, Daily Orders vs Avg Daily GMV, Top
   w.yassirSetVariationSort('score');
 
   // Clients Kool (slides 34 partie 3, 37-38) : période W47.
-  // Nouveaux : 104, 106 (Alpha), 301, 302 (Gamma) = 4. Retours : 101, 105 (Alpha), 201 (Beta) = 3. Réactivés : 0.
+  // Nouveaux : 104, 106 (Alpha), 301, 302 (Gamma) = 4. Retours : 101 (Alpha),
+  // 201 (Beta) = 2. Réactivés : 105 (Alpha, commande précédente le 09/11, soit
+  // 9 jours avant sa première commande de la période) = 1.
   w.yassirSwitchTab('kool_clients');
   await wait(600);
   assert.equal(w.document.getElementById('koolCliKpiNouveaux').textContent, '4', 'Nouveaux clients W47');
-  assert.equal(w.document.getElementById('koolCliKpiRetours').textContent, '3', 'Clients de retour W47');
-  assert.equal(w.document.getElementById('koolCliKpiReactives').textContent, '0', 'Clients réactivés W47');
+  assert.equal(w.document.getElementById('koolCliKpiRetours').textContent, '2', 'Clients de retour W47');
+  assert.equal(w.document.getElementById('koolCliKpiReactives').textContent, '1', 'Clients réactivés W47');
   assert.equal(w.document.getElementById('koolCliKpiTotal').textContent, '7', 'Total clients W47');
   const areaRows = [...w.document.querySelectorAll('#koolCliAreaTableBody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent.trim()));
-  assert.deepEqual(areaRows[0].slice(0, 5), ['Tunis', '4', '2', '0', '6'], 'Tunis : 4 nouveaux, 2 retours, 6 clients');
+  assert.deepEqual(areaRows[0].slice(0, 5), ['Tunis', '4', '1', '1', '6'], 'Tunis : 4 nouveaux, 1 retour, 1 réactivé, 6 clients');
   assert.deepEqual(areaRows[1].slice(0, 5), ['Ariana', '0', '1', '0', '1'], 'Ariana : 0 nouveau, 1 retour, 1 client');
   const acqTxt = w.document.getElementById('koolCliTopAcqBody').textContent;
   assert.ok(acqTxt.includes('Resto Alpha') && acqTxt.includes('Resto Gamma'), 'Top Acquisition : Alpha et Gamma');
   assert.ok(!acqTxt.includes('Resto Beta'), 'Top Acquisition : Beta (0 nouveau) absent');
   const retTxt = w.document.getElementById('koolCliTopRetBody').textContent;
   assert.ok(retTxt.includes('Resto Alpha') && retTxt.includes('Resto Beta'), 'Top Returning : Alpha et Beta');
-  assert.ok(w.document.getElementById('koolCliTopReaBody').textContent.includes('Aucun'), 'Top Reactivated vide (aucun réactivé)');
+  assert.ok(w.document.getElementById('koolCliTopReaBody').textContent.includes('Resto Alpha'), 'Top Reactivated : Alpha (105 réactivé)');
   const cliCfg = chartWithLabels(['Nouveaux', 'Retours', 'Réactivés']);
   assert.ok(cliCfg, 'graphique clients par ville non créé');
   // (étaler aussi le résultat du .map : datasets est un tableau jsdom, son .map
   // renvoie un tableau jsdom — même piège de prototype que pour le graphique WoW.)
   assert.deepEqual([...cliCfg.data.datasets.map((d) => d.backgroundColor)], ['#FFD100', '#111111', '#9CA3AF'], 'couleurs du graphique clients');
   assert.ok(cliCfg.data.labels.includes('Tunis') && cliCfg.data.labels.includes('Ariana'), 'villes du graphique clients');
-  assert.ok(w.document.getElementById('panelKoolClients').textContent.includes('60 jours'), 'seuil de réactivation (60 jours) affiché dans le panneau');
+  assert.ok(w.document.getElementById('panelKoolClients').textContent.includes('7 jours'), 'seuil de réactivation (7 jours) affiché dans le panneau');
+  // Bouton de téléchargement du graphique Clients Kool (.png).
+  assert.ok(w.document.getElementById('btnDownloadKoolClientsChart'), 'bouton Télécharger le graphique absent');
+  assert.equal(typeof w.yassirDownloadKoolClientsChart, 'function', 'fonction de téléchargement du graphique absente');
 
   // En mode Yassir, l'onglet Clients Kool disparaît (la vue est Kool uniquement).
   w.yassirSwitchBrand('yassir');
