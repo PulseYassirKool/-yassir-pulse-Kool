@@ -18,8 +18,69 @@
         return recordsList.filter(function (rec) { return rec.am === activeFilter; });
       }
 
+      /* ========================================================================
+         H2. FILTRE PAR POLYGONE CLIENT (Kool uniquement — colonne « Polygone Client »,
+         col. AB de la feuille Data Kool, lue par le normaliseur Kool).
+         Comme le filtre AM : état en mémoire uniquement (state.polygonFilter,
+         tableau ; vide = tous les polygones, pas de filtre). Yassir n'a pas
+         cette colonne : le filtre ne s'applique jamais en mode Yassir.
+         ======================================================================== */
+      function getEffectivePolygonFilter() {
+        if (typeof currentBrand === 'undefined' || currentBrand !== 'kool') return [];
+        if (!Array.isArray(state.polygonFilter)) return [];
+        return state.polygonFilter.slice();
+      }
+
+      function getPolygonFilterKey() {
+        return getEffectivePolygonFilter().map(function (p) { return String(p).trim().toLowerCase(); }).sort().join(',');
+      }
+
+      function getRowPolygon(rec) {
+        if (!rec || !rec.cells) return '';
+        var idx = TARGET_HEADERS.indexOf('polygone client');
+        if (idx === -1) return '';
+        return String(rec.cells[idx] || '').trim();
+      }
+
+      function filtrerParPolygoneSelectionne(recordsList) {
+        var sel = getEffectivePolygonFilter();
+        if (sel.length === 0) return recordsList;
+        var norm = {};
+        sel.forEach(function (p) { norm[String(p).trim().toLowerCase()] = true; });
+        return recordsList.filter(function (rec) {
+          return !!norm[getRowPolygon(rec).toLowerCase()];
+        });
+      }
+
+      // Polygones distincts présents dans les données Kool chargées, triés,
+      // + les polygones sélectionnés manuellement (ils restent affichés tant
+      // qu'ils sont sélectionnés, même s'ils ne sont plus dans les données).
+      function getDistinctPolygones() {
+        var seen = {};
+        var list = [];
+        var rows = (state.marketRows || []).concat(state.foodRows || []);
+        rows.forEach(function (rec) {
+          var p = getRowPolygon(rec);
+          if (p && !seen[p.toLowerCase()]) { seen[p.toLowerCase()] = true; list.push(p); }
+        });
+        getEffectivePolygonFilter().forEach(function (p) {
+          var t = String(p).trim();
+          if (t && !seen[t.toLowerCase()]) { seen[t.toLowerCase()] = true; list.push(t); }
+        });
+        list.sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase(), 'fr'); });
+        return list;
+      }
+
+      // Appliquer le filtre polygone (Kool uniquement) à une sélection, sans
+      // casser la sémantique « vide = tous ».
+      window.yassirSetPolygonFilter = function (arr) {
+        state.polygonFilter = Array.isArray(arr) ? arr.slice() : [];
+        state.currentPage = 1;
+        mettreAJourInterface();
+      };
+
       function calculerStatsPourAm(amFilter) {
-        var cacheKey = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + (amFilter || 'ALL');
+        var cacheKey = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + (amFilter || 'ALL') + '|' + getPolygonFilterKey();
         if (_amStatsCache.has(cacheKey)) {
           return _amStatsCache.get(cacheKey);
         }
@@ -32,6 +93,11 @@
         var mList = amFilter === 'ALL' ? state.marketRows : state.marketRows.filter(function (r) { return r.am === amFilter; });
         var fList = amFilter === 'ALL' ? state.foodRows : state.foodRows.filter(function (r) { return r.am === amFilter; });
         var oList = amFilter === 'ALL' ? state.offresRows : state.offresRows.filter(function (r) { return r.am === amFilter; });
+
+        // Filtre polygone Kool (comme le filtre AM) : ne s'applique qu'en mode Kool.
+        mList = filtrerParPolygoneSelectionne(mList);
+        fList = filtrerParPolygoneSelectionne(fList);
+        oList = filtrerParPolygoneSelectionne(oList);
 
         var mDel = mList.filter(function (r) { return estCommandeLivree(r.cells[idxStatus]); });
         var fDel = fList.filter(function (r) { return estCommandeLivree(r.cells[idxStatus]); });

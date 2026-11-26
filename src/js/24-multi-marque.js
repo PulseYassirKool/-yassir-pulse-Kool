@@ -568,6 +568,7 @@
         // L = 11 (Remise)
         // AG = 32 (New Client : 1 = nouveau client, 0 = ancien client)
         // GMV = J + L
+        // AB = 27 (Polygone Client : zone de livraison du client, ex. Menzah, Marsa)
         var COL_A_ANNULE = 0;
         var COL_C_RAISON = 2;
         var COL_D_DATE = 3;
@@ -576,10 +577,12 @@
         var COL_J_MONTANT_HORS_LIV = 9;
         var COL_K_FRAIS_LIV = 10;
         var COL_L_REMISE = 11;
-        // « ID Client » et « New Client » : résolus par nom d'en-tête, repli sur
-        // l'indice fixe (F = 5, AG = 32) si l'en-tête est introuvable.
+        // « ID Client », « New Client » et « Polygone Client » : résolus par nom
+        // d'en-tête, repli sur l'indice fixe (F = 5, AG = 32, AB = 27) si l'en-tête
+        // est introuvable.
         var COL_F_ID_CLIENT = normHeaders.indexOf('id client') !== -1 ? normHeaders.indexOf('id client') : 5;
         var COL_AG_NEW_CLIENT = normHeaders.indexOf('new client') !== -1 ? normHeaders.indexOf('new client') : 32;
+        var COL_AB_POLYGONE = normHeaders.indexOf('polygone client') !== -1 ? normHeaders.indexOf('polygone client') : 27;
 
         var mappedAoa = [TARGET_HEADERS.slice()];
         var idxMap = {};
@@ -697,6 +700,13 @@
             ? 1
             : ((newClientTxt === '0' || newClientTxt === 'non' || newClientTxt === 'no' || newClientTxt === 'false' || newClientTxt === 'faux') ? 0 : '');
           outRow[idxMap['new client']] = newClientVal;
+
+          // Colonne AB (27) : Polygone Client — zone de livraison du client
+          // (ex. Menzah, Marsa). Chaîne nettoyée, vide si absente.
+          var polygoneVal = (sRow.length > COL_AB_POLYGONE && sRow[COL_AB_POLYGONE] !== undefined && sRow[COL_AB_POLYGONE] !== null)
+            ? String(sRow[COL_AB_POLYGONE]).trim()
+            : '';
+          outRow[idxMap['polygone client']] = polygoneVal;
 
           mappedAoa.push(outRow);
         }

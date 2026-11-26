@@ -237,7 +237,7 @@
           return groupedMap.get(key);
         }
 
-        var allRecords = filtrerParAmSelectionne(state.marketRows.concat(state.foodRows));
+        var allRecords = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.marketRows.concat(state.foodRows)));
         for (var r = 0; r < allRecords.length; r++) {
           var rec = allRecords[r];
           var c = rec.cells;
@@ -393,7 +393,7 @@
 
       function renderParticipationPanel() {
         var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
-        var cacheKey = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + participationViewMode + '|' + getEffectiveAmFilter() + '|' + state.marketRows.length + '|' + state.foodRows.length;
+        var cacheKey = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + participationViewMode + '|' + getEffectiveAmFilter() + '|' + getPolygonFilterKey() + '|' + state.marketRows.length + '|' + state.foodRows.length;
         if (_participationCache.key !== cacheKey) {
           _participationCache = { key: cacheKey, result: calculerParticipationParRestaurant(participationViewMode) };
         }

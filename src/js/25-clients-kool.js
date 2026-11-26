@@ -50,7 +50,7 @@
         var idxCity = TARGET_HEADERS.indexOf('city');
         var idxServices = TARGET_HEADERS.indexOf('services');
 
-        var cacheKey = (typeof currentBrand !== 'undefined' ? currentBrand : '') + '|' + getEffectiveAmFilter() + '|' +
+        var cacheKey = (typeof currentBrand !== 'undefined' ? currentBrand : '') + '|' + getEffectiveAmFilter() + '|' + getPolygonFilterKey() + '|' +
           (state.dateStart || '') + '|' + (state.dateEnd || '') + '|' +
           state.foodRows.length + '|' + (state.rawSourceRows ? state.rawSourceRows.length : 0);
         if (koolClientsCache.key === cacheKey && koolClientsCache.result) return koolClientsCache.result;
@@ -60,7 +60,7 @@
         // 1. Première commande livrée de chaque client dans la période filtrée.
         var byClient = new Map();
         var sansIdCount = 0;
-        var allRecords = filtrerParAmSelectionne(getStrictlyFoodRecords());
+        var allRecords = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(getStrictlyFoodRecords()));
         for (var r = 0; r < allRecords.length; r++) {
           var rec = allRecords[r];
           var c = rec.cells;

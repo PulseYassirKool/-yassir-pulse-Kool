@@ -26,6 +26,7 @@
         offrePartSheetId: '',
         historical2025Rows: [],
         selectedAm: 'ALL',
+        polygonFilter: [],
         marketRows: [],
         foodRows: [],
         offresRows: [],

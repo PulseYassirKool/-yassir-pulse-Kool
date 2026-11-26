@@ -16,7 +16,7 @@
       }
 
       function scheduleSmartNotificationsUpdate() {
-        var sig = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + (currentUser ? currentUser.username : '') + '|' + getEffectiveAmFilter();
+        var sig = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + (currentUser ? currentUser.username : '') + '|' + getEffectiveAmFilter() + '|' + getPolygonFilterKey();
         if (sig === _notifCacheSig) return;
         if (_notifTimerId) clearTimeout(_notifTimerId);
         _notifTimerId = setTimeout(function () {
@@ -536,7 +536,7 @@
               ? state.offresRows
               : state.statRows;
 
-        var amDataset = filtrerParAmSelectionne(rawDataset);
+        var amDataset = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(rawDataset));
 
         if (!amDataset || amDataset.length === 0) {
           emptyState.classList.remove('hidden');

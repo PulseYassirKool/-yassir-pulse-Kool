@@ -137,7 +137,7 @@
           showToast('Fichier <strong>YASSIR_Export_Stat_Global_' + dateStr + '.xlsx</strong> téléchargé (Global + Portefeuilles).', 'success');
         } else {
           // Export ciblé sur le portefeuille sélectionné
-          var filteredStat = filtrerParAmSelectionne(state.statRows);
+          var filteredStat = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.statRows));
           var suffix = activeFilter.replace(/\s+/g, '_');
           XLSX.utils.book_append_sheet(wb, construireFeuilleStat(filteredStat), ('Stat ' + activeFilter).slice(0, 31));
           XLSX.writeFile(wb, 'YASSIR_Export_Stat_' + suffix + '_' + dateStr + '.xlsx');
@@ -152,13 +152,13 @@
 
         var wb = XLSX.utils.book_new();
         if (!isFoodOnlyAm()) {
-          XLSX.utils.book_append_sheet(wb, construireFeuille109Colonnes(filtrerParAmSelectionne(state.marketRows)), 'Market VF');
+          XLSX.utils.book_append_sheet(wb, construireFeuille109Colonnes(filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.marketRows))), 'Market VF');
         }
         if (!isMarketOnlyViewer()) {
-          XLSX.utils.book_append_sheet(wb, construireFeuille109Colonnes(filtrerParAmSelectionne(state.foodRows)), 'Food VF');
+          XLSX.utils.book_append_sheet(wb, construireFeuille109Colonnes(filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.foodRows))), 'Food VF');
         }
-        XLSX.utils.book_append_sheet(wb, construireFeuilleOffres(filtrerParAmSelectionne(state.offresRows)), 'Offres');
-        XLSX.utils.book_append_sheet(wb, construireFeuilleStat(filtrerParAmSelectionne(state.statRows)), 'Stat');
+        XLSX.utils.book_append_sheet(wb, construireFeuilleOffres(filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.offresRows))), 'Offres');
+        XLSX.utils.book_append_sheet(wb, construireFeuilleStat(filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.statRows))), 'Stat');
         if (activeFilter === 'ALL' && canSeeGlobalSynth()) {
           var synthData = calculerSyntheseGlobaleData();
           if (synthData && !synthData.empty) {
@@ -202,7 +202,7 @@
       };
 
       window.yassirExportOffresExcel = function () {
-        var list = filtrerParAmSelectionne(state.offresRows);
+        var list = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.offresRows));
         if (list.length === 0) return;
         var activeFilter = getEffectiveAmFilter();
         var suffix = activeFilter === 'ALL' ? 'Global' : activeFilter.replace(/\s+/g, '_');
@@ -221,22 +221,22 @@
         var suffix = activeFilter === 'ALL' ? 'Global' : activeFilter.replace(/\s+/g, '_');
 
         if (state.activeTab === 'market') {
-          var mList = filtrerParAmSelectionne(state.marketRows);
+          var mList = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.marketRows));
           if (mList.length === 0) return;
           aoa = [['Portefeuille AM'].concat(TARGET_HEADERS)].concat(mList.map(function (r) { return [r.am].concat(r.cells); }));
           fileName = 'Market_VF_' + suffix + '.csv';
         } else if (state.activeTab === 'food') {
-          var fList = filtrerParAmSelectionne(state.foodRows);
+          var fList = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.foodRows));
           if (fList.length === 0) return;
           aoa = [['Portefeuille AM'].concat(TARGET_HEADERS)].concat(fList.map(function (r) { return [r.am].concat(r.cells); }));
           fileName = 'Food_VF_' + suffix + '.csv';
         } else if (state.activeTab === 'offres') {
-          var oList = filtrerParAmSelectionne(state.offresRows);
+          var oList = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.offresRows));
           if (oList.length === 0) return;
           aoa = [getOffresVisibleHeaders()].concat(oList.map(function (r) { return filtrerCellulesOffresVisibles(r.cells); }));
           fileName = 'Export_Offres_' + suffix + '.csv';
         } else if (state.activeTab === 'stat') {
-          var sList = filtrerParAmSelectionne(state.statRows);
+          var sList = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.statRows));
           if (sList.length === 0) return;
           aoa = [STAT_HEADERS].concat(sList.map(function (r) { return r.cells; }));
           fileName = 'Export_Stat_' + suffix + '.csv';

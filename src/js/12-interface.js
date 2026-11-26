@@ -58,8 +58,131 @@
         }
       }
 
+      // --- Filtre Polygone Client (Kool uniquement) : menu déroulant multi-sélection ---
+      // État en mémoire uniquement, comme le filtre AM (state.polygonFilter, vide = tous).
+      var _polygonMenuOpen = false;
+
+      function renderPolygonFilter() {
+        var row = document.getElementById('polygonFilterRow');
+        if (!row) return;
+        var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        row.classList.toggle('hidden', !isKool);
+        if (!isKool) return;
+        var sel = getEffectivePolygonFilter();
+        var listed = getDistinctPolygones();
+        var labelEl = document.getElementById('polygonFilterBtnLabel');
+        if (labelEl) {
+          labelEl.textContent = sel.length === 0 ? 'Polygone : Tous'
+            : sel.length === 1 ? ('Polygone : ' + sel[0])
+            : ('Polygone : ' + sel.length + ' sélectionnés');
+        }
+        var countEl = document.getElementById('polygonFilterCount');
+        if (countEl) {
+          countEl.textContent = listed.length > 0
+            ? (listed.length + ' polygone' + (listed.length > 1 ? 's' : '') + ' dans les données')
+            : 'aucun polygone dans les données chargées';
+        }
+        var isSel = function (p) {
+          return sel.some(function (s) { return String(s).trim().toLowerCase() === String(p).trim().toLowerCase(); });
+        };
+        var allBox = document.getElementById('polygonCheckAll');
+        if (allBox) {
+          // « Tous » est coché quand le filtre est inactif (vide = tous) ou quand
+          // tous les polygones listés sont sélectionnés.
+          allBox.checked = sel.length === 0 || listed.every(isSel);
+        }
+        var listEl = document.getElementById('polygonCheckList');
+        if (listEl) {
+          if (listed.length === 0) {
+            listEl.innerHTML = '<p class="px-2 py-1.5 text-[11px] text-slate-400">Aucun polygone dans les données chargées — écrivez-en un ci-dessous.</p>';
+          } else {
+            listEl.innerHTML = listed.map(function (p) {
+              // Filtre inactif (vide) = tous inclus : les cases sont cochées.
+              var checked = sel.length === 0 || isSel(p);
+              return '<label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-[#F3EBFF] cursor-pointer text-xs text-[#1A1A2E]">' +
+                '<input type="checkbox" data-poly="' + escapeHtml(p) + '" ' + (checked ? 'checked' : '') + ' onchange="window.yassirTogglePolygon(this)" class="accent-[#6C2BD9]" />' +
+                '<span>' + escapeHtml(p) + '</span></label>';
+            }).join('');
+          }
+        }
+        var menu = document.getElementById('polygonFilterMenu');
+        if (menu) menu.classList.toggle('hidden', !_polygonMenuOpen);
+      }
+
+      window.yassirTogglePolygonMenu = function () {
+        _polygonMenuOpen = !_polygonMenuOpen;
+        var menu = document.getElementById('polygonFilterMenu');
+        if (menu) menu.classList.toggle('hidden', !_polygonMenuOpen);
+      };
+
+      // Cocher / décocher un polygone. Si le filtre était inactif (tous), on
+      // matérialise d'abord la sélection complète puis on retire celui-ci.
+      window.yassirTogglePolygon = function (cb) {
+        var name = (cb && cb.dataset) ? String(cb.dataset.poly || '').trim() : '';
+        if (!name) return;
+        var norm = name.toLowerCase();
+        var sel = getEffectivePolygonFilter();
+        var findIdx = function (arr) {
+          for (var i = 0; i < arr.length; i++) {
+            if (String(arr[i]).trim().toLowerCase() === norm) return i;
+          }
+          return -1;
+        };
+        if (sel.length === 0) {
+          sel = getDistinctPolygones().slice();
+          var k = findIdx(sel);
+          if (k !== -1) sel.splice(k, 1);
+        } else {
+          var idx = findIdx(sel);
+          if (idx !== -1) sel.splice(idx, 1);
+          else sel.push(name);
+        }
+        window.yassirSetPolygonFilter(sel);
+      };
+
+      // « Tous les polygones » : coché = filtre inactif (tous) ; décoché = filtre
+      // actif avec tous les polygones listés sélectionnés (on peut ensuite en
+      // retirer un par un).
+      window.yassirToggleAllPolygones = function (checked) {
+        window.yassirSetPolygonFilter(checked ? [] : getDistinctPolygones().slice());
+      };
+
+      // Saisie manuelle : tape un nom de polygone (même absent des données) et
+      // l'ajoute à la sélection. Si le filtre était inactif, la saisie crée une
+      // sélection sur ce seul polygone.
+      window.yassirAddPolygonManually = function () {
+        var inp = document.getElementById('polygonManualInput');
+        if (!inp) return;
+        var name = inp.value.trim();
+        if (!name) return;
+        var sel = getEffectivePolygonFilter();
+        var norm = name.toLowerCase();
+        var exists = sel.some(function (s) { return String(s).trim().toLowerCase() === norm; });
+        if (!exists) {
+          if (sel.length === 0) sel = [name];
+          else sel.push(name);
+          window.yassirSetPolygonFilter(sel);
+        }
+        inp.value = '';
+      };
+
+      window.yassirClearPolygonFilter = function () {
+        window.yassirSetPolygonFilter([]);
+      };
+
+      // Fermer le menu quand on clique ailleurs (même mécanisme que le menu des notifications).
+      document.addEventListener('click', function (ev) {
+        var wrap = document.getElementById('polygonFilterWrapper');
+        var menu = document.getElementById('polygonFilterMenu');
+        if (wrap && menu && !menu.classList.contains('hidden') && !wrap.contains(ev.target)) {
+          _polygonMenuOpen = false;
+          menu.classList.add('hidden');
+        }
+      });
+
       function mettreAJourInterface() {
         renderAmFilterPills();
+        renderPolygonFilter();
 
         var globalStats = calculerStatsPourAm('ALL');
         var activeFilter = getEffectiveAmFilter();
@@ -249,7 +372,7 @@
           if (canViewAllPortfolios() || allowedAms.indexOf(info.am) !== -1) visibleRestosCount++;
         });
 
-        var filteredStatList = filtrerParAmSelectionne(state.statRows);
+        var filteredStatList = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.statRows));
 
         document.getElementById('tabCountMarket').textContent = currentStats.marketRecues;
         document.getElementById('tabCountFood').textContent = currentStats.foodRecues;
@@ -259,12 +382,12 @@
         if (elCancCnt) {
           var cancCacheKey = String(state._calcRevision || 0) + '|' +
             (typeof currentBrand !== 'undefined' ? currentBrand : 'yassir') + '|' +
-            getEffectiveAmFilter() + '|' +
+            getEffectiveAmFilter() + '|' + getPolygonFilterKey() + '|' +
             (state.marketRows ? state.marketRows.length : 0) + '|' +
             (state.foodRows ? state.foodRows.length : 0);
           if (_cancCountCache.key !== cancCacheKey) {
             var idxStCanc = TARGET_HEADERS.indexOf('status');
-            var amAllOrders = filtrerParAmSelectionne(state.marketRows.concat(state.foodRows));
+            var amAllOrders = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.marketRows.concat(state.foodRows)));
             _cancCountCache = {
               key: cancCacheKey,
               count: amAllOrders.filter(function (rec) {
@@ -288,7 +411,7 @@
           : state.activeTab === 'food'
             ? currentStats.foodRecues
             : state.activeTab === 'offres'
-              ? filtrerParAmSelectionne(state.offresRows).length
+              ? filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.offresRows)).length
               : state.activeTab === 'stat'
                 ? filteredStatList.length
                 : state.activeTab === 'portefeuilles'

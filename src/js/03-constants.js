@@ -19,9 +19,9 @@
         'Discount Amount', 'Discount Type', 'Night fare', 'Time Taken', 'Food Category', 'Food Item', 'Accepted By',
         'Assigned By', 'Rejection logs', 'Bonus Amount', 'Total Driver Payout', 'Tags', 'Discount Type Provider',
         'Driver Rating', 'Restaurant Rating', 'Driver Adjustment Amount', 'Driver Adjustment Reason', 'Driver Adjustment Category',
-        // Colonnes client Kool (lues par le normaliseur Data Kool : « ID Client » col. F, « New Client » col. AG) :
+        // Colonnes client Kool (lues par le normaliseur Data Kool : « ID Client » col. F, « New Client » col. AG, « Polygone Client » col. AB) :
         // ajoutées en FIN de liste pour ne pas décaler les indices des 109 colonnes existantes.
-        'customer id', 'new client'
+        'customer id', 'new client', 'polygone client'
       ];
 
       var KEY_HEADERS = [

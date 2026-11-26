@@ -962,6 +962,38 @@
             </div>
           </div>
         </div>
+
+        <!-- Filtre Polygone Client (Kool uniquement — colonne « Polygone Client » de la Data Kool) -->
+        <div id="polygonFilterRow" class="hidden pt-2 border-t border-purple-100/80">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center gap-1 text-[11px] font-extrabold text-[#1A1A2E]">
+              <i class="fa-solid fa-draw-polygon text-[#6C2BD9] text-[10px]"></i>
+              <span>Polygone Client :</span>
+            </span>
+            <div id="polygonFilterWrapper" class="relative">
+              <button id="polygonFilterBtn" type="button" onclick="window.yassirTogglePolygonMenu()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold bg-[#FFD100] text-[#111111] hover:bg-[#ffe14d] transition cursor-pointer">
+                <i class="fa-solid fa-draw-polygon text-[10px]"></i>
+                <span id="polygonFilterBtnLabel">Polygone : Tous</span>
+                <i class="fa-solid fa-chevron-down text-[9px]"></i>
+              </button>
+              <div id="polygonFilterMenu" class="hidden absolute left-0 top-full mt-1 w-[280px] max-h-[320px] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-purple-200 z-50 p-2 custom-scrollbar">
+                <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-[#F3EBFF] cursor-pointer text-xs font-bold text-[#1A1A2E]">
+                  <input type="checkbox" id="polygonCheckAll" onchange="window.yassirToggleAllPolygones(this.checked)" class="accent-[#6C2BD9]" />
+                  <span>Tous les polygones</span>
+                </label>
+                <div class="border-t border-purple-100 my-1"></div>
+                <div id="polygonCheckList" class="space-y-0.5"></div>
+                <div class="border-t border-purple-100 my-1"></div>
+                <div class="flex items-center gap-1.5 px-1 pt-1">
+                  <input id="polygonManualInput" type="text" placeholder="ou écrire un polygone…" onkeydown="if(event.key==='Enter'){window.yassirAddPolygonManually();}" class="flex-1 min-w-0 px-2.5 py-1.5 text-xs border border-purple-200 rounded-full focus:outline-none focus:ring-2 focus:ring-[#6C2BD9]" />
+                  <button type="button" onclick="window.yassirAddPolygonManually()" class="px-3 py-1.5 rounded-full text-[11px] font-bold bg-[#6C2BD9] hover:bg-[#5521B5] text-white transition cursor-pointer whitespace-nowrap">Ajouter</button>
+                </div>
+                <button type="button" onclick="window.yassirClearPolygonFilter()" class="w-full mt-1.5 px-2 py-1.5 rounded-full text-[11px] font-bold bg-[#F8F9FC] hover:bg-rose-50 text-[#FF2A6D] border border-purple-200 transition cursor-pointer">Effacer le filtre</button>
+              </div>
+            </div>
+            <span id="polygonFilterCount" class="text-[11px] text-slate-500"></span>
+          </div>
+        </div>
       </section>
 
       <!-- ========================================================================

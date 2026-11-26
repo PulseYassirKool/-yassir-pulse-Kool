@@ -45,7 +45,7 @@
           ? state.foodRows
           : (scopeMode === 'MARKET' ? state.marketRows : state.marketRows.concat(state.foodRows));
 
-        var amOrders = filtrerParAmSelectionne(rawBase);
+        var amOrders = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(rawBase));
         if (!amOrders || amOrders.length === 0) {
           emptyEl.classList.remove('hidden');
           contentEl.classList.add('hidden');

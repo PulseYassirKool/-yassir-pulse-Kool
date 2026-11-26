@@ -669,6 +669,91 @@ test('Kool : vues du deck (Executive Summary, Daily Orders vs Avg Daily GMV, Top
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Filtre par Polygone Client (Kool uniquement) ----
+// Données simulées à 33 colonnes : « Polygone Client » en col. AB (index 27),
+// comme dans la vraie feuille Data Kool. 4 commandes : Menzah 1, Marsa 2,
+// polygone vide 1.
+const polyRow = (date, oid, client, resto, j, k, l, isNew, poly) => {
+  const r = new Array(33).fill('');
+  r[3] = date; r[4] = oid; r[5] = String(client); r[6] = resto;
+  r[9] = j; r[10] = k; r[11] = l; r[27] = poly; r[32] = String(isNew);
+  return r;
+};
+const polyHeader = new Array(33).fill('');
+polyHeader[0] = 'Annulé'; polyHeader[2] = 'Raison annulation'; polyHeader[3] = 'Date';
+polyHeader[4] = 'N° commande'; polyHeader[5] = 'ID Client'; polyHeader[6] = 'Restaurant';
+polyHeader[9] = 'Montant HT'; polyHeader[10] = 'Frais livraison'; polyHeader[11] = 'Remise';
+polyHeader[27] = 'Polygone Client'; polyHeader[32] = 'New Client';
+const koolCsvDataPoly = toCsv([
+  polyHeader,
+  polyRow('17/11/2026', '3001', 401, 'Resto Alpha', '30.00', '3', '0', 1, 'Menzah'),
+  polyRow('18/11/2026', '3002', 402, 'Resto Alpha', '40.00', '4', '0', 0, 'Marsa'),
+  polyRow('18/11/2026', '3003', 403, 'Resto Beta', '20.00', '2', '0', 1, 'Marsa'),
+  polyRow('19/11/2026', '3004', 404, 'Resto Gamma', '50.00', '5', '0', 0, '')
+]);
+const koolCsvCommPoly = toCsv([['Restaurant', 'Commission'], ['Resto Alpha', '20'], ['Resto Beta', '15'], ['Resto Gamma', '10']]);
+const koolCsvPortPoly = toCsv([['Restaurant', 'Ville', 'AM'], ['Resto Alpha', 'Tunis', 'Omar Beldi'], ['Resto Beta', 'Ariana', 'Nour Ali'], ['Resto Gamma', 'Tunis', 'Omar Beldi']]);
+
+test('Kool : filtre par Polygone Client (multi-sélection + saisie manuelle), Kool uniquement', async () => {
+  const w = bootKool({ data: koolCsvDataPoly, comm: koolCsvCommPoly, port: koolCsvPortPoly });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+
+  const foodCount = () => w.document.getElementById('tabCountFood').textContent;
+  const polyLabel = () => w.document.getElementById('polygonFilterBtnLabel').textContent;
+  const polyBoxes = () => [...w.document.querySelectorAll('#polygonCheckList input[type="checkbox"]')].map((cb) => cb.dataset.poly);
+
+  // Ligne visible en Kool ; liste = Menzah + Marsa (le polygone vide n'apparaît pas).
+  assert.equal(w.document.getElementById('polygonFilterRow').classList.contains('hidden'), false, 'ligne filtre polygone masquée en Kool');
+  assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah'], 'liste des polygones (triée)');
+  assert.equal(foodCount(), '4', 'toutes les commandes sans filtre');
+  assert.equal(polyLabel(), 'Polygone : Tous', 'libellé initial');
+
+  // Sélection simple : Marsa → 2 commandes.
+  w.yassirSetPolygonFilter(['Marsa']);
+  assert.equal(foodCount(), '2', 'filtre Marsa : 2 commandes');
+  assert.equal(polyLabel(), 'Polygone : Marsa', 'libellé 1 sélection');
+
+  // Multi-sélection : Menzah + Marsa → 3 commandes.
+  w.yassirSetPolygonFilter(['Menzah', 'Marsa']);
+  assert.equal(foodCount(), '3', 'filtre Menzah + Marsa : 3 commandes');
+  assert.equal(polyLabel(), 'Polygone : 2 sélectionnés', 'libellé 2 sélections');
+
+  // Saisie manuelle d'un polygone absent des données : il S'AJOUTE à la sélection.
+  const inp = w.document.getElementById('polygonManualInput');
+  inp.value = 'Soukra 1';
+  w.yassirAddPolygonManually();
+  assert.equal(foodCount(), '3', 'polygone manuel ajouté à la sélection (Menzah + Marsa + Soukra 1 absent = 3)');
+  assert.equal(polyLabel(), 'Polygone : 3 sélectionnés', 'libellé 3 sélections');
+  assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah', 'Soukra 1'], 'le polygone manuel reste affiché tant qu’il est sélectionné');
+
+  // Effacer → tout revient, le polygone manuel disparaît de la liste.
+  w.yassirClearPolygonFilter();
+  assert.equal(foodCount(), '4', 'effacement : tout revient');
+  assert.equal(polyLabel(), 'Polygone : Tous', 'libellé après effacement');
+  assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah'], 'le polygone manuel disparaît une fois désélectionné');
+
+  // Saisie manuelle quand le filtre est inactif : elle crée une sélection sur ce
+  // seul polygone (absent des données → 0 commande).
+  inp.value = 'Soukra 1';
+  w.yassirAddPolygonManually();
+  assert.equal(foodCount(), '0', 'polygone manuel seul (absent des données) : 0 commande');
+  assert.equal(polyLabel(), 'Polygone : Soukra 1', 'libellé polygone manuel seul');
+  w.yassirClearPolygonFilter();
+  assert.equal(foodCount(), '4', 'effacement final : tout revient');
+
+  // En mode Yassir, la ligne du filtre est masquée (pas de colonne polygone).
+  w.yassirSwitchBrand('yassir');
+  await wait(600);
+  assert.equal(w.document.getElementById('polygonFilterRow').classList.contains('hidden'), true, 'ligne filtre polygone visible en Yassir');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // Règle comptable Yassir (2026-11-26) : offre sans règle → 100 % à la charge du
 // restaurant (l'offre reste comptée). Données importées par fichier, comme un
 // vrai Data exp : les règles arrivent par le fichier Offre Participation, les
