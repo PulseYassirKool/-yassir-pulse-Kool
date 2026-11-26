@@ -211,10 +211,10 @@
               responsive: true,
               maintainAspectRatio: false,
               scales: {
-                x: { stacked: true, beginAtZero: true, ticks: { font: { size: 10, weight: 'bold' }, color: '#6C2BD9' } },
-                y: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, weight: 'bold' }, color: '#5B21B6' } }
+                x: { stacked: true, beginAtZero: true, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#6C2BD9') } },
+                y: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } }
               },
-              plugins: { legend: { position: 'bottom', labels: { font: { size: 10, weight: 'bold' }, color: '#5B21B6' } } }
+              plugins: { legend: { position: 'bottom', labels: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } } }
             }
           });
         }

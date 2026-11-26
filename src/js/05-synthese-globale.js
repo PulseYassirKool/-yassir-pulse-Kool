@@ -1169,9 +1169,9 @@
               yassirLabelMode: 'exec_daily',
               plugins: { legend: { display: false } },
               scales: {
-                y: { beginAtZero: true, position: 'left', grid: { color: '#E2E8F0' }, ticks: { font: { size: 10, weight: 'bold' }, color: '#6C2BD9' } },
-                y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { font: { size: 10, weight: 'bold' }, color: '#6C2BD9' } },
-                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: '#5B21B6' } }
+                y: { beginAtZero: true, position: 'left', grid: { color: window.yassirCouleurGraphique('#E2E8F0') }, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#6C2BD9') } },
+                y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#6C2BD9') } },
+                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } }
               }
             }
           });
@@ -1272,11 +1272,11 @@
               responsive: true,
               maintainAspectRatio: false,
               yassirLabelMode: 'wow_perf',
-              plugins: { legend: { position: 'bottom', labels: { font: { size: 10, weight: 'bold' }, color: '#5B21B6' } } },
+              plugins: { legend: { position: 'bottom', labels: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } } },
               scales: {
-                y: { beginAtZero: true, position: 'left', ticks: { font: { size: 10, weight: 'bold' }, color: '#6C2BD9' } },
-                y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { font: { size: 10, weight: 'bold' }, color: '#6C2BD9' } },
-                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: '#5B21B6' } }
+                y: { beginAtZero: true, position: 'left', ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#6C2BD9') } },
+                y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#6C2BD9') } },
+                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } }
               }
             }
           });
@@ -1313,8 +1313,8 @@
               yassirLabelMode: 'aov_bars',
               plugins: { legend: { display: false } },
               scales: {
-                y: { beginAtZero: true, suggestedMax: 40, ticks: { font: { size: 10, weight: 'bold' }, color: '#5B21B6', callback: function (v) { return Number(v).toFixed(1).replace('.', ','); } } },
-                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: '#5B21B6' } }
+                y: { beginAtZero: true, suggestedMax: 40, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6'), callback: function (v) { return Number(v).toFixed(1).replace('.', ','); } } },
+                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } }
               }
             }
           });
@@ -1340,8 +1340,8 @@
               layout: { padding: { top: 20, bottom: 20, left: 12, right: 12 } },
               plugins: { legend: { display: false } },
               scales: {
-                y: { beginAtZero: true, ticks: { font: { size: 10, weight: 'bold' }, color: '#5B21B6' } },
-                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: '#5B21B6' } }
+                y: { beginAtZero: true, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } },
+                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } }
               }
             }
           });
@@ -1367,8 +1367,8 @@
               layout: { padding: { top: 20, bottom: 20, left: 12, right: 12 } },
               plugins: { legend: { display: false } },
               scales: {
-                y: { beginAtZero: true, ticks: { font: { size: 10, weight: 'bold' }, color: '#5B21B6' } },
-                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: '#5B21B6' } }
+                y: { beginAtZero: true, ticks: { font: { size: 10, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } },
+                x: { grid: { display: false }, ticks: { font: { size: 11, weight: 'bold' }, color: window.yassirCouleurGraphique('#5B21B6') } }
               }
             }
           });

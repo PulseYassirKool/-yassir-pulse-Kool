@@ -509,20 +509,20 @@
                   type: 'linear',
                   position: 'left',
                   beginAtZero: true,
-                  ticks: { precision: 0, color: '#00897B', font: { weight: 'bold', size: 11 } },
-                  grid: { color: '#F3EBFF' },
-                  title: { display: true, text: 'Commandes livrées', color: '#00897B', font: { size: 11, weight: 'bold' } }
+                  ticks: { precision: 0, color: window.yassirCouleurGraphique('#00897B'), font: { weight: 'bold', size: 11 } },
+                  grid: { color: window.yassirCouleurGraphique('#F3EBFF') },
+                  title: { display: true, text: 'Commandes livrées', color: window.yassirCouleurGraphique('#00897B'), font: { size: 11, weight: 'bold' } }
                 },
                 yGmv: {
                   type: 'linear',
                   position: 'right',
                   beginAtZero: true,
-                  ticks: { color: '#6C2BD9', font: { weight: 'bold', size: 11 } },
+                  ticks: { color: window.yassirCouleurGraphique('#6C2BD9'), font: { weight: 'bold', size: 11 } },
                   grid: { drawOnChartArea: false },
-                  title: { display: true, text: 'GMV (TND)', color: '#6C2BD9', font: { size: 11, weight: 'bold' } }
+                  title: { display: true, text: 'GMV (TND)', color: window.yassirCouleurGraphique('#6C2BD9'), font: { size: 11, weight: 'bold' } }
                 },
                 x: {
-                  ticks: { color: '#1A1A2E', font: { weight: 'bold', size: 11 } },
+                  ticks: { color: window.yassirCouleurGraphique('#1A1A2E'), font: { weight: 'bold', size: 11 } },
                   grid: { display: false }
                 }
               }

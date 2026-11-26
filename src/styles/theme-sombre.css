@@ -1,0 +1,168 @@
+    /* ==========================================================================
+       THÈME SOMBRE (MODE NUIT) — activé par la classe `dark` sur <html>.
+       Bouton dans l'en-tête (src/js/27-theme.js) + choix mémorisé en
+       localStorage (clé yassir_pulse_theme_v1). Par défaut : mode clair.
+
+       Deux mécanismes complémentaires, même palette (ardoise) :
+       1. Les variantes `dark:` de Tailwind sur la coque statique (index.html).
+       2. CETTE COUCHE : elle couvre le contenu généré par les 26 fichiers JS
+          (tableaux, cartes, modales, menus déroulants, toasts...). Retoucher
+          ~500 littéraux de classes dans les gabarits JS risquerait de casser
+          l'app ; ces règles ne s'appliquent QUE sous `.dark`, donc le mode
+          clair reste visuellement identique à avant.
+       Palette sombre : fond #0F172A (slate-900), surface #1E293B (slate-800),
+       bordure #334155 (slate-700), texte #F1F5F9 / #CBD5E1 / #94A3B8,
+       teinte violette #2E1065 (purple-950) + texte #C4B5FD (purple-300).
+       ========================================================================== */
+
+    html.dark { color-scheme: dark; }
+
+    html.dark body { background-color: #0F172A; color: #F1F5F9; }
+    /* Marque Kool : le fond clair #FFFDF5 imposé par theme-kool.css doit aussi s'assombrir. */
+    html.dark body.brand-kool { background-color: #0F172A !important; color: #F1F5F9 !important; }
+
+    /* --- Surfaces principales --- */
+    .dark .bg-white { background-color: #1E293B; }
+    .dark .bg-white\/95 { background-color: rgba(30, 41, 59, 0.95); }
+    .dark .bg-white\/90 { background-color: rgba(30, 41, 59, 0.90); }
+    .dark .bg-white\/80 { background-color: rgba(30, 41, 59, 0.80); }
+    .dark .bg-\[\#F8F9FC\] { background-color: #0F172A; }
+    .dark .bg-\[\#F8F9FC\]\/70 { background-color: rgba(15, 23, 42, 0.70); }
+    .dark .bg-\[\#F3EBFF\] { background-color: #2E1065; }
+    .dark .bg-\[\#F3EBFF\]\/40 { background-color: rgba(46, 16, 101, 0.40); }
+    .dark .bg-\[\#F3EBFF\]\/55 { background-color: rgba(46, 16, 101, 0.55); }
+    .dark .bg-\[\#F3EBFF\]\/60 { background-color: rgba(46, 16, 101, 0.60); }
+    .dark .bg-\[\#E0F7F4\] { background-color: #134E4A; }
+    .dark .bg-slate-100 { background-color: #1E293B; }
+    .dark .bg-slate-50 { background-color: #0F172A; }
+    .dark .bg-slate-200 { background-color: #334155; }
+    .dark .bg-purple-100 { background-color: #2E1065; }
+    .dark .bg-purple-50 { background-color: #2E1065; }
+    .dark .bg-purple-200 { background-color: #4C1D95; }
+    .dark .bg-purple-200\/80 { background-color: rgba(76, 29, 149, 0.80); }
+    .dark .bg-purple-200\/70 { background-color: rgba(76, 29, 149, 0.70); }
+    .dark .bg-gray-100 { background-color: #1E293B; }
+    .dark .bg-gray-50 { background-color: #0F172A; }
+
+    /* --- Pastilles de statut (fonds clairs -> teintes sombres) --- */
+    .dark .bg-rose-50 { background-color: #4C0519; }
+    .dark .bg-rose-100 { background-color: #881337; }
+    .dark .bg-amber-50 { background-color: #451A03; }
+    .dark .bg-amber-100 { background-color: #78350F; }
+    .dark .bg-pink-50 { background-color: #500724; }
+    .dark .bg-pink-50\/40 { background-color: rgba(80, 7, 36, 0.40); }
+    .dark .bg-pink-50\/70 { background-color: rgba(80, 7, 36, 0.70); }
+    .dark .bg-emerald-50 { background-color: #022C22; }
+    .dark .bg-emerald-100 { background-color: #064E3B; }
+    .dark .bg-teal-50\/40 { background-color: rgba(19, 78, 74, 0.40); }
+    .dark .bg-sky-50 { background-color: #082F49; }
+    .dark .bg-blue-50 { background-color: #172554; }
+    .dark .bg-green-50 { background-color: #052E16; }
+    .dark .bg-red-50 { background-color: #450A0A; }
+    .dark .bg-yellow-50 { background-color: #422006; }
+
+    /* --- Textes --- */
+    .dark .text-\[\#1A1A2E\] { color: #F1F5F9; }
+    .dark .text-\[\#6C2BD9\] { color: #C4B5FD; }
+    .dark .text-\[\#6C2BD9\]\/60 { color: rgba(196, 181, 253, 0.60); }
+    .dark .text-\[\#5B21B6\] { color: #C4B5FD; }
+    .dark .text-\[\#00897B\] { color: #2DD4BF; }
+    .dark .text-\[\#00BFA5\] { color: #2DD4BF; }
+    .dark .text-slate-900 { color: #F1F5F9; }
+    .dark .text-slate-800 { color: #E2E8F0; }
+    .dark .text-slate-700 { color: #E2E8F0; }
+    .dark .text-slate-600 { color: #CBD5E1; }
+    .dark .text-slate-500 { color: #94A3B8; }
+    .dark .text-gray-900 { color: #F1F5F9; }
+    .dark .text-gray-700 { color: #E2E8F0; }
+    .dark .text-gray-600 { color: #CBD5E1; }
+    .dark .text-gray-500 { color: #94A3B8; }
+    .dark .text-amber-900 { color: #FDE68A; }
+    .dark .text-amber-800 { color: #FCD34D; }
+    .dark .text-amber-600 { color: #FBBF24; }
+    .dark .text-amber-700 { color: #FCD34D; }
+    .dark .text-teal-800 { color: #5EEAD4; }
+    .dark .text-teal-700 { color: #2DD4BF; }
+    .dark .text-rose-700 { color: #FDA4AF; }
+    .dark .text-rose-600 { color: #FB7185; }
+    .dark .text-emerald-700 { color: #6EE7B7; }
+    .dark .text-emerald-600 { color: #34D399; }
+    .dark .text-sky-700 { color: #7DD3FC; }
+    .dark .text-blue-700 { color: #93C5FD; }
+    .dark .text-green-700 { color: #86EFAC; }
+    .dark .text-red-700 { color: #FCA5A5; }
+    .dark .text-purple-700 { color: #C4B5FD; }
+    .dark .text-purple-600 { color: #C4B5FD; }
+    .dark .text-purple-500 { color: #A78BFA; }
+    /* Texte sombre sur fond coloré (bouton turquoise, bouton jaune Kool...) : il doit RESTER sombre. */
+    .dark .bg-\[\#00BFA5\].text-\[\#1A1A2E\] { color: #1A1A2E; }
+    .dark .bg-\[\#FFD100\].text-\[\#1A1A2E\] { color: #1A1A2E; }
+    /* Bouton Kool de l'écran de connexion : il reste blanc sur fond sombre (sinon texte noir illisible). */
+    .dark #loginBrandBtnKool { background-color: #FFFFFF; color: #111111; }
+    .dark #loginBrandBtnKool:hover { background-color: #FEF9C3; }
+
+    /* --- Bordures --- */
+    .dark .border-slate-200 { border-color: #334155; }
+    .dark .border-slate-100 { border-color: #1E293B; }
+    .dark .border-slate-300 { border-color: #475569; }
+    .dark .border-gray-200 { border-color: #334155; }
+    .dark .border-purple-100 { border-color: #4C1D95; }
+    .dark .border-purple-100\/70 { border-color: rgba(76, 29, 149, 0.70); }
+    .dark .border-purple-100\/80 { border-color: rgba(76, 29, 149, 0.80); }
+    .dark .border-purple-200 { border-color: #4C1D95; }
+    .dark .border-purple-200\/60 { border-color: rgba(76, 29, 149, 0.60); }
+    .dark .border-purple-200\/90 { border-color: rgba(76, 29, 149, 0.90); }
+    .dark .border-purple-300 { border-color: #6D28D9; }
+    .dark .border-purple-400\/30 { border-color: rgba(168, 85, 247, 0.30); }
+    .dark .border-purple-400\/35 { border-color: rgba(168, 85, 247, 0.35); }
+    .dark .border-purple-400\/40 { border-color: rgba(168, 85, 247, 0.40); }
+    .dark .border-pink-200 { border-color: #9D174D; }
+    .dark .border-pink-400\/40 { border-color: rgba(244, 114, 182, 0.40); }
+    .dark .border-pink-400\/50 { border-color: rgba(244, 114, 182, 0.50); }
+    .dark .border-rose-200 { border-color: #9F1239; }
+    .dark .border-rose-300 { border-color: #BE123C; }
+    .dark .border-rose-400\/50 { border-color: rgba(251, 113, 133, 0.50); }
+    .dark .border-emerald-200 { border-color: #065F46; }
+    .dark .border-emerald-300 { border-color: #059669; }
+    .dark .border-emerald-400\/50 { border-color: rgba(52, 211, 153, 0.50); }
+    .dark .border-teal-200 { border-color: #0F766E; }
+    .dark .border-teal-400\/50 { border-color: rgba(45, 212, 191, 0.50); }
+    .dark .border-amber-200 { border-color: #92400E; }
+    .dark .border-amber-300 { border-color: #B45309; }
+    .dark .border-amber-300\/60 { border-color: rgba(252, 211, 77, 0.60); }
+    .dark .border-\[\#00BFA5\] { border-color: #0D9488; }
+    .dark .border-\[\#6C2BD9\] { border-color: #7C3AED; }
+    .dark .border-white\/80 { border-color: #334155; }
+
+    /* --- Séparateurs de tableaux (divide-*) --- */
+    .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1E293B; }
+    .dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: #334155; }
+    .dark .divide-purple-100 > :not([hidden]) ~ :not([hidden]) { border-color: #4C1D95; }
+
+    /* --- Survols (hover:*) --- */
+    .dark .hover\:bg-slate-50:hover { background-color: #1E293B; }
+    .dark .hover\:bg-slate-200:hover { background-color: #334155; }
+    .dark .hover\:bg-rose-100:hover { background-color: #881337; }
+    .dark .hover\:bg-rose-50:hover { background-color: #4C0519; }
+    .dark .hover\:bg-rose-50\/60:hover { background-color: rgba(76, 5, 25, 0.60); }
+    .dark .hover\:bg-purple-200:hover { background-color: #4C1D95; }
+    .dark .hover\:bg-purple-200\/80:hover { background-color: rgba(76, 29, 149, 0.80); }
+    .dark .hover\:bg-purple-200\/70:hover { background-color: rgba(76, 29, 149, 0.70); }
+    .dark .hover\:bg-amber-100:hover { background-color: #78350F; }
+    .dark .hover\:bg-amber-50\/40:hover { background-color: rgba(69, 26, 3, 0.40); }
+    .dark .hover\:bg-pink-50:hover { background-color: #500724; }
+    .dark .hover\:bg-pink-50\/30:hover { background-color: rgba(80, 7, 36, 0.30); }
+    .dark .hover\:bg-pink-100:hover { background-color: #500724; }
+    .dark .hover\:bg-\[\#F3EBFF\]:hover { background-color: #2E1065; }
+    .dark .hover\:bg-\[\#F3EBFF\]\/50:hover { background-color: rgba(46, 16, 101, 0.50); }
+    .dark .hover\:bg-\[\#F8F9FC\]\/70:hover { background-color: rgba(15, 23, 42, 0.70); }
+
+    /* --- Formulaires : champs sombres, listes déroulantes natives sombres --- */
+    .dark input, .dark select, .dark textarea { color-scheme: dark; }
+    .dark ::placeholder { color: #64748B; }
+    .dark select option { background-color: #1E293B; color: #F1F5F9; }
+
+    /* --- Barres de défilement --- */
+    .dark .custom-scrollbar::-webkit-scrollbar-track { background: #1E293B; }
+    .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
+    .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6C2BD9; }

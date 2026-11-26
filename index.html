@@ -7,8 +7,13 @@
   <meta name="referrer" content="no-referrer" />
   <title>Yassir Pulse — Pilotage Opérations &amp; Portefeuilles</title>
   <link id="appFavicon" rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <!-- Thème clair / sombre : appliqué AVANT le rendu pour éviter un flash clair
+       en mode nuit. Le choix est mémorisé en localStorage (clé yassir_pulse_theme_v1). -->
+  <script>
+    try { if (localStorage.getItem('yassir_pulse_theme_v1') === 'sombre') document.documentElement.classList.add('dark'); } catch (e) {}
+  </script>
 </head>
-<body class="bg-[#F8F9FC] text-[#1A1A2E] min-h-screen w-full overflow-x-hidden flex flex-col antialiased">
+<body class="bg-[#F8F9FC] text-[#1A1A2E] min-h-screen w-full overflow-x-hidden flex flex-col antialiased dark:bg-[#0F172A] dark:text-slate-100">
 
   <!-- ==========================================================================
        1. ÉCRAN DE CONNEXION OFFICIEL YASSIR
@@ -16,11 +21,11 @@
   <div id="loginScreen" class="fixed inset-0 z-50 yassir-login-bg flex items-center justify-center p-4 overflow-y-auto">
     <div class="absolute inset-0 opacity-10 pointer-events-none" style="background-image: radial-gradient(#ffffff 1.25px, transparent 1.25px); background-size: 22px 22px;"></div>
 
-    <div id="loginCard" class="relative w-full max-w-[330px] bg-white/95 backdrop-blur-md rounded-3xl shadow-[0_24px_60px_-15px_rgba(19,6,36,0.65)] p-5 sm:p-6 border border-white/80 my-auto">
+    <div id="loginCard" class="relative w-full max-w-[330px] bg-white/95 backdrop-blur-md rounded-3xl shadow-[0_24px_60px_-15px_rgba(19,6,36,0.65)] p-5 sm:p-6 border border-white/80 my-auto dark:bg-slate-800/95 dark:border-slate-700">
       <div class="flex flex-col items-center text-center mb-4">
 
       <!-- Sélecteur de marque Yassir / Kool -->
-      <div class="flex items-center justify-center gap-2 mb-3 p-1.5 rounded-2xl bg-slate-100 border border-slate-200">
+      <div class="flex items-center justify-center gap-2 mb-3 p-1.5 rounded-2xl bg-slate-100 border border-slate-200 dark:bg-slate-700 dark:border-slate-600">
         <button type="button" id="loginBrandBtnYassir" onclick="window.yassirSwitchBrand('yassir')" class="flex-1 py-2 px-3 rounded-xl flex items-center justify-center gap-2 font-extrabold text-xs bg-[#6C2BD9] text-white shadow-sm transition cursor-pointer">
           <span class="w-2.5 h-2.5 rounded-full bg-[#FF2A6D]"></span>
           <span>Yassir</span>
@@ -58,8 +63,8 @@
         <span id="loginBrandPulseBadge" class="px-3.5 py-1 rounded-full text-[11px] font-extrabold bg-[#F3EBFF] text-[#6C2BD9] mb-1.5">
           Yassir Pulse • Opérations
         </span>
-        <h1 class="text-base sm:text-lg font-extrabold text-[#1A1A2E] tracking-tight">Connexion à l'espace de travail</h1>
-        <p class="text-xs text-slate-500 mt-1">Veuillez saisir votre identifiant personnel</p>
+        <h1 class="text-base sm:text-lg font-extrabold text-[#1A1A2E] tracking-tight dark:text-slate-100">Connexion à l'espace de travail</h1>
+        <p class="text-xs text-slate-500 mt-1 dark:text-slate-400">Veuillez saisir votre identifiant personnel</p>
       </div>
 
       <div id="loginErrorBox" class="hidden mb-3 p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2.5">
@@ -107,7 +112,7 @@
        2. MODALE GESTION DES ACCÈS & IDENTIFIANTS (PROPRIÉTAIRE ADMIN UNIQUEMENT)
        ========================================================================== -->
   <div id="accessManagerModal" class="hidden fixed inset-0 z-50 bg-[#1E0B36]/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden my-auto">
+    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden my-auto dark:bg-slate-800 dark:border-slate-700">
       <div class="yassir-header-gradient px-6 py-4 text-white flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center text-[#00BFA5]">
@@ -200,7 +205,7 @@
        Activité des AM uniquement (connexions, exports, alertes traitées).
        ========================================================================== -->
   <div id="activityLogModal" class="hidden fixed inset-0 z-50 bg-[#1E0B36]/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden my-auto">
+    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden my-auto dark:bg-slate-800 dark:border-slate-700">
       <div class="yassir-header-gradient px-6 py-4 text-white flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center text-[#00BFA5]">
@@ -265,7 +270,7 @@
        3. MODALE ÉDITION D'UN RESTAURANT (PROPRIÉTAIRE ADMIN UNIQUEMENT)
        ========================================================================== -->
   <div id="editRestoModal" class="hidden fixed inset-0 z-50 bg-[#1E0B36]/70 backdrop-blur-xs flex items-center justify-center p-4">
-    <div class="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden">
+    <div class="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
       <div class="yassir-header-gradient px-6 py-4 text-white flex items-center justify-between">
         <div class="flex items-center gap-2.5">
           <i class="fa-solid fa-pen-to-square text-[#00BFA5]"></i>
@@ -329,7 +334,7 @@
        3B. MODALE DÉTAILS COMMANDE & ARTICLES (KOOL / YASSIR)
        ========================================================================== -->
   <div id="orderItemsDetailModal" class="hidden fixed inset-0 z-50 bg-[#1E0B36]/70 backdrop-blur-xs flex items-center justify-center p-4">
-    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden">
+    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-purple-100 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
       <div class="yassir-header-gradient px-6 py-4 text-white flex items-center justify-between">
         <div class="flex items-center gap-2.5">
           <i class="fa-solid fa-receipt text-[#00BFA5]"></i>
@@ -669,31 +674,35 @@
     <div class="flex-1 flex flex-col min-w-0">
 
       <!-- Barre supérieure compacte (Titre de vue + Bouton menu mobile + Actions rapides) -->
-      <header class="bg-white border-b border-purple-100 sticky top-0 z-20 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+      <header class="bg-white border-b border-purple-100 sticky top-0 z-20 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs dark:bg-slate-800 dark:border-slate-700">
         <div class="flex items-center gap-3 min-w-0">
-          <button id="btnOpenMainMenu" type="button" onclick="window.yassirToggleMobileSidebar()" class="w-9 h-9 rounded-xl bg-[#F3EBFF] hover:bg-purple-200/80 text-[#6C2BD9] flex items-center justify-center transition cursor-pointer shadow-2xs" title="Ouvrir / Fermer le menu de navigation">
+          <button id="btnOpenMainMenu" type="button" onclick="window.yassirToggleMobileSidebar()" class="w-9 h-9 rounded-xl bg-[#F3EBFF] hover:bg-purple-200/80 text-[#6C2BD9] flex items-center justify-center transition cursor-pointer shadow-2xs dark:bg-purple-950 dark:hover:bg-purple-800/80 dark:text-purple-300" title="Ouvrir / Fermer le menu de navigation">
             <i class="fa-solid fa-bars"></i>
           </button>
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <h1 id="headerBrandAppTitle" class="text-sm sm:text-base font-extrabold text-[#1A1A2E] truncate">Yassir Pulse</h1>
-              <span id="headerBrandVersionBadge" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#F3EBFF] text-[#6C2BD9] border border-purple-200">v2.0</span>
+              <h1 id="headerBrandAppTitle" class="text-sm sm:text-base font-extrabold text-[#1A1A2E] truncate dark:text-slate-100">Yassir Pulse</h1>
+              <span id="headerBrandVersionBadge" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#F3EBFF] text-[#6C2BD9] border border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-800">v2.0</span>
             </div>
-            <p id="headerScopeSubtitle" class="text-[11px] text-slate-500 truncate">Vue Propriétaire • Accès complet aux 7 Portefeuilles AM & Vue Globale</p>
+            <p id="headerScopeSubtitle" class="text-[11px] text-slate-500 truncate dark:text-slate-400">Vue Propriétaire • Accès complet aux 7 Portefeuilles AM & Vue Globale</p>
           </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
+          <!-- Bascule mode nuit / mode clair (visible par tous les comptes) -->
+          <button id="btnBasculerTheme" type="button" onclick="window.yassirBasculerTheme()" class="inline-flex items-center justify-center w-9 h-9 rounded-full text-xs font-bold bg-[#F3EBFF] hover:bg-purple-200/80 text-[#6C2BD9] border border-purple-200 transition cursor-pointer dark:bg-purple-950 dark:hover:bg-purple-800/80 dark:text-purple-300 dark:border-purple-800" title="Passer en mode nuit">
+            <i id="iconTheme" class="fa-solid fa-moon text-sm"></i>
+          </button>
           <!-- Centre de Notifications Intelligentes (Cloche) -->
           <div class="relative" id="yassirNotifWrapper">
-            <button id="btnOpenNotifCenter" type="button" onclick="window.yassirToggleNotifPanel()" class="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-[#F3EBFF] hover:bg-purple-200/80 text-[#6C2BD9] border border-purple-200 transition cursor-pointer" title="Alertes intelligentes (Inactivité, 0 commande, Fin d'offre, Drop 3 jours)">
+            <button id="btnOpenNotifCenter" type="button" onclick="window.yassirToggleNotifPanel()" class="relative inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold bg-[#F3EBFF] hover:bg-purple-200/80 text-[#6C2BD9] border border-purple-200 transition cursor-pointer dark:bg-purple-950 dark:hover:bg-purple-800/80 dark:text-purple-300 dark:border-purple-800" title="Alertes intelligentes (Inactivité, 0 commande, Fin d'offre, Drop 3 jours)">
               <i class="fa-solid fa-bell text-sm"></i>
               <span class="hidden sm:inline">Alertes</span>
               <span id="notifBellBadgeCount" class="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-[#FF2A6D] text-white">0</span>
             </button>
 
             <!-- Panneau déroulant des notifications -->
-            <div id="yassirNotifDropdown" class="hidden fixed sm:absolute right-2 sm:right-0 top-14 sm:top-11 w-[calc(100vw-16px)] sm:w-[460px] max-h-[82vh] bg-white rounded-3xl shadow-2xl border border-purple-200 z-50 flex flex-col overflow-hidden">
+            <div id="yassirNotifDropdown" class="hidden fixed sm:absolute right-2 sm:right-0 top-14 sm:top-11 w-[calc(100vw-16px)] sm:w-[460px] max-h-[82vh] bg-white rounded-3xl shadow-2xl border border-purple-200 z-50 flex flex-col overflow-hidden dark:bg-slate-800 dark:border-slate-700">
               <div class="yassir-header-gradient px-4 py-3.5 text-white flex items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <i class="fa-solid fa-bell text-[#00BFA5]"></i>
@@ -719,7 +728,7 @@
               </div>
 
               <!-- Filtres rapides par catégorie d'alerte -->
-              <div class="px-3 py-2 bg-[#F8F9FC] border-b border-purple-100 flex flex-wrap items-center gap-1 text-[10px] font-bold">
+              <div class="px-3 py-2 bg-[#F8F9FC] border-b border-purple-100 flex flex-wrap items-center gap-1 text-[10px] font-bold dark:bg-slate-900 dark:border-slate-700">
                 <button type="button" data-notif-filter="ALL" onclick="window.yassirSetNotifCategoryFilter('ALL')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-[#6C2BD9] text-white cursor-pointer">Toutes (<span id="notifCntAll">0</span>)</button>
                 <button type="button" data-notif-filter="INACTIVE_3D" onclick="window.yassirSetNotifCategoryFilter('INACTIVE_3D')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">Inactive &ge;3j (<span id="notifCntInactive">0</span>)</button>
                 <button type="button" data-notif-filter="ZERO_3D" onclick="window.yassirSetNotifCategoryFilter('ZERO_3D')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">0 cmd &ge;3j (<span id="notifCntZero">0</span>)</button>
@@ -732,13 +741,13 @@
               </div>
 
               <!-- Liste scrollable des notifications -->
-              <div id="yassirNotifListBody" class="p-3 space-y-2 overflow-y-auto custom-scrollbar flex-1 max-h-[55vh] bg-white text-xs">
+              <div id="yassirNotifListBody" class="p-3 space-y-2 overflow-y-auto custom-scrollbar flex-1 max-h-[55vh] bg-white text-xs dark:bg-slate-800">
                 <p class="py-8 text-center text-slate-400">Aucune alerte détectée.</p>
               </div>
             </div>
           </div>
 
-          <button id="btnResetAll" type="button" onclick="window.yassirResetAll()" style="display:none" class="hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-rose-50 text-[#FF2A6D] hover:bg-rose-100 border border-pink-200 transition cursor-pointer">
+          <button id="btnResetAll" type="button" onclick="window.yassirResetAll()" style="display:none" class="hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-rose-50 text-[#FF2A6D] hover:bg-rose-100 border border-pink-200 transition cursor-pointer dark:bg-rose-950 dark:hover:bg-rose-900 dark:border-rose-800">
             <i class="fa-solid fa-rotate-left"></i>
             <span>Réinitialiser</span>
           </button>
@@ -754,7 +763,7 @@
            RÉSERVÉ EXCLUSIVEMENT AU PROPRIÉTAIRE ADMIN
            ======================================================================== -->
       <section id="ownerImportSection" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div id="mainSourceImportCard" class="bg-white rounded-3xl border border-purple-100 p-4 sm:p-5 shadow-sm hover:border-[#6C2BD9]/40 transition flex flex-col justify-between gap-3">
+        <div id="mainSourceImportCard" class="bg-white rounded-3xl border border-purple-100 p-4 sm:p-5 shadow-sm hover:border-[#6C2BD9]/40 transition flex flex-col justify-between gap-3 dark:bg-slate-800 dark:border-slate-700">
           <div>
             <div class="flex items-center justify-between gap-2 mb-1.5">
               <div class="flex items-center gap-2">
@@ -806,7 +815,7 @@
           </div>
         </div>
 
-        <div id="commissionsImportCard" class="hidden bg-white rounded-3xl border border-purple-100 p-6 shadow-sm hover:border-[#6C2BD9]/40 transition flex flex-col justify-between">
+        <div id="commissionsImportCard" class="hidden bg-white rounded-3xl border border-purple-100 p-6 shadow-sm hover:border-[#6C2BD9]/40 transition flex flex-col justify-between dark:bg-slate-800 dark:border-slate-700">
           <div>
             <div class="flex items-start justify-between gap-3 mb-3">
               <div class="flex items-center gap-2.5">

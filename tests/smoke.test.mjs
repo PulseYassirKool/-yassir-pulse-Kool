@@ -1724,3 +1724,73 @@ test("journal d'activité : alerte marquée « Traité » journalisée", async (
   const entries = JSON.parse(store.get('activity_log') || '[]');
   assert.ok(entries.some((e) => e.type === 'alerte' && e.detail.includes('test|key')), 'alerte traitée absente du journal');
 });
+
+test('thème : bouton de bascule présent dans l\'en-tête, visible par tous les comptes', async () => {
+  const w = boot();
+  const btn = w.document.getElementById('btnBasculerTheme');
+  assert.ok(btn, 'bouton thème absent');
+  assert.equal(btn.getAttribute('onclick'), 'window.yassirBasculerTheme()', 'bouton non câblé sur yassirBasculerTheme');
+  assert.equal(btn.classList.contains('hidden'), false, 'bouton thème masqué');
+  assert.ok(w.document.getElementById('iconTheme').classList.contains('fa-moon'), 'icône lune attendue en mode clair');
+  // Même visible pour un AM (préférence d'affichage, pas une fonction admin).
+  await login(w, 'omar.beldi', 'Omar-Test-12345');
+  assert.equal(w.document.getElementById('btnBasculerTheme').classList.contains('hidden'), false, 'bouton thème masqué pour un AM');
+});
+
+test('thème : mode clair par défaut, bascule clair → sombre → clair mémorisée', async () => {
+  const w = boot();
+  assert.equal(w.document.documentElement.classList.contains('dark'), false, 'mode sombre actif par défaut');
+  assert.notEqual(w.localStorage.getItem('yassir_pulse_theme_v1'), 'sombre', 'stockage sombre par défaut');
+  // Bascule vers le sombre.
+  w.yassirBasculerTheme();
+  assert.equal(w.document.documentElement.classList.contains('dark'), true, 'classe dark non posée');
+  assert.equal(w.localStorage.getItem('yassir_pulse_theme_v1'), 'sombre', 'choix sombre non mémorisé');
+  assert.ok(w.document.getElementById('iconTheme').classList.contains('fa-sun'), 'icône soleil attendue en mode nuit');
+  assert.ok(!w.document.getElementById('iconTheme').classList.contains('fa-moon'), 'icône lune encore présente en mode nuit');
+  // Retour au clair.
+  w.yassirBasculerTheme();
+  assert.equal(w.document.documentElement.classList.contains('dark'), false, 'classe dark non retirée');
+  assert.equal(w.localStorage.getItem('yassir_pulse_theme_v1'), 'clair', 'choix clair non mémorisé');
+  assert.ok(w.document.getElementById('iconTheme').classList.contains('fa-moon'), 'icône lune attendue après retour au clair');
+});
+
+test('thème : le choix mémorisé est réappliqué au chargement', async () => {
+  const w = boot();
+  w.localStorage.setItem('yassir_pulse_theme_v1', 'sombre');
+  w.yassirAppliquerTheme();
+  assert.equal(w.document.documentElement.classList.contains('dark'), true, 'thème sombre mémorisé non réappliqué');
+  w.localStorage.setItem('yassir_pulse_theme_v1', 'clair');
+  w.yassirAppliquerTheme();
+  assert.equal(w.document.documentElement.classList.contains('dark'), false, 'thème clair mémorisé non réappliqué');
+  // Argument explicite prioritaire.
+  w.yassirAppliquerTheme('sombre');
+  assert.equal(w.document.documentElement.classList.contains('dark'), true, 'yassirAppliquerTheme(sombre) sans effet');
+  assert.equal(w.localStorage.getItem('yassir_pulse_theme_v1'), 'sombre', 'argument explicite non mémorisé');
+});
+
+test('thème : script anti-flash dans le <head> et darkMode par classe', () => {
+  assert.ok(html.includes('yassir_pulse_theme_v1'), 'clé de thème absente de index.html');
+  assert.ok(html.includes("classList.add('dark')"), 'script anti-flash absent du <head>');
+  assert.ok(html.includes('id="btnBasculerTheme"'), 'bouton thème absent de index.html');
+  const twConfig = readFileSync('tailwind.config.js', 'utf8');
+  assert.ok(twConfig.includes("darkMode: 'class'"), 'darkMode class absent de tailwind.config.js');
+  assert.ok(!twConfig.includes("darkMode: 'media'"), 'darkMode media interdit (le choix manuel doit gagner)');
+  assert.ok(existsSync('src/styles/theme-sombre.css'), 'couche CSS sombre absente');
+  const cssSombre = readFileSync('src/styles/theme-sombre.css', 'utf8');
+  assert.ok(cssSombre.includes('.dark .bg-white'), 'règle de surface sombre absente');
+  assert.ok(cssSombre.includes('.dark .text-\\[\\#1A1A2E\\]'), 'règle de texte sombre absente');
+});
+
+test('thème : couleurs des graphiques adaptées en mode nuit, inchangées en mode clair', async () => {
+  const w = boot();
+  assert.equal(w.yassirCouleurGraphique('#6C2BD9'), '#6C2BD9', 'couleur graphique modifiée en mode clair');
+  assert.equal(w.yassirCouleurGraphique('#E2E8F0'), '#E2E8F0', 'grille modifiée en mode clair');
+  w.yassirAppliquerTheme('sombre');
+  assert.equal(w.yassirCouleurGraphique('#6C2BD9'), '#C4B5FD', 'graduation non adaptée en mode nuit');
+  assert.equal(w.yassirCouleurGraphique('#5B21B6'), '#C4B5FD', 'graduation violette non adaptée en mode nuit');
+  assert.equal(w.yassirCouleurGraphique('#E2E8F0'), '#334155', 'grille non adaptée en mode nuit');
+  assert.equal(w.yassirCouleurGraphique('#1A1A2E'), '#F1F5F9', 'texte graphique non adapté en mode nuit');
+  assert.equal(w.yassirCouleurGraphique('#FFD100'), '#FFD100', 'couleur de série modifiée (les courbes ne doivent pas changer)');
+  w.yassirAppliquerTheme('clair');
+  assert.equal(w.yassirCouleurGraphique('#6C2BD9'), '#6C2BD9', 'couleur graphique non restaurée en mode clair');
+});
