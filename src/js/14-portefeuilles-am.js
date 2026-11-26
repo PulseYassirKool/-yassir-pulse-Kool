@@ -590,7 +590,10 @@
               var rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
               if (!rows || rows.length === 0) return;
 
-              addedCount += extraireRestaurantsDepuisLignesSheet(rows, resolvedAm, state.amPortfolios);
+              // Import dans les portefeuilles de la marque ACTIVE : on filtre par la
+              // colonne APP quand elle existe (classeur fusionné) ; sans colonne APP,
+              // toutes les lignes sont gardées (anciens fichiers).
+              addedCount += extraireRestaurantsDepuisLignesSheet(rows, resolvedAm, state.amPortfolios, (typeof currentBrand !== 'undefined' ? currentBrand : ''));
             });
 
             savePortfoliosToStore();

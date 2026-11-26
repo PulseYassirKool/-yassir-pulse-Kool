@@ -235,6 +235,7 @@
       };
 
       var YASSIR_2025_STORAGE_KEY = 'yassir_vf_hist_2025_rows_v1';
+      var KOOL_2025_STORAGE_KEY = 'kool_vf_hist_2025_rows_v1';
       var execSummaryDailyChartInst = null;
       var weeklyWowPerfChartInst = null;
       var weeklyAovCompareChartInst = null;
@@ -346,6 +347,20 @@
         } catch (e) {}
       })();
 
+      // Historique 2025 Kool (onglet « 2025 Kool » du classeur fusionné) : stocké
+      // à part, comme les autres données Kool (motif loadKoolStored*).
+      (function loadSaved2025KoolFromStore() {
+        try {
+          var raw25k = safeGet(KOOL_2025_STORAGE_KEY);
+          if (raw25k) {
+            var parsed25k = JSON.parse(raw25k);
+            if (Array.isArray(parsed25k) && parsed25k.length > 0) {
+              state.historical2025RowsKool = parsed25k;
+            }
+          }
+        } catch (e) {}
+      })();
+
       window.yassirSync2025Sheet = function (manualTrigger) {
         var sheetId = LIVE_SHEETS_CONFIG.HISTORICAL_2025_SHEET_ID;
         var gid = LIVE_SHEETS_CONFIG.HISTORICAL_2025_GID || '0';
@@ -358,7 +373,10 @@
         return fetchGoogleSheetByGidSmart(sheetId, gid, '')
           .catch(function () {
             return fetchGoogleWorkbookXlsx(sheetId).then(function (wb) {
-              var sName = wb.SheetNames[0];
+              // Le classeur fusionné a 14 onglets : SheetNames[0] serait 'Omar Beldi'
+              // (portefeuilles). On cherche l'onglet 2025 Yassir par son nom.
+              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('2025') && normalizeText(n).includes('yassir'); });
+              if (!sName) throw new Error('Onglet 2025 Yassir introuvable');
               return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
             });
           })
@@ -388,6 +406,48 @@
           });
       };
 
+      // Données 2025 Kool (onglet « 2025 Kool » du classeur fusionné, gid=14) :
+      // parallèle exact de yassirSync2025Sheet, stocké par marque. Appelée par la
+      // synchro Kool (automatique + manuelle). Ne rejette jamais : un échec 2025
+      // ne doit pas faire échouer la synchro Kool. Résout avec le nombre de lignes.
+      window.yassirSync2025KoolSheet = function (manualTrigger) {
+        var sheetId = KOOL_SHEETS_CONFIG.HISTORICAL_2025_SHEET_ID;
+        var gid = KOOL_SHEETS_CONFIG.HISTORICAL_2025_GID || '0';
+        if (!sheetId) return Promise.resolve(0);
+        return fetchGoogleSheetByGidSmart(sheetId, gid, '')
+          .catch(function () {
+            return fetchGoogleWorkbookXlsx(sheetId).then(function (wb) {
+              // Repli : chercher l'onglet « 2025 Kool » par son nom — surtout pas
+              // un autre onglet 2025 (les valeurs Yassir ne doivent pas passer
+              // pour des valeurs Kool).
+              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('2025') && normalizeText(n).includes('kool'); });
+              if (!sName) throw new Error('Onglet 2025 Kool introuvable');
+              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
+            });
+          })
+          .then(function (rows) {
+            if (rows && rows.length > 1) {
+              var cleaned = rows.filter(function (r) {
+                return Array.isArray(r) && r.some(function (c) { return String(c || '').trim() !== ''; });
+              });
+              state.historical2025RowsKool = cleaned;
+              safeSet(KOOL_2025_STORAGE_KEY, JSON.stringify(cleaned));
+              if (state.activeTab === 'synth_global' && typeof currentBrand !== 'undefined' && currentBrand === 'kool') renderSynth2025Panel();
+              if (manualTrigger) {
+                showToast('<strong>Données 2025 Kool synchronisées</strong> pour les semaines YoY.', 'success');
+              }
+              return cleaned.length;
+            }
+            return 0;
+          })
+          .catch(function () {
+            if (manualTrigger) {
+              showToast('Impossible de lire la feuille 2025 Kool (vérifiez le partage public en lecture).', 'error');
+            }
+            return 0;
+          });
+      };
+
       function getIsoWeekNumber(isoDateStr) {
         if (!isoDateStr) return 0;
         var parts = isoDateStr.split('-');
@@ -399,10 +459,19 @@
         return Math.ceil((((dt - yearStart) / 86400000) + 1) / 7);
       }
 
+      // Lignes 2025 de la marque active (Yassir / Kool, stockées séparément).
+      function getActive2025Rows() {
+        if (typeof currentBrand !== 'undefined' && currentBrand === 'kool') {
+          return state.historical2025RowsKool || [];
+        }
+        return state.historical2025Rows || [];
+      }
+      window.yassirGetActive2025Rows = getActive2025Rows;
+
       // Extraction complète des semaines de 2025 (format horizontal W 07, W 08, ..., W 47 en colonnes et indicateurs en lignes, OU format vertical)
-      function extract2025MetricsByWeekMap() {
+      function extract2025MetricsByWeekMap(rowsOverride) {
         var map25 = new Map();
-        var rows = state.historical2025Rows || [];
+        var rows = rowsOverride || state.historical2025Rows || [];
         if (rows.length < 2) return map25;
 
         // 1. Détecter si le fichier 2025 est en format horizontal (colonnes W 07, W 08, ..., W 47) comme dans la capture
@@ -643,10 +712,10 @@
         var activeStores26 = kpiMap['Active Store'] || 0;
 
         // Toutes les semaines de 2025 (Google Sheet 2025 en colonnes W 07..W 47) et de 2026 (Data exp)
-        // Kool : aucune donnée 2025 — map25 reste vide (pas de comparaison YoY, pas de records 2025,
-        // la courbe 2025 est donc absente et le message l'explique).
+        // Kool : les lignes 2025 Kool (onglet « 2025 Kool ») quand elles existent,
+        // sinon map25 reste vide (pas de comparaison YoY, le message l'explique).
         var isKoolBrand = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
-        var map25 = isKoolBrand ? new Map() : extract2025MetricsByWeekMap();
+        var map25 = extract2025MetricsByWeekMap(getActive2025Rows());
         var map26AllWeeks = compute2026AllWeeksStatsMap();
         var allSortedW26 = Array.from(map26AllWeeks.keys()).sort(function (a, b) { return a - b; });
 
@@ -732,9 +801,10 @@
           }
         }
 
-        // Note Kool sous les graphiques YoY : la courbe 2025 est absente (aucune donnée Kool 2025).
+        // Note Kool sous les graphiques YoY : visible seulement s'il n'y a aucune
+        // donnée 2025 Kool (la courbe 2025 est alors absente).
         var koolYoyNote = document.getElementById('koolNoYoyNote');
-        if (koolYoyNote) koolYoyNote.classList.toggle('hidden', !isKoolBrand);
+        if (koolYoyNote) koolYoyNote.classList.toggle('hidden', !(isKoolBrand && map25.size === 0));
 
         // 2. Calcul des métriques de la semaine précédente (Data préc ou W-1 automatique) pour WoW
         var prevReq = 0, prevDel = 0, prevGmvBrut = 0, prevGmvAfter = 0, prevCa = 0, prevPromo = 0, prevStoresCount = 0;
@@ -1617,7 +1687,7 @@
             XLSX.utils.book_append_sheet(wb, wsVar, isMktMode ? 'Variation Market' : 'Variation Food');
           }
         }
-        var map25Exp = extract2025MetricsByWeekMap();
+        var map25Exp = extract2025MetricsByWeekMap(getActive2025Rows());
         var map26Exp = compute2026AllWeeksStatsMap();
         var yoyAoa = [['Week', 'Req 2025', 'Req 2026', 'Req YoY %', 'Del 2025', 'Del 2026', 'Del YoY %', 'GMV 2025', 'GMV 2026', 'GMV YoY %', 'CA 2025', 'CA 2026', 'CA YoY %']];
         Array.from(map26Exp.keys()).sort(function (a, b) { return a - b; }).forEach(function (wNo) {

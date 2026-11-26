@@ -25,6 +25,7 @@
         offreParticipationRules: [],
         offrePartSheetId: '',
         historical2025Rows: [],
+        historical2025RowsKool: [],
         selectedAm: 'ALL',
         polygonFilter: null,
         marketRows: [],
@@ -51,10 +52,19 @@
       }
 
       function saveBudgetToStore() {
-        safeSet(STORAGE_KEYS.BUDGET, JSON.stringify({
+        var payload = JSON.stringify({
           byAm: state.budgetByAm,
           global: state.budgetGlobal
-        }));
+        });
+        // Stockage par marque : la saisie manuelle (ou la synchro) écrit dans la
+        // clé de la marque active, comme le fait la synchro Budget.
+        if (typeof currentBrand !== 'undefined' && currentBrand === 'kool') {
+          safeSet(KOOL_BUDGET_STORAGE_KEY, payload);
+          if (typeof brandArchives !== 'undefined' && brandArchives.kool) brandArchives.kool.budgetByAm = state.budgetByAm || {};
+        } else {
+          safeSet(STORAGE_KEYS.BUDGET, payload);
+          if (typeof brandArchives !== 'undefined' && brandArchives.yassir) brandArchives.yassir.budgetByAm = state.budgetByAm || {};
+        }
       }
 
       function loadInitialReasons() {
@@ -156,7 +166,7 @@
         return Number.isFinite(num) ? num : 0;
       }
 
-      function parseOffreParticipationRows(rows) {
+      function parseOffreParticipationRows(rows, brandFilter) {
         if (!rows || rows.length < 2) return [];
         var headerRowIdx = 0;
         for (var sr = 0; sr < Math.min(5, rows.length); sr++) {
@@ -167,6 +177,9 @@
           }
         }
         var headers = (rows[headerRowIdx] || []).map(function (h) { return normalizeText(h); });
+
+        // Colonne APP (Yassir / Kool) : filtre par marque quand elle est présente.
+        var idxApp = headers.indexOf('app');
 
         var idxArea = headers.findIndex(function (h) { return h === 'area' || h.includes('ville') || h.includes('zone'); });
         var idxResto = headers.findIndex(function (h) { return h.includes('restaurant') || h.includes('partenaire') || h.includes('store') || h.includes('enseigne') || h.includes('nom'); });
@@ -186,6 +199,11 @@
           if (!row || row.length <= idxResto) continue;
           var rName = String(row[idxResto] || '').trim();
           if (!rName || normalizeText(rName) === 'restaurant' || normalizeText(rName) === 'restaurant name') continue;
+          // Filtre par marque (classeur fusionné) : ne garder que les règles APP = marque demandée.
+          if (brandFilter && idxApp !== -1 && idxApp < row.length) {
+            var appVal = normalizeText(row[idxApp]);
+            if (appVal && appVal !== normalizeText(brandFilter)) continue;
+          }
 
           var partPct = (idxPartPct !== -1 && idxPartPct < row.length) ? parsePercentNumber(row[idxPartPct]) : 0;
           var cPct = (idxCPct !== -1 && idxCPct < row.length) ? parsePercentNumber(row[idxCPct]) : 0;
@@ -223,6 +241,7 @@
         }
         return parsedRules;
       }
+      window.yassirParseOffreParticipationRows = parseOffreParticipationRows;
 
       window.yassirOnOffrePartFileChange = function (e) {
         if (!isOwnerAdmin()) return;
@@ -235,7 +254,7 @@
             var wb = XLSX.read(data, { type: 'array', cellDates: true });
             var sheetName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('participation') || normalizeText(n).includes('offre'); }) || wb.SheetNames[0];
             var rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' });
-            var rules = parseOffreParticipationRows(rows);
+            var rules = parseOffreParticipationRows(rows, (typeof currentBrand !== 'undefined' ? currentBrand : ''));
             if (rules.length === 0) {
               showToast('Aucune ligne valide trouvée dans le fichier Offre Participation.', 'error');
               return;
@@ -276,7 +295,11 @@
 
         return fetchGoogleWorkbookXlsx(sheetId)
           .then(function (wb) {
-            var sName = wb.SheetNames[0];
+            // Le classeur fusionné a 14 onglets : SheetNames[0] serait 'Omar Beldi'
+            // (portefeuilles) et produirait des règles aberrantes. On cherche
+            // l'onglet Offre Participation par son nom, comme l'import de fichier.
+            var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('participation') || normalizeText(n).includes('offre'); });
+            if (!sName) throw new Error('Onglet Offre Participation introuvable');
             var rows = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
             if (!rows || rows.length < 2) throw new Error('Feuille vide');
             return rows;
@@ -285,7 +308,7 @@
             return fetchGoogleSheetByGidSmart(sheetId, gid, 'Feuille 1');
           })
           .then(function (rows) {
-            var rules = parseOffreParticipationRows(rows);
+            var rules = parseOffreParticipationRows(rows, 'Yassir');
             if (rules.length > 0) {
               state.offreParticipationRules = rules;
               saveOffreParticipationToStore();

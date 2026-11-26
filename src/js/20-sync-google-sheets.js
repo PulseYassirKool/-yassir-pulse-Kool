@@ -208,7 +208,22 @@
         return cities.indexOf(n) !== -1;
       }
 
-      function extraireRestaurantsDepuisLignesSheet(rows, defaultAmName, targetMap) {
+      // Colonne APP (Yassir / Kool) : détectée par son en-tête normalisé 'app'.
+      // Quand la colonne est absente (anciens classeurs), toutes les lignes sont gardées.
+      function trouverColonneApp(ligneEnTete) {
+        if (!ligneEnTete) return -1;
+        var hdr = ligneEnTete.map(function (c) { return normalizeText(c); });
+        return hdr.indexOf('app');
+      }
+      function ligneEstDeLaMarque(row, idxApp, marqueDemandee) {
+        if (!marqueDemandee || idxApp === -1) return true;
+        if (!row || idxApp >= row.length) return true;
+        var v = normalizeText(row[idxApp]);
+        if (!v) return true; // APP vide → gardée (compatibilité anciens classeurs)
+        return v === normalizeText(marqueDemandee);
+      }
+
+      function extraireRestaurantsDepuisLignesSheet(rows, defaultAmName, targetMap, brandFilter) {
         if (!rows || rows.length === 0) return 0;
         var count = 0;
 
@@ -269,9 +284,15 @@
 
         var startRow = (headerRowIdx !== -1) ? (headerRowIdx + 1) : 0;
 
+        // Colonne APP (Yassir / Kool) détectée sur la ligne d'en-tête, si elle existe.
+        var idxApp = (headerRowIdx !== -1) ? trouverColonneApp(rows[headerRowIdx]) : -1;
+
         for (var r = startRow; r < rows.length; r++) {
           var row = rows[r];
           if (!row || !Array.isArray(row)) continue;
+
+          // Filtre par marque (classeur fusionné) : ne garder que les lignes APP = marque demandée.
+          if (!ligneEstDeLaMarque(row, idxApp, brandFilter)) continue;
 
           // Cas multi-AM côte à côte en colonnes
           if (idxAmCol === 999 && headerRowIdx !== -1) {
@@ -367,6 +388,74 @@
         }
         return count;
       }
+      window.yassirExtraireRestaurantsDepuisLignesSheet = extraireRestaurantsDepuisLignesSheet;
+
+      // Lecture des onglets portefeuilles d'un classeur complet (.xlsx) : seuls les
+      // onglets dont le nom correspond à un AM sont lus. Les autres onglets du classeur
+      // fusionné (Budget, Commissions, Offre Participation, Statuts, 2025...) sont
+      // ignorés — sinon l'onglet Budget injecterait des restaurants bidons nommés
+      // 'Yassir' / 'Kool' (son nom d'AM en colonne A + la marque en dernière colonne).
+      // brandFilter : 'Yassir' / 'Kool' (filtre colonne APP) ; exclureAm : AM à exclure
+      // (Kool : 'Eya Majdoub', qui n'a pas de portefeuille Kool).
+      function extrairePortefeuillesDepuisClasseur(sheetNames, lireLignes, brandFilter, exclureAm) {
+        var extractedMap = {};
+        var details = [];
+        sheetNames.forEach(function (sName) {
+          var amFromSheet = matchAgentFromText(sName);
+          if (!amFromSheet) return;
+          if (exclureAm && amFromSheet === exclureAm) return;
+          var rows = lireLignes(sName);
+          if (!rows || rows.length === 0) return;
+          var tempMap = {};
+          var added = extraireRestaurantsDepuisLignesSheet(rows, amFromSheet, tempMap, brandFilter);
+          if (added > 0) {
+            var keptForSheet = 0;
+            Object.keys(tempMap).forEach(function (k) {
+              if (exclureAm && tempMap[k].am === exclureAm) return;
+              if (!Object.prototype.hasOwnProperty.call(extractedMap, k)) {
+                extractedMap[k] = tempMap[k];
+                keptForSheet++;
+              }
+            });
+            details.push((amFromSheet || sName) + ' (' + keptForSheet + ')');
+          }
+        });
+        return { map: extractedMap, details: details };
+      }
+      window.yassirExtrairePortefeuillesDepuisClasseur = extrairePortefeuillesDepuisClasseur;
+
+      // Lecture d'une feuille Commissions : colonnes détectées par en-tête
+      // (restaurant + taux) ; la colonne APP (Yassir / Kool) filtre par marque
+      // quand elle est présente. Sans en-tête, lecture positionnelle (col 0 = nom,
+      // col 1 = taux) comme l'ancien classeur Kool.
+      function parseCommissionRows(rows, brandFilter) {
+        var map = {};
+        var count = 0;
+        if (!rows || rows.length < 2) return { map: map, count: 0 };
+        var hdr = rows[0].map(function (h) { return normalizeText(h); });
+        var idxRest = hdr.findIndex(function (h) { return h.includes('restaurant') || h.includes('partenaire') || h.includes('nom') || h.includes('store'); });
+        var idxRate = hdr.findIndex(function (h) { return h.includes('commission') || h.includes('taux') || h.includes('%') || h.includes('facture'); });
+        var idxApp = hdr.indexOf('app');
+        var startR = (idxRest !== -1 || idxRate !== -1) ? 1 : 0;
+        if (idxRest === -1) idxRest = 0;
+        if (idxRate === -1) idxRate = 1;
+        for (var c = startR; c < rows.length; c++) {
+          var cRow = rows[c];
+          if (!cRow || cRow[idxRest] === undefined || cRow[idxRate] === undefined) continue;
+          if (!ligneEstDeLaMarque(cRow, idxApp, brandFilter)) continue;
+          var cName = String(cRow[idxRest]).replace(/[‎‏‪-‮]/g, '').trim().toLowerCase();
+          var rawRateVal = cRow[idxRate];
+          var cRate = (typeof rawRateVal === 'number' && rawRateVal > 0 && rawRateVal < 1)
+            ? Number((rawRateVal * 100).toFixed(4))
+            : purgerNombre(String(rawRateVal).replace(/%|[‎‏‪-‮]/g, ''));
+          if (cName && cName !== 'restaurant' && cName !== 'restaurant name' && !isNaN(cRate) && cRate > 0) {
+            map[cName] = cRate;
+            count++;
+          }
+        }
+        return { map: map, count: count };
+      }
+      window.yassirParseCommissionRows = parseCommissionRows;
 
       function fetchGoogleSheetByGidSmart(sheetId, gid, fallbackTab) {
         var exportCsvUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) +
@@ -540,6 +629,66 @@
         return '';
       }
 
+      // Lecture de l'onglet Budget : les lignes sont séparées par colonne APP
+      // (Yassir / Kool). Une ligne sans APP (ou colonne APP absente) est traitée
+      // comme Yassir (compatibilité avec l'ancien classeur Budget Yassir seul).
+      // Retour : { yassir: {am: budget}, kool: {am: budget}, global: number }.
+      function parseBudgetRowsParMarque(rows) {
+        var parsedYassir = {};
+        var parsedKool = {};
+        var explicitGlobal = 0;
+        // Colonne APP : cherchée dans les 5 premières lignes (ligne d'en-tête).
+        var idxApp = -1;
+        for (var hr = 0; hr < Math.min(5, rows.length); hr++) {
+          var hdrRow = rows[hr] || [];
+          for (var hc = 0; hc < hdrRow.length; hc++) {
+            if (normalizeText(hdrRow[hc]) === 'app') { idxApp = hc; break; }
+          }
+          if (idxApp !== -1) break;
+        }
+        for (var r = 0; r < rows.length; r++) {
+          var row = rows[r];
+          if (!row || row.length === 0) continue;
+          var rowBrand = 'yassir';
+          if (idxApp !== -1 && idxApp < row.length && normalizeText(row[idxApp]) === 'kool') {
+            rowBrand = 'kool';
+          }
+          var matchedAm = '';
+          var isGlobalRow = false;
+          var numericValues = [];
+          for (var c = 0; c < row.length; c++) {
+            var cellStr = String(row[c] !== null && row[c] !== undefined ? row[c] : '').trim();
+            if (!cellStr) continue;
+            var low = cellStr.toLowerCase();
+            if (low === 'global' || low === 'total' || low === 'budget global' || low === 'total budget' || low.includes('budget global')) {
+              isGlobalRow = true;
+            }
+            if (!matchedAm) {
+              var ag = matchAgentFirstOrFullName(cellStr);
+              if (ag) matchedAm = ag;
+            }
+            var cleanedNumStr = cellStr
+              .replace(/tnd|dt|€|\$|%/gi, '')
+              .replace(/[\s\u00A0\u202F]/g, '')
+              .replace(/,/g, '.');
+            if (/^-?\d+(\.\d+)?$/.test(cleanedNumStr)) {
+              var num = parseFloat(cleanedNumStr);
+              if (Number.isFinite(num) && num > 0) {
+                numericValues.push(num);
+              }
+            }
+          }
+          if (matchedAm && numericValues.length > 0) {
+            if (rowBrand === 'kool') parsedKool[matchedAm] = numericValues[0];
+            else parsedYassir[matchedAm] = numericValues[0];
+          } else if (isGlobalRow && numericValues.length > 0) {
+            explicitGlobal = numericValues[0];
+          }
+        }
+        return { yassir: parsedYassir, kool: parsedKool, global: explicitGlobal };
+      }
+      window.yassirParseBudgetRowsParMarque = parseBudgetRowsParMarque;
+
       window.yassirSyncBudgetSheet = function (manualTrigger) {
         if (manualTrigger && !isOwnerAdmin() && !canViewAllPortfolios()) return;
         var icon = document.getElementById('iconSyncBudget');
@@ -560,54 +709,20 @@
           })
           .then(function (rows) {
             if (!rows || rows.length === 0) throw new Error('Feuille Budget vide');
-            var parsedByAm = {};
-            var explicitGlobal = 0;
-
-            for (var r = 0; r < rows.length; r++) {
-              var row = rows[r];
-              if (!row || row.length === 0) continue;
-
-              var matchedAm = '';
-              var isGlobalRow = false;
-              var numericValues = [];
-
-              for (var c = 0; c < row.length; c++) {
-                var cellStr = String(row[c] !== null && row[c] !== undefined ? row[c] : '').trim();
-                if (!cellStr) continue;
-                var low = cellStr.toLowerCase();
-                if (low === 'global' || low === 'total' || low === 'budget global' || low === 'total budget' || low.includes('budget global')) {
-                  isGlobalRow = true;
-                }
-                if (!matchedAm) {
-                  var ag = matchAgentFirstOrFullName(cellStr);
-                  if (ag) matchedAm = ag;
-                }
-                var cleanedNumStr = cellStr
-                  .replace(/tnd|dt|€|\$|%/gi, '')
-                  .replace(/[\s\u00A0\u202F]/g, '')
-                  .replace(/,/g, '.');
-                if (/^-?\d+(\.\d+)?$/.test(cleanedNumStr)) {
-                  var num = parseFloat(cleanedNumStr);
-                  if (Number.isFinite(num) && num > 0) {
-                    numericValues.push(num);
-                  }
-                }
-              }
-
-              if (matchedAm && numericValues.length > 0) {
-                parsedByAm[matchedAm] = numericValues[0];
-              } else if (isGlobalRow && numericValues.length > 0) {
-                explicitGlobal = numericValues[0];
-              }
-            }
-
-            if (Object.keys(parsedByAm).length === 0) {
+            var split = parseBudgetRowsParMarque(rows);
+            if (Object.keys(split.yassir).length === 0 && Object.keys(split.kool).length === 0) {
               throw new Error('Aucune ligne AM reconnue dans la feuille Budget');
             }
 
-            state.budgetByAm = parsedByAm;
-            state.budgetGlobal = 0;
-            saveBudgetToStore();
+            // Stockage par marque (motif brandArchives) : la carte Yassir garde
+            // l'ancienne clé de stockage, la carte Kool a sa propre clé.
+            var sumYassirBudget = Object.values(split.yassir).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
+            safeSet(STORAGE_KEYS.BUDGET, JSON.stringify({ byAm: split.yassir, global: sumYassirBudget }));
+            saveKoolBudgetToStore(split.kool);
+            brandArchives.yassir.budgetByAm = split.yassir;
+            brandArchives.kool.budgetByAm = split.kool;
+            state.budgetByAm = (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? split.kool : split.yassir;
+            state.budgetGlobal = Object.values(state.budgetByAm).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
 
             if (icon) icon.classList.remove('fa-spin');
             if (label) {
@@ -653,7 +768,7 @@
           }
         });
         state.budgetByAm = parsedByAm;
-        state.budgetGlobal = 0;
+        state.budgetGlobal = sum;
         saveBudgetToStore();
         mettreAJourInterface();
         showToast('<strong>Budgets AM enregistrés !</strong> (' + Object.keys(parsedByAm).length + ' AM configurés).', 'success');
@@ -690,59 +805,28 @@
         // 1. Télécharger le classeur complet (.xlsx) pour lire EXCLUSIVEMENT la liste exacte donnée dans Google Sheets
         var portfoliosPromise = fetchGoogleWorkbookXlsx(LIVE_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID)
           .then(function (wb) {
-            var extractedMap = {};
-            var details = [];
-            wb.SheetNames.forEach(function (sName) {
-              var rows = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-              if (!rows || rows.length === 0) return;
-              var amFromSheet = matchAgentFromText(sName);
-              var tempMap = {};
-              var added = extraireRestaurantsDepuisLignesSheet(rows, amFromSheet, tempMap);
-              if (added > 0) {
-                var keptForSheet = 0;
-                Object.keys(tempMap).forEach(function (k) {
-                  if (!Object.prototype.hasOwnProperty.call(extractedMap, k)) {
-                    extractedMap[k] = tempMap[k];
-                    keptForSheet++;
-                  }
-                });
-                details.push((amFromSheet || sName) + ' (' + keptForSheet + ')');
-              }
-            });
-            if (Object.keys(extractedMap).length === 0) {
+            var res = extrairePortefeuillesDepuisClasseur(wb.SheetNames, function (sName) {
+              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
+            }, 'Yassir', null);
+            if (Object.keys(res.map).length === 0) {
               throw new Error('Aucun restaurant extrait depuis le classeur xlsx');
             }
-            return { ok: true, map: extractedMap, details: details };
+            return { ok: true, map: res.map, details: res.details };
           })
           .catch(function () {
-            // Fallback JSONP/CSV si export?format=xlsx est bloqué par CORS
-            var masterPromise = fetchGoogleSheetByGidSmart(LIVE_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID, '495278602', '')
-              .then(function (rows) { return { ok: true, rows: rows }; })
-              .catch(function () { return { ok: false, rows: [] }; });
-
+            // Fallback JSONP/CSV si export?format=xlsx est bloqué par CORS.
+            // (L'ancien onglet maître gid 495278602 n'existe plus dans le classeur
+            // fusionné : le repli lit désormais chaque onglet AM par son gid.)
             var tabPromises = LIVE_SHEETS_CONFIG.PORTFOLIOS_TABS.map(function (entry) {
               return fetchGoogleSheetTabSmart(LIVE_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID, entry.tab, entry.altTabs, entry.gid)
                 .then(function (rows) { return { am: entry.am, rows: rows, ok: true }; })
                 .catch(function () { return { am: entry.am, rows: [], ok: false }; });
             });
 
-            return Promise.all([masterPromise, Promise.all(tabPromises)]).then(function (arr) {
-              var mRes = arr[0];
-              var tResList = arr[1];
+            return Promise.all(tabPromises).then(function (tResList) {
               var extractedMap = {};
               var details = [];
               var seenSignatures = new Set();
-
-              if (mRes.ok && mRes.rows && mRes.rows.length > 1) {
-                var sigM = JSON.stringify(mRes.rows.slice(0, 6));
-                seenSignatures.add(sigM);
-                var tmpM = {};
-                var addM = extraireRestaurantsDepuisLignesSheet(mRes.rows, '', tmpM);
-                if (addM > 0) {
-                  Object.assign(extractedMap, tmpM);
-                  details.push('Feuille principale (' + addM + ')');
-                }
-              }
 
               tResList.forEach(function (res) {
                 if (!res.ok || !res.rows || res.rows.length === 0) return;
@@ -752,7 +836,7 @@
                 seenSignatures.add(sig);
 
                 var tmpAm = {};
-                var addAm = extraireRestaurantsDepuisLignesSheet(res.rows, res.am, tmpAm);
+                var addAm = extraireRestaurantsDepuisLignesSheet(res.rows, res.am, tmpAm, 'Yassir');
                 if (addAm > 0) {
                   var keptAm = 0;
                   Object.keys(tmpAm).forEach(function (k) {
@@ -807,27 +891,9 @@
 
           var updatedCommCount = 0;
           if (commResult.ok && commResult.rows && commResult.rows.length > 1) {
-            var freshComm = {};
-            var hdrY = commResult.rows[0].map(function (h) { return normalizeText(h); });
-            var idxRestY = hdrY.findIndex(function (h) { return h.includes('restaurant') || h.includes('partenaire') || h.includes('nom') || h.includes('store'); });
-            var idxRateY = hdrY.findIndex(function (h) { return h.includes('commission') || h.includes('taux') || h.includes('%') || h.includes('facture'); });
-            var startY = (idxRestY !== -1 || idxRateY !== -1) ? 1 : 0;
-            if (idxRestY === -1) idxRestY = 0;
-            if (idxRateY === -1) idxRateY = 1;
-
-            for (var c = startY; c < commResult.rows.length; c++) {
-              var cRow = commResult.rows[c];
-              if (!cRow || cRow[idxRestY] === undefined || cRow[idxRateY] === undefined) continue;
-              var cName = String(cRow[idxRestY]).replace(/[\u200e\u200f\u202a-\u202e]/g, '').trim().toLowerCase();
-              var rawRateY = cRow[idxRateY];
-              var cRate = (typeof rawRateY === 'number' && rawRateY > 0 && rawRateY < 1)
-                ? Number((rawRateY * 100).toFixed(4))
-                : purgerNombre(String(rawRateY).replace(/%|[\u200e\u200f\u202a-\u202e]/g, ''));
-              if (cName && cName !== 'restaurant' && cName !== 'restaurant name' && !isNaN(cRate) && cRate > 0) {
-                freshComm[cName] = cRate;
-                updatedCommCount++;
-              }
-            }
+            var parsedComm = parseCommissionRows(commResult.rows, 'Yassir');
+            var freshComm = parsedComm.map;
+            updatedCommCount = parsedComm.count;
             if (updatedCommCount > 0) {
               safeSet(STORAGE_KEYS.COMMISSIONS, JSON.stringify(freshComm));
               brandArchives.yassir.customCommissions = Object.assign({}, freshComm);

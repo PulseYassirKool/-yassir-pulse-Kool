@@ -61,9 +61,14 @@
           if (Object.keys(kp).length > 0) state.amPortfolios = kp;
           var ko = loadKoolStoredOffreParticipation();
           if (ko.length > 0) state.offreParticipationRules = ko;
+          state.budgetByAm = loadKoolStoredBudget().byAm || {};
+          state.budgetGlobal = Object.values(state.budgetByAm).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
         } else {
           state.customCommissions = loadInitialCommissions();
           state.amPortfolios = loadInitialPortfolios();
+          var yb = loadInitialBudget();
+          state.budgetByAm = yb.byAm || {};
+          state.budgetGlobal = Number(yb.global || 0) || Object.values(state.budgetByAm).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
         }
       }
 

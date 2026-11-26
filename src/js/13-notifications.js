@@ -463,11 +463,11 @@
           }));
         }
 
-        // 7. RÈGLE H : Budget dépassé — 90 % puis 100 % (Yassir uniquement : il n'y a
-        // pas de feuille Budget Kool, le budget affiché en Kool est celui de Yassir).
+        // 7. RÈGLE H : Budget dépassé — 90 % puis 100 % (les deux marques : le
+        // budget Kool vient de l'onglet Budget du classeur fusionné, lignes APP = Kool).
         // Même calcul que la carte « Reste Budget » (coût LR/LG + participation offres
         // sur les livrées du périmètre courant : filtre de date et polygone actifs).
-        if (!isKoolBrandNotif) {
+        {
           var budgetScopes = [];
           if (canViewAllPortfolios()) {
             budgetScopes.push({ scope: 'ALL', label: 'Global' });

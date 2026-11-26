@@ -12,7 +12,9 @@ const koolTestIds = {
   DATA_SHEET_ID: 'KOOL_DATA_TEST_ID_000000000001', ORDER_ITEMS_SHEET_ID: 'KOOL_ITEMS_TEST_ID_000000000002',
   COMMISSION_SHEET_ID: 'KOOL_COMM_TEST_ID_000000000003', PORTFOLIOS_SHEET_ID: 'KOOL_PORT_TEST_ID_000000000004',
   OFFRE_PARTICIPATION_SHEET_ID: 'KOOL_OFFRE_TEST_ID_000000000005',
+  BUDGET_SHEET_ID: 'KOOL_BUDGET_TEST_ID_000000000007', HISTORICAL_2025_SHEET_ID: 'KOOL_2025_TEST_ID_000000000006',
   DATA_GID: '0', ORDER_ITEMS_GID: '0', COMMISSION_GID: '0', PORTFOLIOS_GID: '0', OFFRE_PARTICIPATION_GID: '0',
+  BUDGET_GID: '11', HISTORICAL_2025_GID: '14',
 };
 const koolCfg = { ...koolTestIds, ...(seed.kool || {}) };
 // En-têtes cibles (111 colonnes) lus depuis le code source : le test Yassir
@@ -149,6 +151,14 @@ const koolCsvItems = toCsv([
 const koolCsvComm = toCsv([['Restaurant', 'Commission'], ['Resto Alpha', '20'], ['Resto Beta', '15']]);
 const koolCsvPort = toCsv([['Restaurant', 'Ville', 'AM'], ['Resto Alpha', 'Tunis', 'Omar Beldi'], ['Resto Beta', 'Ariana', 'Nour Ali']]);
 const koolCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], ['Resto Alpha', '10', 'Toute la carte', '01/11/2026 - 30/11/2026']]);
+// Onglet « 2025 Kool » du classeur fusionné (format horizontal W 07..W 47).
+const koolCsvHist2025Kool = toCsv([
+  ['', 'W 45', 'W 46', 'W 47'],
+  ['Requested', 100, 110, 120],
+  ['Delivered Orders', 5, 6, 7],
+  ['GMV (Total Food VF)', 100, 120, 140],
+  ['CA KOOL', 10, 12, 14]
+]);
 
 // Variantes pour le test Participation : le Burger de la commande 1002 est remisé
 // (12 au lieu de 15) et Resto Alpha a en plus une règle article « Super Promo » à 10 %.
@@ -205,6 +215,9 @@ function bootKool(overrides) {
     else if (match(kc.COMMISSION_SHEET_ID)) body = ov.comm || koolCsvComm;
     else if (match(kc.PORTFOLIOS_SHEET_ID)) body = ov.port || koolCsvPort;
     else if (match(kc.OFFRE_PARTICIPATION_SHEET_ID)) body = ov.offre || koolCsvOffre;
+    // 2025 Kool : pas de données par défaut (les tests existants supposent
+    // « aucune donnée Kool 2025 ») ; seul un override explicite en fournit.
+    else if (match(kc.HISTORICAL_2025_SHEET_ID)) body = ov.hist2025 || null;
     if (body !== null) return { ok: true, status: 200, text: async () => body, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
   };
@@ -1153,5 +1166,162 @@ test('Proprio change SON propre mot de passe : il reste connecté (reconnexion a
   }), env);
   assert.equal(restoreRes.status, 200, 'restauration du mot de passe proprio échouée');
 
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Classeur fusionné : filtre par colonne APP ----
+test('Classeur fusionné : filtre par colonne APP (portefeuilles, commissions, offres, budget)', () => {
+  const w = boot();
+
+  // Portefeuilles : lignes Yassir exclues de la carte Kool et inversement.
+  const portRows = [
+    ['Ville', 'Segment', 'restaurant Name', 'APP'],
+    ['Tunis', 'Top Performer', 'Resto Yassir A', 'Yassir'],
+    ['Sfax', 'Top Performer', 'Resto Kool A', 'Kool'],
+    ['Tunis', 'Long Tail', 'Resto Commun', 'Yassir'],
+    ['Tunis', 'Long Tail', 'Resto Commun', 'Kool']
+  ];
+  const mapK = {};
+  w.yassirExtraireRestaurantsDepuisLignesSheet(portRows, 'Omar Beldi', mapK, 'Kool');
+  assert.equal(Object.keys(mapK).length, 2, 'portefeuilles Kool : 2 restos');
+  assert.ok(mapK['resto kool a'], 'portefeuilles Kool : Resto Kool A présent');
+  assert.ok(mapK['resto commun'], 'portefeuilles Kool : Resto Commun présent');
+  assert.ok(!mapK['resto yassir a'], 'portefeuilles Kool : Resto Yassir A exclu');
+  const mapY = {};
+  w.yassirExtraireRestaurantsDepuisLignesSheet(portRows, 'Omar Beldi', mapY, 'Yassir');
+  assert.equal(Object.keys(mapY).length, 2, 'portefeuilles Yassir : 2 restos');
+  assert.ok(mapY['resto yassir a'] && mapY['resto commun'], 'portefeuilles Yassir : bons restos');
+  assert.ok(!mapY['resto kool a'], 'portefeuilles Yassir : Resto Kool A exclu');
+  const mapAll = {};
+  w.yassirExtraireRestaurantsDepuisLignesSheet(portRows, 'Omar Beldi', mapAll);
+  assert.equal(Object.keys(mapAll).length, 3, 'sans filtre : 3 restos (Resto Commun fusionné)');
+  // Sans colonne APP : tout est gardé (compatibilité anciens classeurs).
+  const mapOld = {};
+  w.yassirExtraireRestaurantsDepuisLignesSheet(
+    [['Ville', 'Segment', 'restaurant Name'], ['Tunis', 'Top Performer', 'Resto Ancien']],
+    'Omar Beldi', mapOld, 'Kool');
+  assert.ok(mapOld['resto ancien'], 'sans colonne APP : ligne gardée');
+
+  // Onglet Budget : il ne doit pas injecter de restaurants 'Yassir'/'Kool'.
+  const wbRows = {
+    'Omar Beldi': portRows,
+    'Budget': [['AM', 'Budget global', 'APP'], ['Omar beldi', 337181, 'Yassir'], ['Omar beldi', 90000, 'Kool']],
+    'Commissions': [['Restaurant', 'Commission', 'APP'], ['Resto X', 20, 'Yassir']],
+    '2025 Kool': [['', 'W 07'], ['Requested', 100]]
+  };
+  const res = w.yassirExtrairePortefeuillesDepuisClasseur(Object.keys(wbRows), function (n) { return wbRows[n]; }, 'Yassir', null);
+  assert.equal(Object.keys(res.map).length, 2, 'portefeuilles Yassir via classeur : 2 restos');
+  assert.ok(!res.map['yassir'] && !res.map['kool'], 'onglet Budget : aucun resto Yassir/Kool injecté');
+
+  // Commissions : filtre APP, ancien format sans en-tête conservé.
+  const commRows = [
+    ['Restaurant', 'Commission', 'APP'],
+    ['Resto Yassir A', 20, 'Yassir'],
+    ['Resto Kool A', 15, 'Kool'],
+    ['Resto Commun', 25, 'Yassir'],
+    ['Resto Commun', 10, 'Kool']
+  ];
+  const ck = w.yassirParseCommissionRows(commRows, 'Kool');
+  assert.equal(ck.count, 2, 'commissions Kool : 2 lignes');
+  assert.equal(ck.map['resto kool a'], 15, 'commission Kool A');
+  assert.equal(ck.map['resto commun'], 10, 'commission Kool Commun');
+  const cy = w.yassirParseCommissionRows(commRows, 'Yassir');
+  assert.equal(cy.count, 2, 'commissions Yassir : 2 lignes');
+  assert.equal(cy.map['resto commun'], 25, 'commission Yassir Commun');
+  const co = w.yassirParseCommissionRows([['Resto Alpha', 20], ['Resto Beta', 15]], 'Kool');
+  assert.equal(co.count, 2, 'commissions sans en-tête : 2 lignes (ancien format)');
+
+  // Offres : filtre APP.
+  const offreRows = [
+    ['Area', 'Restaurant Name', 'C %', 'TAG', 'Responsable Account', 'Répartition', 'Participation de C %', "Détails de l'offre", 'Start Date', 'End Date', 'Période', 'APP'],
+    ['El Menzah', 'Resto Yassir A', 100, 'Discount', 'Aziza', 'OOK', 10, '30% sur tt la carte', '2026-11-01', '2026-11-30', 'Black Friday', 'Yassir'],
+    ['Sfax', 'Resto Kool A', 25, 'BOGOF', 'Ilyes', 'Sud (Ilyes)', 0, '1 acheté = 1 offert', '2026-11-01', '2026-12-07', 'Black Friday', 'Kool']
+  ];
+  const ok = w.yassirParseOffreParticipationRows(offreRows, 'Kool');
+  assert.equal(ok.length, 1, 'offres Kool : 1 règle');
+  assert.equal(ok[0].restaurant, 'resto kool a', 'offre Kool : bon restaurant');
+  const oy = w.yassirParseOffreParticipationRows(offreRows, 'Yassir');
+  assert.equal(oy.length, 1, 'offres Yassir : 1 règle');
+  assert.equal(oy[0].restaurant, 'resto yassir a', 'offre Yassir : bon restaurant');
+  assert.equal(w.yassirParseOffreParticipationRows(offreRows).length, 2, 'offres sans filtre : 2 règles');
+
+  // Budget : séparation par APP ; sans APP → Yassir.
+  const budgetRows = [
+    ['AM', 'Budget global', 'APP'],
+    ['Omar beldi', 337181, 'Yassir'],
+    ['Omar beldi', 90000, 'Kool'],
+    ['Nour Ali', 100000, 'Yassir'],
+    ['Nour Ali', 20000, 'Kool']
+  ];
+  const b = w.yassirParseBudgetRowsParMarque(budgetRows);
+  assert.equal(b.yassir['Omar Beldi'], 337181, 'budget Yassir Omar');
+  assert.equal(b.kool['Omar Beldi'], 90000, 'budget Kool Omar');
+  assert.equal(b.yassir['Nour Ali'], 100000, 'budget Yassir Nour');
+  assert.equal(b.kool['Nour Ali'], 20000, 'budget Kool Nour');
+  const b2 = w.yassirParseBudgetRowsParMarque([['AM', 'Budget global'], ['Omar beldi', 50000]]);
+  assert.equal(b2.yassir['Omar Beldi'], 50000, 'budget sans APP : Yassir');
+  assert.equal(Object.keys(b2.kool).length, 0, 'budget sans APP : rien pour Kool');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- 2025 Kool : synchro et panneau YoY ----
+test('Kool : données 2025 Kool synchronisées et utilisées par le panneau YoY', async () => {
+  const w = bootKool({ data: koolCsvDataDeck, comm: koolCsvCommDeck, port: koolCsvPortDeck, hist2025: koolCsvHist2025Kool });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  // Lignes 2025 Kool stockées séparément des lignes Yassir.
+  const stored = w.localStorage.getItem('kool_vf_hist_2025_rows_v1');
+  assert.ok(stored && stored.includes('Requested'), 'lignes 2025 Kool stockées');
+  assert.equal(w.yassirGetActive2025Rows().length, 5, 'lignes 2025 actives en Kool : 5');
+  // Période courante W47 (16-22/11/2026).
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+  w.document.getElementById('filterDateStart').value = '2026-11-16';
+  w.document.getElementById('filterDateEnd').value = '2026-11-22';
+  w.yassirOnDateRangeChange();
+  await wait(600);
+  w.yassirSwitchTab('synth_global');
+  await wait(600);
+  const yoyGrid = w.document.getElementById('synth2025YoyCardsGrid');
+  assert.ok(yoyGrid, 'grille YoY absente');
+  assert.ok(!yoyGrid.textContent.includes('indisponible pour Kool'), 'la note « indisponible pour Kool » doit disparaître avec des données 2025 Kool');
+  assert.ok(yoyGrid.textContent.includes('Variation YoY'), 'carte YoY W47 absente');
+  const note = w.document.getElementById('koolNoYoyNote');
+  assert.ok(note && note.classList.contains('hidden'), 'note Kool sous les graphiques YoY : doit être masquée');
+  // La série 2025 du graphique YoY n'est plus vide (W45 : 5 livrées, W46 : 6, W47 : 7).
+  const yoyCfg = w.__chartConfigs.find(function (c) {
+    return c && c.data && Array.isArray(c.data.datasets) && c.data.datasets.length === 2 &&
+      c.data.datasets[0].label === '2025' && c.data.datasets[1].label === '2026';
+  });
+  assert.ok(yoyCfg, 'config graphique YoY introuvable');
+  assert.ok(yoyCfg.data.datasets[0].data.some(function (v) { return v !== null && v !== undefined; }), 'série 2025 du graphique YoY : vide');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Budget Kool : alertes « Budget à 90 % » et « Budget dépassé » en mode Kool ----
+// Données deck Kool (toute période) : coût = livraison gratuite (5 − K quand K < 5)
+// + part restaurant des offres Resto Alpha (règle 10 % : 2001 → 5 − 3.5 = 1.5,
+// 2006 → 5 − 4 = 1, soit 2.5) = 23.50 TND (Omar : Alpha 18 + 2.5, Gamma 3)
+// et 28.50 TND (Global : + Beta 5). Budget Kool Omar 25 TND → Omar 94 %
+// (alerte « Budget à 90 % »), Global 114 % (alerte « Budget dépassé »).
+test('Notifications Kool : alerte Budget à 90 % avec les budgets Kool', async () => {
+  const w = bootKool({ data: koolCsvDataDeck, comm: koolCsvCommDeck, port: koolCsvPortDeck });
+  w.localStorage.setItem('kool_vf_budget_v1', JSON.stringify({ byAm: { 'Omar Beldi': 25 }, global: 25 }));
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+  w.yassirRecalculerNotifications();
+  await wait(200);
+  assert.equal(w.document.getElementById('notifCntBudget').textContent, '2', 'compteur Budget Kool : 2 (Global + Omar)');
+  w.yassirSetNotifCategoryFilter('BUDGET');
+  const budTxt = w.document.getElementById('yassirNotifListBody').textContent;
+  assert.ok(budTxt.includes('Budget à 90 %'), 'alerte Budget Kool à 90 % absente (Omar 94 %)');
+  assert.ok(budTxt.includes('Budget dépassé'), 'alerte Budget Kool dépassé absente (Global 114 %)');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

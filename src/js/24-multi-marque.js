@@ -3,7 +3,7 @@
          ======================================================================== */
       var currentBrand = safeGet('yassir_kool_active_brand_v1') || 'yassir';
 
-      var KOOL_SHEETS_CONFIG = {"DATA_SHEET_ID": "", "DATA_GID": "", "COMMISSION_SHEET_ID": "", "COMMISSION_TAB": "", "COMMISSION_ALT_TABS": [], "COMMISSION_GID": "", "PORTFOLIOS_SHEET_ID": "", "PORTFOLIOS_GID": "", "OFFRE_PARTICIPATION_SHEET_ID": "", "OFFRE_PARTICIPATION_GID": "", "ORDER_ITEMS_SHEET_ID": "", "ORDER_ITEMS_GID": ""}; // rempli après connexion (GET /api/bootstrap)
+      var KOOL_SHEETS_CONFIG = {"DATA_SHEET_ID": "", "DATA_GID": "", "COMMISSION_SHEET_ID": "", "COMMISSION_TAB": "", "COMMISSION_ALT_TABS": [], "COMMISSION_GID": "", "PORTFOLIOS_SHEET_ID": "", "PORTFOLIOS_GID": "", "OFFRE_PARTICIPATION_SHEET_ID": "", "OFFRE_PARTICIPATION_GID": "", "ORDER_ITEMS_SHEET_ID": "", "ORDER_ITEMS_GID": "", "BUDGET_SHEET_ID": "", "BUDGET_GID": "", "HISTORICAL_2025_SHEET_ID": "", "HISTORICAL_2025_GID": ""}; // rempli après connexion (GET /api/bootstrap)
 
       window.koolOrderItemsByOrderId = new Map();
       window.koolOrderItemsByResto = new Map();
@@ -234,6 +234,7 @@
           customCommissions: null,
           amPortfolios: null,
           offreParticipationRules: null,
+          budgetByAm: {},
           dateStart: '',
           dateEnd: '',
           minAvailableDate: '',
@@ -251,6 +252,7 @@
           customCommissions: null,
           amPortfolios: null,
           offreParticipationRules: null,
+          budgetByAm: {},
           dateStart: '',
           dateEnd: '',
           minAvailableDate: '',
@@ -293,6 +295,25 @@
         return {};
       }
 
+      // Budgets Kool (onglet Budget du classeur fusionné, lignes APP = Kool) :
+      // clé de stockage séparée, parallèle à STORAGE_KEYS.BUDGET (Yassir).
+      var KOOL_BUDGET_STORAGE_KEY = 'kool_vf_budget_v1';
+      function loadKoolStoredBudget() {
+        var raw = safeGet(KOOL_BUDGET_STORAGE_KEY);
+        if (raw) {
+          try {
+            var p = JSON.parse(raw);
+            if (p && typeof p === 'object') return p;
+          } catch (e) {}
+        }
+        return { byAm: {}, global: 0 };
+      }
+      function saveKoolBudgetToStore(byAm) {
+        var map = byAm || {};
+        var sum = Object.values(map).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
+        safeSet(KOOL_BUDGET_STORAGE_KEY, JSON.stringify({ byAm: map, global: sum }));
+      }
+
       function saveCurrentStateToBrandCache(brandKey) {
         var b = brandArchives[brandKey];
         if (!b) return;
@@ -306,6 +327,7 @@
         b.customCommissions = state.customCommissions || {};
         b.amPortfolios = state.amPortfolios || {};
         b.offreParticipationRules = state.offreParticipationRules || [];
+        b.budgetByAm = state.budgetByAm || {};
         b.dateStart = state.dateStart || '';
         b.dateEnd = state.dateEnd || '';
         b.minAvailableDate = state.minAvailableDate || '';
@@ -349,6 +371,18 @@
             state.offreParticipationRules = DEFAULT_OFFRE_PARTICIPATION_RULES.slice();
           }
         }
+        // Budgets par marque : la carte de la marque active (Kool = lignes APP Kool
+        // de l'onglet Budget, Yassir = lignes APP Yassir / sans APP).
+        if (b.budgetByAm && Object.keys(b.budgetByAm).length > 0) {
+          state.budgetByAm = b.budgetByAm;
+        } else if (brandKey === 'kool') {
+          state.budgetByAm = loadKoolStoredBudget().byAm || {};
+        } else {
+          state.budgetByAm = loadInitialBudget().byAm || {};
+        }
+        // Budget global de la marque active = somme de ses budgets par AM (scope
+        // « Global » des alertes budget et de la carte « Reste Budget »).
+        state.budgetGlobal = Object.values(state.budgetByAm).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
         state.dateStart = b.dateStart || '';
         state.dateEnd = b.dateEnd || '';
         state.minAvailableDate = b.minAvailableDate || '';
@@ -741,42 +775,34 @@
           })
           .catch(function () { return []; });
 
-        // 2. Commission Kool (<sheet-id>, gid=0)
+        // 2. Commission Kool (onglet « Commissions » du classeur fusionné, gid=9)
         var pComm = fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.COMMISSION_SHEET_ID, KOOL_SHEETS_CONFIG.COMMISSION_GID, KOOL_SHEETS_CONFIG.COMMISSION_TAB)
           .catch(function () {
             return fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.COMMISSION_SHEET_ID).then(function (wb) {
-              var sName = wb.SheetNames[0];
+              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('commission'); }) || wb.SheetNames[0];
               return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
             });
           })
           .catch(function () { return []; });
 
-        // 3. Portefeuille Kool (<sheet-id>, gid=642650166 + tous onglets)
+        // 3. Portefeuille Kool (classeur fusionné : un onglet par AM, filtre APP = Kool)
         var pPortfolios = fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID)
           .then(function (wb) {
-            var extractedMap = {};
-            wb.SheetNames.forEach(function (sName) {
-              var rows = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-              if (!rows || rows.length === 0) return;
-              var amFromSheet = matchAgentFromText(sName);
-              if (amFromSheet === 'Eya Majdoub') return;
-              var tmpMap = {};
-              extraireRestaurantsDepuisLignesSheet(rows, amFromSheet, tmpMap);
-              Object.keys(tmpMap).forEach(function (k) {
-                if (tmpMap[k].am === 'Eya Majdoub') return;
-                if (!Object.prototype.hasOwnProperty.call(extractedMap, k)) {
-                  extractedMap[k] = tmpMap[k];
-                }
-              });
-            });
-            if (Object.keys(extractedMap).length === 0) throw new Error('Portefeuille Kool vide via xlsx');
-            return extractedMap;
+            var res = extrairePortefeuillesDepuisClasseur(wb.SheetNames, function (sName) {
+              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
+            }, 'Kool', 'Eya Majdoub');
+            if (Object.keys(res.map).length === 0) throw new Error('Portefeuille Kool vide via xlsx');
+            return res.map;
           })
           .catch(function () {
+            // Repli dégradé (export xlsx bloqué) : un seul onglet par gid.
+            // PORTFOLIOS_GID = '1' = onglet Omar Beldi du classeur fusionné : on
+            // le lit avec son AM en défaut, sinon l'extracteur ne trouverait
+            // aucune colonne AM dans l'onglet et ne renverrait rien.
             return fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID, KOOL_SHEETS_CONFIG.PORTFOLIOS_GID, '')
               .then(function (rows) {
                 var tmpMap = {};
-                extraireRestaurantsDepuisLignesSheet(rows, '', tmpMap);
+                extraireRestaurantsDepuisLignesSheet(rows, 'Omar Beldi', tmpMap, 'Kool');
                 Object.keys(tmpMap).forEach(function (k) {
                   if (tmpMap[k].am === 'Eya Majdoub') delete tmpMap[k];
                 });
@@ -785,11 +811,11 @@
               .catch(function () { return {}; });
           });
 
-        // 4. Offre participation Kool (<sheet-id>, gid=0)
+        // 4. Offre participation Kool (onglet « Offre Participation » du classeur fusionné, gid=10)
         var pOffrePart = fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.OFFRE_PARTICIPATION_SHEET_ID, KOOL_SHEETS_CONFIG.OFFRE_PARTICIPATION_GID, '')
           .catch(function () {
             return fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.OFFRE_PARTICIPATION_SHEET_ID).then(function (wb) {
-              var sName = wb.SheetNames[0];
+              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('participation') || normalizeText(n).includes('offre'); }) || wb.SheetNames[0];
               return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
             });
           })
@@ -805,7 +831,14 @@
           })
           .catch(function () { return []; });
 
-        return Promise.all([pData, pComm, pPortfolios, pOffrePart, pOrderItems]).then(function (results) {
+        // 6. Données 2025 Kool (onglet « 2025 Kool » du classeur fusionné, gid=14) :
+        // lues en parallèle et stockées par marque (state.historical2025RowsKool).
+        var pHist2025Kool = Promise.resolve().then(function () {
+          if (typeof window.yassirSync2025KoolSheet !== 'function') return 0;
+          return window.yassirSync2025KoolSheet(false);
+        }).catch(function () { return 0; });
+
+        return Promise.all([pData, pComm, pPortfolios, pOffrePart, pOrderItems, pHist2025Kool]).then(function (results) {
           if (icon) icon.classList.remove('fa-spin');
 
           var rawDataRows = results[0];
@@ -813,6 +846,7 @@
           var koolPortfoliosMap = results[2] || {};
           var offrePartRows = results[3];
           var orderItemsRows = results[4];
+          var hist2025KoolCount = results[5] || 0;
 
           var orderItemsCount = 0;
           if (orderItemsRows && orderItemsRows.length > 1) {
@@ -821,31 +855,10 @@
             try { safeSet('kool_vf_order_items_v1', JSON.stringify(lightOrderItemsRows)); } catch (e) {}
           }
 
-          // A. Commissions Kool
-          var koolCommMap = {};
-          var commCount = 0;
-          if (commRows && commRows.length > 1) {
-            var hdrC = commRows[0].map(function (h) { return normalizeText(h); });
-            var idxRestC = hdrC.findIndex(function (h) { return h.includes('restaurant') || h.includes('partenaire') || h.includes('nom') || h.includes('store'); });
-            var idxRateC = hdrC.findIndex(function (h) { return h.includes('commission') || h.includes('taux') || h.includes('%') || h.includes('facture'); });
-            var startR = (idxRestC !== -1 || idxRateC !== -1) ? 1 : 0;
-            if (idxRestC === -1) idxRestC = 0;
-            if (idxRateC === -1) idxRateC = 1;
-
-            for (var c = startR; c < commRows.length; c++) {
-              var cRow = commRows[c];
-              if (!cRow || cRow[idxRestC] === undefined || cRow[idxRateC] === undefined) continue;
-              var cName = String(cRow[idxRestC]).replace(/[‎‏‪-‮]/g, '').trim().toLowerCase();
-              var rawRateVal = cRow[idxRateC];
-              var cRate = (typeof rawRateVal === 'number' && rawRateVal > 0 && rawRateVal < 1)
-                ? Number((rawRateVal * 100).toFixed(4))
-                : purgerNombre(String(rawRateVal).replace(/%|[‎‏‪-‮]/g, ''));
-              if (cName && cName !== 'restaurant' && cName !== 'restaurant name' && !isNaN(cRate) && cRate > 0) {
-                koolCommMap[cName] = cRate;
-                commCount++;
-              }
-            }
-          }
+          // A. Commissions Kool (filtre colonne APP = Kool)
+          var parsedKoolComm = parseCommissionRows(commRows, 'Kool');
+          var koolCommMap = parsedKoolComm.map;
+          var commCount = parsedKoolComm.count;
           if (commCount > 0) {
             safeSet('kool_vf_commissions_v1', JSON.stringify(koolCommMap));
             brandArchives.kool.customCommissions = Object.assign({}, koolCommMap);
@@ -859,7 +872,7 @@
           }
 
           // C. Offre Participation Kool
-          var koolOffreRules = (offrePartRows && offrePartRows.length > 1) ? parseOffreParticipationRows(offrePartRows) : [];
+          var koolOffreRules = (offrePartRows && offrePartRows.length > 1) ? parseOffreParticipationRows(offrePartRows, 'Kool') : [];
           if (koolOffreRules.length > 0) {
             safeSet('kool_vf_offre_participation_v1', JSON.stringify(koolOffreRules));
             brandArchives.kool.offreParticipationRules = koolOffreRules.slice();
@@ -955,7 +968,8 @@
                 '<strong>Synchronisation Kool réussie !</strong><br/>' +
                 '• Data Oct & Nov : <strong>' + addedDataCount + '</strong> commandes.<br/>' +
                 '• Commissions Kool : <strong>' + commCount + '</strong> taux.<br/>' +
-                '• Portefeuilles Kool : <strong>' + portCount + '</strong> restos • Offres : <strong>' + koolOffreRules.length + '</strong> règles • Détails articles : <strong>' + orderItemsCount + '</strong> lignes.',
+                '• Portefeuilles Kool : <strong>' + portCount + '</strong> restos • Offres : <strong>' + koolOffreRules.length + '</strong> règles • Détails articles : <strong>' + orderItemsCount + '</strong> lignes.' +
+                (hist2025KoolCount > 0 ? '<br/>• Données 2025 Kool : <strong>' + hist2025KoolCount + '</strong> lignes.' : ''),
                 'success'
               );
             } else {
