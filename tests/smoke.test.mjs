@@ -134,13 +134,19 @@ const koolCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], 
 // (12 au lieu de 15) et Resto Alpha a en plus une règle article « Super Promo » à 10 %.
 // Resto Beta n'a AUCUNE règle : sa commande 1003 est remisée (3 TND) pour tester le
 // repli « 100 % plateforme » (remise sans règle), en vue carte comme en vue article.
+// Resto Gamma a une règle à participation VIDE (= 0 %) : 100 % restaurant.
+// Resto Delta a une règle à 30 % : plafonnement (30 % × brut 52 = 15.60 > remise 2).
 const koolCsvDataPart = toCsv([
   ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
   ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
   ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '5'],
   ['', '', '', '17/11/2026', '1003', '', 'Resto Beta', '', '', '18.00', '2', '3'],
   ['oui', '', 'Client absent', '18/11/2026', '1004', '', 'Resto Alpha', '', '', '22.00', '3', '0'],
-  ['', '', '', '18/11/2026', '1005', '', 'Resto Alpha', '', '', '10.00', '2', '0']
+  ['', '', '', '18/11/2026', '1005', '', 'Resto Alpha', '', '', '10.00', '2', '0'],
+  // 1006 (Resto Gamma, règle « Toute la carte » à participation VIDE → 0 %) et 1007
+  // (Resto Delta, règle à 30 % → plafonnement : 30 % × brut 52 = 15.60 > remise 2).
+  ['', '', '', '17/11/2026', '1006', '', 'Resto Gamma', '', '', '20.00', '2', '4'],
+  ['', '', '', '17/11/2026', '1007', '', 'Resto Delta', '', '', '50.00', '2', '2']
 ]);
 const koolCsvItemsPart = toCsv([
   ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
@@ -153,7 +159,9 @@ const koolCsvItemsPart = toCsv([
 const koolCsvOffrePart = toCsv([
   ['Restaurant', 'Participation', 'Tag', 'Période'],
   ['Resto Alpha', '10', 'Toute la carte', '01/11/2026 - 30/11/2026'],
-  ['Resto Alpha', '10', 'Super Promo', '01/11/2026 - 30/11/2026']
+  ['Resto Alpha', '10', 'Super Promo', '01/11/2026 - 30/11/2026'],
+  ['Resto Gamma', '', 'Toute la carte', '01/11/2026 - 30/11/2026'],
+  ['Resto Delta', '30', 'Toute la carte', '01/11/2026 - 30/11/2026']
 ]);
 
 function bootKool(overrides) {
@@ -389,7 +397,8 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   const headTxt = w.document.getElementById('previewTableHead').textContent;
   assert.equal(headTxt.includes('Promo Admin'), false, 'colonne Promo Admin encore affichée en mode Kool : ' + headTxt);
   assert.equal(headTxt.includes('Promo Restaurant'), true, 'colonne Promo Restaurant absente en mode Kool');
-  assert.equal(w.document.querySelectorAll('#previewTableBody tr td').length, 7, 'une ligne Offres Kool doit avoir 7 cellules (sans Promo Admin)');
+  assert.equal(w.document.querySelectorAll('#previewTableBody tr td').length, 21, 'trois lignes Offres Kool (Alpha, Gamma, Delta) × 7 cellules (sans Promo Admin)');
+  assert.ok(w.document.getElementById('previewTableBody').textContent.includes('Resto Gamma'), 'Resto Gamma (règle à 0 %) absent du tableau Offres');
   assert.deepEqual([...w.yassirGetOffresVisibleHeaders()], ['Portefeuille AM', 'Area', 'Nom du restaurant', 'Total Offres', 'Discount Article', 'Promo Restaurant']);
   // En mode Yassir, la colonne est toujours là.
   w.yassirSwitchBrand('yassir');
@@ -398,25 +407,32 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   await wait(600);
 
   // Demande 1 — section Participation, vue « Toute la carte » (par défaut).
-  // Resto Alpha : 3 commandes livrées avec offre (1001, 1002, 1005), remise totale 5
-  // (seule 1002), participation resto 10 % × (25.50 + 40 + 10) = 7.55, plateforme 1.00
-  // (seule 1002 a une remise : 5 − 4.00 = 1.00 ; les autres ont une remise de 0).
-  // Repli « 100 % plateforme » : Resto Beta (sans règle), commande 1003 remisée de 3,
-  // apparaît avec remise 3.00, resto 0, plateforme 3.00 → totaux 4 offres / 8.00 / 7.55 / 4.00.
+  // Formule corrigée : plateforme = partPct % du BRUT (item total), restaurant = remise − plateforme (plafonné à la remise).
+  // 1001 (Alpha, brut 25.50, D 0) : plateforme min(2.55, 0) = 0, resto 0.
+  // 1002 (Alpha, brut 45, D 5) : plateforme 4.50, resto 0.50.
+  // 1003 (Beta, sans règle, D 3) : repli 100 % plateforme.
+  // 1005 (Alpha, brut 10, D 0) : plateforme 0, resto 0.
+  // 1006 (Gamma, règle à participation VIDE → 0 %, D 4) : plateforme 0, resto 4.00.
+  // 1007 (Delta, règle 30 %, brut 52, D 2) : plateforme plafonnée à 2.00, resto 0.
+  // Totaux : 6 offres / 14.00 / resto 4.50 / plateforme 9.50.
   w.yassirSwitchTab('participation');
   await wait(600);
   assert.equal(w.document.getElementById('activeSectionTitle').textContent, 'Participation des Offres');
-  assert.equal(w.document.getElementById('partKpiOffres').textContent, '4', 'Total Offres (carte)');
-  assert.equal(w.document.getElementById('partKpiRemise').textContent, '8.00 TND', 'Remise totale (carte)');
-  assert.equal(w.document.getElementById('partKpiResto').textContent, '7.55 TND', 'Participation restaurant (carte)');
-  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '4.00 TND', 'Participation plateforme (carte)');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '6', 'Total Offres (carte)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '14.00 TND', 'Remise totale (carte)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '4.50 TND', 'Participation restaurant (carte)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '9.50 TND', 'Participation plateforme (carte)');
   const bodyTxt = w.document.getElementById('partTableBody').textContent;
   assert.ok(bodyTxt.includes('Resto Alpha'), 'Resto Alpha absent du tableau Participation');
   assert.ok(bodyTxt.includes('Resto Beta'), 'Resto Beta (remise sans règle) doit apparaître à 100 % plateforme');
-  assert.ok(w.document.getElementById('partTableFoot').textContent.includes('7.55'), 'total Participation restaurant absent du pied de tableau');
+  assert.ok(bodyTxt.includes('Resto Gamma'), 'Resto Gamma (règle à 0 %) doit apparaître à 100 % restaurant');
+  assert.ok(bodyTxt.includes('Resto Delta'), 'Resto Delta (plafonnement) absent du tableau Participation');
+  assert.ok(w.document.getElementById('partTableFoot').textContent.includes('4.50'), 'total Participation restaurant absent du pied de tableau');
+  // KPI budget « Participation Offres » (coût restaurant) : carte 4.50 + article 1.50 = 6.00.
+  assert.equal(w.yassirCalculerCoutParticipationOffresLivrees(w.yassirGetDeliveredRecords()), 6, 'KPI Participation Offres (coût restaurant)');
 
   // Vue « Par article » : 1002 a un article remisé (Burger 15 → 12, discount 3.00,
-  // resto 10 % × 15 = 1.50, plateforme 1.50) ; 1003 (Resto Beta, sans règle) a des
+  // plateforme 10 % × 15 = 1.50, resto 3.00 − 1.50 = 1.50) ; 1003 (Resto Beta, sans règle) a des
   // Tacos remisés (9 → 8 × 3 = 3.00) → repli 100 % plateforme. Totaux : 2 / 6.00 / 1.50 / 4.50.
   w.yassirSetParticipationView('article');
   assert.equal(w.document.getElementById('partKpiOffres').textContent, '2', 'Total Offres (article)');
@@ -426,7 +442,7 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   assert.ok(w.document.getElementById('partTableBody').textContent.includes('Resto Alpha'), 'Resto Alpha absent en vue article');
   assert.ok(w.document.getElementById('partTableBody').textContent.includes('Resto Beta'), 'Resto Beta absent en vue article (repli 100 % plateforme)');
 
-  // Filtre de date : 16/11 uniquement → seule 1001 (carte : remise 0, resto 2.55).
+  // Filtre de date : 16/11 uniquement → seule 1001 (carte : remise 0, plateforme min(2.55, 0) = 0, resto 0).
   w.yassirSetParticipationView('carte');
   w.document.getElementById('filterDateStart').value = '2026-11-16';
   w.document.getElementById('filterDateEnd').value = '2026-11-16';
@@ -434,7 +450,8 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   await wait(600);
   assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres 16/11 (carte)');
   assert.equal(w.document.getElementById('partKpiRemise').textContent, '0.00 TND', 'Remise 16/11 (carte)');
-  assert.equal(w.document.getElementById('partKpiResto').textContent, '2.55 TND', 'Participation restaurant 16/11 (carte)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '0.00 TND', 'Participation restaurant 16/11 (carte)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '0.00 TND', 'Participation plateforme 16/11 (carte)');
   // Même jour en vue article : détails couverts mais aucune offre article → message neutre, pas de couverture.
   w.yassirSetParticipationView('article');
   assert.equal(w.document.getElementById('partKpiOffres').textContent, '0', 'Total Offres 16/11 (article)');
@@ -443,14 +460,15 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   assert.ok(!note16.includes('17/11/2026'), 'pas de message de couverture le 16/11');
 
   // 18/11 : commande 1005 livrée sans détail article → message de couverture (fin au 17/11).
-  // La vue « Toute la carte » fonctionne sans détails articles : resto = 10 % × 10 = 1.00.
+  // La vue « Toute la carte » fonctionne sans détails articles : remise 0 donc plateforme 0 et resto 0.
   w.document.getElementById('filterDateStart').value = '2026-11-18';
   w.document.getElementById('filterDateEnd').value = '2026-11-18';
   w.yassirOnDateRangeChange();
   await wait(600);
   w.yassirSetParticipationView('carte');
   assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres 18/11 (carte)');
-  assert.equal(w.document.getElementById('partKpiResto').textContent, '1.00 TND', 'Participation restaurant 18/11 (carte)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '0.00 TND', 'Participation restaurant 18/11 (carte)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '0.00 TND', 'Participation plateforme 18/11 (carte)');
   w.yassirSetParticipationView('article');
   const note18 = w.document.getElementById('partNoteBanner').textContent;
   assert.ok(note18.includes('17/11/2026'), 'message de couverture attendu (fin au 17/11/2026) : ' + note18);

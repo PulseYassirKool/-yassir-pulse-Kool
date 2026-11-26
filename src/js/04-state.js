@@ -349,7 +349,9 @@
       // Formate le libellé d'une règle d'offre Kool pour l'affichage (ex: "20% sur toute la carte" ou TAG)
       function formaterLibelleOffreKool(rl) {
         if (!rl) return '';
-        var pctVal = rl.cPct > 0 ? rl.cPct : rl.partPct;
+        // Le libellé porte sur le TAUX de remise (cPct). partPct est la participation
+        // de la plateforme (points du taux), pas le taux de remise : ne pas l'utiliser ici.
+        var pctVal = rl.cPct > 0 ? rl.cPct : 0;
         var tagStr = String(rl.tag || '').trim();
         var detStr = String(rl.details || '').trim();
         if (detStr) return detStr;
@@ -407,8 +409,13 @@
             appliedRule = articleRules[0];
           }
 
-          if (appliedRule && appliedRule.partPct > 0 && (isDiscountedItem || appliedRule.details)) {
-            var linePart = (appliedRule.partPct / 100) * origLineTotal;
+          // Règle corrigée (2026-11-26) : partPct = points du taux de l'offre pris en
+          // charge par la PLATEFORME, calculés sur le brut de la ligne (prix original
+          // × quantité). Le restaurant prend le reste de la remise réelle de la ligne.
+          // Une règle à 0 % (ou vide) compte aussi : le restaurant prend toute la remise.
+          if (appliedRule && (isDiscountedItem || appliedRule.details)) {
+            var partPlateformeLigne = (appliedRule.partPct / 100) * origLineTotal;
+            var linePart = Math.max(0, lineDiscountTnd - partPlateformeLigne);
             costTnd += linePart;
             discountTotalTnd += lineDiscountTnd;
             matchedItemsCount += (it.quantity || 1);
@@ -481,11 +488,10 @@
           return null;
         }
 
+        // Première règle applicable : partPct = 0 est une valeur définie (le restaurant
+        // prend toute l'offre), pas une absence de participation — pas de préférence
+        // pour les règles à partPct > 0.
         var best = matchedTouteLaCarte.length > 0 ? matchedTouteLaCarte[0] : matchedArticleRules[0];
-        var searchArr = matchedTouteLaCarte.length > 0 ? matchedTouteLaCarte : matchedArticleRules;
-        for (var j = 0; j < searchArr.length; j++) {
-          if (searchArr[j].partPct > 0) { best = searchArr[j]; break; }
-        }
 
         var resObj = {
           rule: best,
@@ -516,16 +522,22 @@
           var idxOrderIdK = TARGET_HEADERS.indexOf('order id');
           var idxGmvK = TARGET_HEADERS.indexOf('Total Food VF');
           var idxItemK = TARGET_HEADERS.indexOf('item total');
+          var idxDiscAmtK = TARGET_HEADERS.indexOf('Discount Amount');
           var totalPartKool = 0;
           for (var rk = 0; rk < deliveredRecords.length; rk++) {
             var ck = deliveredRecords[rk].cells;
             var evK = evaluerOffreKoolPourCommande(ck[idxRestoK], ck[idxOrderDayK], ck[idxOrderIdK]);
             if (evK) {
-              if (evK.partPct > 0) {
-                var gmvValK = purgerNombre(ck[idxGmvK]) || purgerNombre(ck[idxItemK]);
-                totalPartKool += (evK.partPct / 100) * gmvValK;
+              var dAmtK = purgerNombre(ck[idxDiscAmtK]);
+              if (evK.isPromoRestaurant) {
+                // Coût restaurant « Toute la carte » : remise réelle − part plateforme.
+                // Base = BRUT avant remise : item total (J + L) ; sinon Total Food VF (J, net) + remise (L).
+                var brutValK = purgerNombre(ck[idxItemK]);
+                if (!(brutValK > 0)) brutValK = (purgerNombre(ck[idxGmvK]) || 0) + dAmtK;
+                var partPlatK = Math.min((evK.partPct / 100) * brutValK, dAmtK);
+                totalPartKool += Math.max(0, dAmtK - partPlatK);
               }
-              if (evK.articlePartTnd > 0) {
+              if (evK.isPromoArticle) {
                 totalPartKool += evK.articlePartTnd;
               }
             }
@@ -536,11 +548,12 @@
         var rules = state.offreParticipationRules || [];
         if (rules.length === 0) return 0;
 
-        // Indexer les règles par nom de restaurant normalisé
+        // Indexer les règles par nom de restaurant normalisé. Une règle à partPct 0
+        // (ou vide) est une règle valide : le restaurant prend toute la remise.
         var rulesByResto = new Map();
         for (var i = 0; i < rules.length; i++) {
           var rl = rules[i];
-          if (!rl.partPct || rl.partPct <= 0) continue;
+          if (!rl) continue;
           var k1 = rl.restaurant;
           var k2 = rl.restaurantNorm || normalizeText(rl.restaurant);
           if (k1) {
@@ -597,16 +610,27 @@
             break;
           }
 
-          if (matchedRule && matchedRule.partPct > 0) {
-            // Base de calcul : Item Total (montant brut avant remise) ou Total Food + Discount Amount
+          if (matchedRule) {
+            // Base de calcul : Item Total (montant brut avant remise) ou Total Food + Discount Amount.
+            // La plateforme prend partPct points du taux, calculés sur le brut ;
+            // le coût restaurant = remise réelle − part plateforme (borné à 0).
             var itemTot = purgerNombre(c[idxItemTotal]);
             var baseAmount = itemTot > 0 ? itemTot : (purgerNombre(c[idxTotalFood]) + dAmt);
-            totalParticipationCostTnd += (matchedRule.partPct / 100) * baseAmount;
+            var partPlatY = Math.min((matchedRule.partPct / 100) * baseAmount, dAmt);
+            totalParticipationCostTnd += Math.max(0, dAmt - partPlatY);
           }
         }
 
         return Number(totalParticipationCostTnd.toFixed(2));
       }
+
+      // Exposés pour les tests (même motif que yassirCalculerParticipationArticlesKool) :
+      // coût de participation restaurant et commandes livrées du périmètre courant.
+      window.yassirCalculerCoutParticipationOffresLivrees = calculerCoutParticipationOffresLivrees;
+      window.yassirGetDeliveredRecords = function () {
+        var idxStatus = TARGET_HEADERS.indexOf('status');
+        return state.marketRows.concat(state.foodRows).filter(function (rec) { return estCommandeLivree(rec.cells[idxStatus]); });
+      };
 
       function estOrderIdYaf(val) {
         if (val === null || val === undefined) return false;

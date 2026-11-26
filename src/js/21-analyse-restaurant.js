@@ -626,6 +626,9 @@
         var idxDay = TARGET_HEADERS.indexOf('order day');
         var idxStatus = TARGET_HEADERS.indexOf('status');
         var idxGmv = TARGET_HEADERS.indexOf('Total Food VF');
+        var idxDiscAmt = TARGET_HEADERS.indexOf('Discount Amount');
+        var idxItemTot = TARGET_HEADERS.indexOf('item total');
+        var idxTotalFood = TARGET_HEADERS.indexOf('Total Food');
         var idxFoodItem = TARGET_HEADERS.indexOf('Food Item');
 
         var matchedRec = null;
@@ -663,7 +666,16 @@
         var totalOrig = 0;
         var totalEff = 0;
         var totalPartArt = evOffer ? (evOffer.articlePartTnd || 0) : 0;
-        var totalPartMenu = (evOffer && evOffer.partPct > 0) ? ((evOffer.partPct / 100) * gmvVal) : 0;
+        // Part. restaurant « Toute la carte » : remise réelle − part plateforme
+        // (partPct points du brut avant remise, plafonnée à la remise).
+        var totalPartMenu = 0;
+        if (evOffer && evOffer.isPromoRestaurant && matchedRec) {
+          var dAmtOrd = purgerNombre(matchedRec.cells[idxDiscAmt]);
+          var brutOrd = purgerNombre(matchedRec.cells[idxItemTot]);
+          if (!(brutOrd > 0)) brutOrd = (purgerNombre(matchedRec.cells[idxTotalFood]) || 0) + dAmtOrd;
+          var partPlatOrd = Math.min((evOffer.partPct / 100) * brutOrd, dAmtOrd);
+          totalPartMenu = Math.max(0, dAmtOrd - partPlatOrd);
+        }
 
         items.forEach(function (it) {
           var q = it.quantity || 1;

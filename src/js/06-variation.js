@@ -354,7 +354,8 @@
           var activationLabel = matchingOffers.length > 0
             ? matchingOffers.map(function (of) {
                 var baseLbl = of.details ? of.details : ((of.tag || 'Offre') + (of.cPct ? (' ' + of.cPct + '%') : ''));
-                var partLbl = of.partPct > 0 ? (' [Part. ' + of.partPct + '%]') : '';
+                // partPct = points du taux pris en charge par la plateforme (0 = le restaurant prend toute l'offre).
+                var partLbl = ' [Part. plateforme ' + Number(of.partPct || 0) + '%]';
                 return baseLbl + partLbl;
               }).join(' + ')
             : 'Aucune offre';

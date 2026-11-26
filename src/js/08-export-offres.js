@@ -139,14 +139,14 @@
       }
 
       // Index des règles Yassir par restaurant (même construction que
-      // calculerCoutParticipationOffresLivrees, 04-state.js) : seules les règles
-      // avec une participation > 0 % définissent un partage resto / plateforme.
+      // calculerCoutParticipationOffresLivrees, 04-state.js). Une règle à partPct 0
+      // (ou vide) est une règle valide : le restaurant prend toute l'offre.
       function indexerReglesParticipationYassir() {
         var rulesByResto = new Map();
         var rules = state.offreParticipationRules || [];
         for (var i = 0; i < rules.length; i++) {
           var rl = rules[i];
-          if (!rl || !rl.partPct || rl.partPct <= 0) continue;
+          if (!rl) continue;
           var k1 = rl.restaurant;
           var k2 = rl.restaurantNorm || normalizeText(rl.restaurant);
           if (k1) {
@@ -185,19 +185,22 @@
       // section réagit donc au filtre de date comme les autres sections.
       // viewMode : 'carte' (offres sur toute la carte) ou 'article' (offres sur articles).
       // Règle de calcul (cohérente avec calculerCoutParticipationOffresLivrees) :
-      // - Remise totale = montant réellement accordé au client : « Discount Amount »
+      // - Remise totale (D) = montant réellement accordé au client : « Discount Amount »
       //   de la commande (Yassir comme Kool) ; en vue « Par article » (Kool) : somme
       //   sur les lignes remisées de (Original Price − Discount Price) × Quantity.
-      // - Participation restaurant = partPct % × base : base = Total Food VF (ou item
-      //   total) pour « toute la carte », total original des lignes pour les articles.
-      // - Participation plateforme = remise − participation restaurant, par commande
-      //   (le reste de la remise, à la charge de la plateforme), bornée à 0. Le total
-      //   resto + plateforme peut donc dépasser la remise totale quand la participation
-      //   contractuelle du restaurant dépasse la remise sur certaines commandes.
+      // - partPct = points du taux de l'offre pris en charge par la PLATEFORME (pas un %
+      //   de la remise) : Participation plateforme = partPct % × total BRUT avant remise
+      //   (Yassir : item total ; Kool : item total = J + L, pas Total Food VF = J net ;
+      //   en vue « Par article » : total original des lignes).
+      //   Exemple : offre 30 %, participation 10 % → sur un brut de 100 TND, remise 30,
+      //   plateforme 10, restaurant 20.
+      // - Participation restaurant = D − participation plateforme, par commande, bornée à 0
+      //   (si partPct % × brut > D, plateforme = D et restaurant = 0).
       //   Yassir n'a pas de détail par article avec prix : la vue
       //   « Par article » y est calculée au niveau commande (offres Super Promo).
+      // - Règle à partPct vide ou 0 : la plateforme prend 0, le restaurant prend toute la remise.
       // - Repli (décision utilisateur) : une commande livrée avec une remise mais SANS
-      //   règle de participation est quand même comptée, avec sa remise à 100 % pour
+      //   règle de participation du tout est quand même comptée, avec sa remise à 100 % pour
       //   la plateforme (participation restaurant = 0). En vue « Par article » Kool,
       //   le repli s'applique aux lignes d'articles remisées sans règle article.
       function calculerParticipationParRestaurant(viewMode) {
@@ -209,7 +212,6 @@
         var idxOrderId = TARGET_HEADERS.indexOf('order id');
         var idxServices = TARGET_HEADERS.indexOf('services');
         var idxDiscAmt = TARGET_HEADERS.indexOf('Discount Amount');
-        var idxGmv = TARGET_HEADERS.indexOf('Total Food VF');
         var idxItemTot = TARGET_HEADERS.indexOf('item total');
         var idxTotalFood = TARGET_HEADERS.indexOf('Total Food');
         var idxDiscType = TARGET_HEADERS.indexOf('Discount Type');
@@ -250,14 +252,17 @@
           var dAmt = purgerNombre(c[idxDiscAmt]);
           var itemTotVal = purgerNombre(c[idxItemTot]);
           var baseCarteYassir = itemTotVal > 0 ? itemTotVal : (purgerNombre(c[idxTotalFood]) + dAmt);
-          var baseCarteKool = purgerNombre(c[idxGmv]) || purgerNombre(c[idxItemTot]);
+          // Base BRUT avant remise : item total (J + L pour Kool). Si absent, Total Food (J, net) + remise (L).
+          var baseCarteKool = itemTotVal > 0 ? itemTotVal : (purgerNombre(c[idxTotalFood]) + dAmt);
 
           if (isKool) {
             var evK = evaluerOffreKoolPourCommande(rawResto, c[idxOrderDay], c[idxOrderId]);
             if (view === 'carte') {
-              if (evK && evK.partPct > 0) {
-                var partRestoCarte = (evK.partPct / 100) * baseCarteKool;
-                var partPlatCarte = Math.max(0, dAmt - partRestoCarte);
+              if (evK && evK.isPromoRestaurant) {
+                // Règle « Toute la carte » applicable (même à 0 %) : la plateforme prend
+                // partPct points du brut, le restaurant le reste de la remise (plafonné).
+                var partPlatCarte = Math.min((evK.partPct / 100) * baseCarteKool, dAmt);
+                var partRestoCarte = Math.max(0, dAmt - partPlatCarte);
                 var e1 = getEntry(rec.am, rawArea, rawResto);
                 e1.totalOffres += 1;
                 e1.remiseTnd += dAmt;
@@ -271,7 +276,9 @@
                 e1f.partPlateformeTnd += dAmt;
               }
             } else {
-              if (evK && evK.articlePartTnd > 0) {
+              if (evK && evK.isPromoArticle) {
+                // articlePartTnd = part restaurant (remise lignes − part plateforme,
+                // calculée sur le brut des lignes) ; la plateforme prend le reste.
                 var discArt = evK.articleDiscountTnd || 0;
                 var partPlatArt = Math.max(0, discArt - evK.articlePartTnd);
                 var e2 = getEntry(rec.am, rawArea, rawResto);
@@ -306,8 +313,8 @@
               if (view === 'carte' && !isCarteRule) continue;
               if (view === 'article' && isCarteRule) continue;
               if (view === 'article' && !isArticleOffer) continue;
-              var partRestoY = (matchedRule.partPct / 100) * baseCarteYassir;
-              var partPlatY = Math.max(0, dAmt - partRestoY);
+              var partPlatY = Math.min((matchedRule.partPct / 100) * baseCarteYassir, dAmt);
+              var partRestoY = Math.max(0, dAmt - partPlatY);
               var e3 = getEntry(rec.am, rawArea, rawResto);
               e3.totalOffres += 1;
               e3.remiseTnd += dAmt;
