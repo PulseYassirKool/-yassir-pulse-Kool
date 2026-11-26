@@ -468,6 +468,13 @@
                 </span>
                 <span class="lmd-radio-dot w-4 h-4 rounded-full border border-white/45 flex items-center justify-center shrink-0"></span>
               </button>
+              <button id="tabBtnKoolClients" type="button" data-tab="kool_clients" onclick="window.yassirSwitchTab('kool_clients')" class="hidden tab-btn w-full flex items-center justify-between px-3 py-2 rounded-xl text-white/80 hover:bg-white/10 transition cursor-pointer">
+                <span class="flex items-center gap-2.5 min-w-0">
+                  <i class="fa-solid fa-users text-xs w-4 text-center"></i>
+                  <span class="lmd-nav-label truncate">Clients Kool</span>
+                </span>
+                <span class="lmd-radio-dot w-4 h-4 rounded-full border border-white/45 flex items-center justify-center shrink-0"></span>
+              </button>
             </div>
           </div>
 
@@ -1123,7 +1130,7 @@
                   <i class="fa-solid fa-hand-holding-dollar text-[#FF2A6D] mr-1.5"></i> Participation des offres par restaurant
                 </h3>
                 <p id="partViewLabel" class="text-xs text-slate-500">Vue : Toute la carte • Période : toute la période</p>
-                <p class="text-[11px] text-slate-400 mt-0.5">Exemple : offre 30 %, participation 10 % → la plateforme prend 10 points du brut avant remise, le restaurant prend le reste de la remise (20 points). Participation plateforme = partPct % du brut avant remise • Participation restaurant = remise − plateforme (0 si la participation plateforme dépasse la remise). Règle avec participation vide ou 0 % : le restaurant prend toute l'offre. Offre sans aucune règle : remise comptée à 100 % pour la plateforme.</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">Exemple : offre 30 %, participation 10 % → la plateforme prend 10 points du brut avant remise, le restaurant prend le reste de la remise (20 points). Participation plateforme = partPct % du brut avant remise • Participation restaurant = remise − plateforme (0 si la participation plateforme dépasse la remise). Règle avec participation vide ou 0 % : le restaurant prend toute l'offre. Pour Kool, offre sans aucune règle dans la feuille « Offre Participation » : la remise n'est pas comptée (ni comme offre, ni en participation, ni dans les budgets). Pour Yassir, la remise sans règle est comptée à 100 % à la charge du restaurant.</p>
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <div class="inline-flex rounded-full bg-[#F3EBFF] p-1 border border-purple-200">
@@ -1404,7 +1411,7 @@
                 <!-- Colonne Gauche (6/12) : WoW Performance (W44 -> W47) + AOV Before % vs AOV After % -->
                 <div class="xl:col-span-6 space-y-5 xl:border-r-2 xl:border-dotted xl:border-[#FF1E6E] xl:pr-6">
                   <div class="border border-slate-400 rounded-xs p-3.5 bg-[#EFEFF3]">
-                    <h5 class="text-center text-sm font-extrabold text-[#5B21B6] mb-2">WoW Performance</h5>
+                    <h5 id="weeklyWowPerfTitle" class="text-center text-sm font-extrabold text-[#5B21B6] mb-2">WoW Performance</h5>
                     <div class="relative w-full h-60">
                       <canvas id="weeklyWowPerfChartCanvas"></canvas>
                     </div>
@@ -1444,6 +1451,10 @@
                       <canvas id="yoyGmvChartCanvas"></canvas>
                     </div>
                   </div>
+
+                  <div id="koolNoYoyNote" class="hidden rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
+                    <strong>Comparaison 2025 indisponible pour Kool :</strong> aucune donnée Kool 2025 (ni feuille 2025, ni historique) — la courbe 2025 est absente. Les records et les comparaisons sont calculés sur les données disponibles (oct.–nov. 2026).
+                  </div>
                 </div>
               </div>
 
@@ -1482,6 +1493,11 @@
                   <option value="Tier 2">Tier 2 (Moyen)</option>
                   <option value="Tier 3">Tier 3 (Faible)</option>
                 </select>
+                <div id="variationSortButtons" class="hidden flex items-center gap-1.5">
+                  <button id="btnVariationSortScore" type="button" onclick="window.yassirSetVariationSort('score')" class="px-2 py-1 rounded-full text-[11px] font-extrabold cursor-pointer bg-[#FFD100] text-[#111111] border border-[#111111] transition">Tout (score)</button>
+                  <button id="btnVariationSortTop20" type="button" onclick="window.yassirSetVariationSort('top20')" class="px-2 py-1 rounded-full text-[11px] font-bold cursor-pointer bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 transition">Top 20</button>
+                  <button id="btnVariationSortGrowth" type="button" onclick="window.yassirSetVariationSort('growth')" class="px-2 py-1 rounded-full text-[11px] font-bold cursor-pointer bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 transition">Top Growth</button>
+                </div>
                 <div class="relative">
                   <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#6C2BD9]/60 text-xs"></i>
                   <input id="searchVariationRestoInput" type="text" oninput="window.yassirRenderVariationTable()" placeholder="Filtrer restaurant, zone, segment..." class="pl-8 pr-3 py-1.5 text-xs bg-[#F8F9FC] border border-purple-200 rounded-full focus:outline-none focus:ring-2 focus:ring-[#6C2BD9]" />
@@ -1539,6 +1555,106 @@
                   </tr>
                 </thead>
                 <tbody id="synthVariationTableBody" class="bg-white divide-y divide-slate-200"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================================================================
+             VUE CLIENTS KOOL : NOUVEAUX VS RETOURS VS RÉACTIVÉS (slides 34, 37-38 du deck)
+             Kool uniquement. Définitions : Nouveau = New Client = 1 ; Retour = ancien
+             (New Client = 0) avec une commande précédente il y a moins de 60 jours ;
+             Réactivé = ancien avec une commande précédente il y a plus de 60 jours.
+             Par ville du portefeuille (Area) — les zones du deck ne correspondent
+             pas aux villes, aucun mapping n'est inventé.
+             ====================================================================== -->
+        <div id="panelKoolClients" class="hidden p-4 sm:p-5 space-y-6">
+          <div class="bg-[#F8F9FC] p-4 sm:p-5 rounded-2xl border border-purple-100 space-y-4">
+            <div>
+              <h3 class="text-sm font-extrabold text-[#1A1A2E]">
+                <i class="fa-solid fa-users text-[#FFD100] mr-1.5"></i> Clients Kool — Nouveaux vs Retours vs Réactivés
+                <span class="ml-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#FFD100] text-[#111111]">Kool</span>
+              </h3>
+              <p class="text-xs text-slate-500 mt-1">Comptage par <strong>client distinct</strong> (ID Client), sur les commandes <strong>livrées Food</strong> de la période filtrée.</p>
+              <p class="text-[11px] text-slate-400 mt-0.5"><strong>Nouveau :</strong> New Client = 1 sur sa première commande livrée de la période. <strong>Retour :</strong> New Client = 0 et commande précédente dans l'archive il y a moins de 60 jours. <strong>Réactivé :</strong> New Client = 0 et commande précédente il y a plus de 60 jours (seuil de 60 jours par défaut — modifiable sur demande). La commande précédente est cherchée dans l'archive chargée (oct.–nov. 2026) : avec 2 mois d'archive, un écart de plus de 60 jours est presque impossible, les réactivés resteront à 0 tant que l'archive ne couvrira pas plus de 60 jours. Par zone : ville du portefeuille (Area).</p>
+              <p id="koolCliCoverage" class="text-[11px] font-semibold text-slate-500 mt-1"></p>
+            </div>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Nouveaux clients</p>
+                <p id="koolCliKpiNouveaux" class="text-xl font-extrabold text-[#1A1A2E] mt-0.5">0</p>
+                <p id="koolCliPctNouveaux" class="text-[11px] text-slate-500">—</p>
+              </div>
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Clients de retour</p>
+                <p id="koolCliKpiRetours" class="text-xl font-extrabold text-[#1A1A2E] mt-0.5">0</p>
+                <p id="koolCliPctRetours" class="text-[11px] text-slate-500">—</p>
+              </div>
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Clients réactivés</p>
+                <p id="koolCliKpiReactives" class="text-xl font-extrabold text-[#1A1A2E] mt-0.5">0</p>
+                <p id="koolCliPctReactives" class="text-[11px] text-slate-500">—</p>
+              </div>
+              <div class="bg-white rounded-xl p-3.5 border border-purple-100">
+                <p class="text-[10px] font-bold uppercase text-slate-400">Total clients</p>
+                <p id="koolCliKpiTotal" class="text-xl font-extrabold text-[#6C2BD9] mt-0.5">0</p>
+                <p class="text-[11px] text-slate-500">clients distincts dans la période</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-purple-100 p-4">
+            <h4 class="text-sm font-extrabold text-[#1A1A2E] mb-2">Nouveaux vs Retours vs Réactivés par ville (top 10 villes)</h4>
+            <div class="relative w-full h-72">
+              <canvas id="koolCliAreaChartCanvas"></canvas>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-purple-100 overflow-hidden">
+            <div class="max-h-[420px] overflow-y-auto overflow-x-auto custom-scrollbar">
+              <table class="min-w-full divide-y divide-purple-100 text-xs">
+                <thead class="bg-[#6C2BD9] text-white font-bold uppercase sticky top-0 z-10">
+                  <tr>
+                    <th class="px-3 py-3 text-left">Ville (Area)</th>
+                    <th class="px-3 py-3 text-center">Nouveaux</th>
+                    <th class="px-3 py-3 text-center">Retours</th>
+                    <th class="px-3 py-3 text-center">Réactivés</th>
+                    <th class="px-3 py-3 text-center">Total</th>
+                    <th class="px-3 py-3 text-center">% nouveaux</th>
+                  </tr>
+                </thead>
+                <tbody id="koolCliAreaTableBody" class="divide-y divide-slate-100 bg-white"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="bg-white rounded-2xl border border-purple-100 overflow-hidden">
+              <h4 class="px-4 py-3 text-sm font-extrabold text-[#1A1A2E] bg-[#FFD100]/20 border-b border-purple-100">Top Acquisition (nouveaux)</h4>
+              <table class="min-w-full text-xs">
+                <thead class="bg-slate-50 text-slate-500 font-bold uppercase">
+                  <tr><th class="px-3 py-2 text-center">#</th><th class="px-3 py-2 text-left">Restaurant</th><th class="px-3 py-2 text-center">Nouveaux</th></tr>
+                </thead>
+                <tbody id="koolCliTopAcqBody" class="divide-y divide-slate-100 bg-white"></tbody>
+              </table>
+            </div>
+            <div class="bg-white rounded-2xl border border-purple-100 overflow-hidden">
+              <h4 class="px-4 py-3 text-sm font-extrabold text-[#1A1A2E] bg-slate-100 border-b border-purple-100">Top Returning (retours)</h4>
+              <table class="min-w-full text-xs">
+                <thead class="bg-slate-50 text-slate-500 font-bold uppercase">
+                  <tr><th class="px-3 py-2 text-center">#</th><th class="px-3 py-2 text-left">Restaurant</th><th class="px-3 py-2 text-center">Retours</th></tr>
+                </thead>
+                <tbody id="koolCliTopRetBody" class="divide-y divide-slate-100 bg-white"></tbody>
+              </table>
+            </div>
+            <div class="bg-white rounded-2xl border border-purple-100 overflow-hidden">
+              <h4 class="px-4 py-3 text-sm font-extrabold text-[#1A1A2E] bg-slate-100 border-b border-purple-100">Top Reactivated (réactivés)</h4>
+              <table class="min-w-full text-xs">
+                <thead class="bg-slate-50 text-slate-500 font-bold uppercase">
+                  <tr><th class="px-3 py-2 text-center">#</th><th class="px-3 py-2 text-left">Restaurant</th><th class="px-3 py-2 text-center">Réactivés</th></tr>
+                </thead>
+                <tbody id="koolCliTopReaBody" class="divide-y divide-slate-100 bg-white"></tbody>
               </table>
             </div>
           </div>

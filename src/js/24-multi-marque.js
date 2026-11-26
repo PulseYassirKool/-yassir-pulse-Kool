@@ -438,6 +438,11 @@
           if (isKool) zeroStSel.value = 'ALL';
         }
 
+        // Onglet « Clients Kool » (Nouveaux vs Retours vs Réactivés) : Kool uniquement.
+        var koolCliBtn = document.getElementById('tabBtnKoolClients');
+        if (koolCliBtn) koolCliBtn.classList.toggle('hidden', !isKool);
+        if (!isKool && state.activeTab === 'kool_clients') state.activeTab = 'synth_global';
+
         var mainFileSub = document.getElementById('mainFileSub');
         var totalRowsInBase = Math.max(0, (state.rawSourceRows ? state.rawSourceRows.length - 1 : 0));
         var nbFiles = state.storedFilesMeta ? state.storedFilesMeta.length : 0;
@@ -556,10 +561,12 @@
         // C = 2 (Raison d'annulation)
         // D = 3 (Date)
         // E = 4 (N° commande)
+        // F = 5 (ID Client)
         // G = 6 (Restaurant)
         // J = 9 (Montant Hors Frais De Livraison)
         // K = 10 (Frais De Livraison : si < 5 DT => calculé en tant que à payer réduit = 5 - K)
         // L = 11 (Remise)
+        // AG = 32 (New Client : 1 = nouveau client, 0 = ancien client)
         // GMV = J + L
         var COL_A_ANNULE = 0;
         var COL_C_RAISON = 2;
@@ -569,6 +576,10 @@
         var COL_J_MONTANT_HORS_LIV = 9;
         var COL_K_FRAIS_LIV = 10;
         var COL_L_REMISE = 11;
+        // « ID Client » et « New Client » : résolus par nom d'en-tête, repli sur
+        // l'indice fixe (F = 5, AG = 32) si l'en-tête est introuvable.
+        var COL_F_ID_CLIENT = normHeaders.indexOf('id client') !== -1 ? normHeaders.indexOf('id client') : 5;
+        var COL_AG_NEW_CLIENT = normHeaders.indexOf('new client') !== -1 ? normHeaders.indexOf('new client') : 32;
 
         var mappedAoa = [TARGET_HEADERS.slice()];
         var idxMap = {};
@@ -672,6 +683,20 @@
             outRow[idxMap['delivery amount']] = fraisLivK;
             outRow[idxMap['à payer réduits']] = 0;
           }
+
+          // Colonne F (5) : ID Client — identifiant du client (Nouveaux / Retours / Réactivés).
+          var idClientVal = (sRow.length > COL_F_ID_CLIENT && sRow[COL_F_ID_CLIENT] !== undefined && sRow[COL_F_ID_CLIENT] !== null)
+            ? String(sRow[COL_F_ID_CLIENT]).trim()
+            : '';
+          outRow[idxMap['customer id']] = idClientVal;
+
+          // Colonne AG (32) : New Client (1 = nouveau client, 0 = ancien client).
+          var newClientRaw = sRow.length > COL_AG_NEW_CLIENT ? sRow[COL_AG_NEW_CLIENT] : '';
+          var newClientTxt = normalizeText(String(newClientRaw === null || newClientRaw === undefined ? '' : newClientRaw));
+          var newClientVal = (newClientTxt === '1' || newClientTxt === 'oui' || newClientTxt === 'yes' || newClientTxt === 'true' || newClientTxt === 'vrai')
+            ? 1
+            : ((newClientTxt === '0' || newClientTxt === 'non' || newClientTxt === 'no' || newClientTxt === 'false' || newClientTxt === 'faux') ? 0 : '');
+          outRow[idxMap['new client']] = newClientVal;
 
           mappedAoa.push(outRow);
         }

@@ -370,9 +370,6 @@
 
         var costTnd = 0;
         var discountTotalTnd = 0;
-        // Remise totale de toutes les lignes remisées, règle ou non : sert au repli
-        // « 100 % plateforme » de la section Participation (commandes sans règle).
-        var discountAllTnd = 0;
         var matchedItemsCount = 0;
         var breakdown = [];
 
@@ -389,7 +386,6 @@
             ? it.discountPrice
             : (it.unitPrice || it.originalPrice || 0);
           var lineDiscountTnd = Math.max(0, (origLineTotal - effUnitPrice * (it.quantity || 1)));
-          discountAllTnd += lineDiscountTnd;
 
           // Chercher une règle article correspondante (par nom d'article/détail, Super Promo, ou règle article générique du restaurant)
           var appliedRule = null;
@@ -434,14 +430,12 @@
         return {
           costTnd: Number(costTnd.toFixed(3)),
           discountTotalTnd: Number(discountTotalTnd.toFixed(3)),
-          discountAllTnd: Number(discountAllTnd.toFixed(3)),
           matchedItemsCount: matchedItemsCount,
           breakdown: breakdown
         };
       }
 
-      // Exposé pour la section Participation (repli « 100 % plateforme » en vue
-      // « Par article » quand la commande n'a pas de règle article).
+      // Exposé pour la section Participation (vue « Par article » Kool) et les tests.
       window.yassirCalculerParticipationArticlesKool = calculerParticipationArticlesCommandeKool;
 
       // Évaluation ultra-rapide des offres & participation Kool (Toute la carte + Offres sur articles)
@@ -515,6 +509,11 @@
         var rules = state.offreParticipationRules || [];
         if (rules.length === 0) return 0;
 
+        // Règles comptables (2026-11-26) : pour Kool, seules les offres de la feuille
+        // « Offre Participation » comptent — sans règle, la commande est exclue
+        // (coût 0, voir la branche Kool : evK null → rien n'est ajouté). Pour Yassir,
+        // une offre sans règle est comptée à 100 % à la charge du restaurant : le
+        // coût restaurant vaut alors la remise entière D (voir le « else » ci-dessous).
         // Mode Kool : participation Toute la carte (% * GMV) + participation Offres sur articles (% * Prix Original Article)
         if (typeof currentBrand !== 'undefined' && currentBrand === 'kool') {
           var idxRestoK = TARGET_HEADERS.indexOf('restaurant name');
@@ -583,7 +582,8 @@
           var rawResto = String(c[idxResto] || '').trim().toLowerCase();
           if (!rawResto) continue;
           var candidateRules = rulesByResto.get(rawResto) || rulesByResto.get(normalizeText(rawResto));
-          if (!candidateRules || candidateRules.length === 0) continue;
+          // Pas de « continue » ici : sans aucune règle pour ce restaurant, l'offre
+          // est quand même à 100 % à la charge du restaurant (repli Yassir, voir ci-dessous).
 
           var orderIso = parseOrderDayToIsoDate(c[idxOrderDay]);
           var dTypeLower = String(c[idxDiscType] || '').toLowerCase();
@@ -597,17 +597,19 @@
 
           // Trouver la règle applicable selon Start Date / End Date et TAG
           var matchedRule = null;
-          for (var j = 0; j < candidateRules.length; j++) {
-            var cand = candidateRules[j];
-            if (orderIso) {
-              if (cand.startDate && orderIso < cand.startDate) continue;
-              if (cand.endDate && orderIso > cand.endDate) continue;
+          if (candidateRules && candidateRules.length > 0) {
+            for (var j = 0; j < candidateRules.length; j++) {
+              var cand = candidateRules[j];
+              if (orderIso) {
+                if (cand.startDate && orderIso < cand.startDate) continue;
+                if (cand.endDate && orderIso > cand.endDate) continue;
+              }
+              var tagLow = (cand.tag || '').toLowerCase();
+              if (tagLow === 'pack' && !/super\s*promo/i.test(fCatLower) && !/pack/i.test(dTypeLower)) continue;
+              if (tagLow === 'discount' && !/(percentage|pourcentage)/i.test(dTypeLower) && dAmt <= 0) continue;
+              matchedRule = cand;
+              break;
             }
-            var tagLow = (cand.tag || '').toLowerCase();
-            if (tagLow === 'pack' && !/super\s*promo/i.test(fCatLower) && !/pack/i.test(dTypeLower)) continue;
-            if (tagLow === 'discount' && !/(percentage|pourcentage)/i.test(dTypeLower) && dAmt <= 0) continue;
-            matchedRule = cand;
-            break;
           }
 
           if (matchedRule) {
@@ -618,6 +620,10 @@
             var baseAmount = itemTot > 0 ? itemTot : (purgerNombre(c[idxTotalFood]) + dAmt);
             var partPlatY = Math.min((matchedRule.partPct / 100) * baseAmount, dAmt);
             totalParticipationCostTnd += Math.max(0, dAmt - partPlatY);
+          } else {
+            // Repli Yassir (règle 2026-11-26) : offre sans règle → 100 % à la charge
+            // du restaurant (la remise entière est un coût restaurant).
+            totalParticipationCostTnd += dAmt;
           }
         }
 

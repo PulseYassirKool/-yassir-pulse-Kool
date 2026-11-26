@@ -199,10 +199,14 @@
       //   Yassir n'a pas de détail par article avec prix : la vue
       //   « Par article » y est calculée au niveau commande (offres Super Promo).
       // - Règle à partPct vide ou 0 : la plateforme prend 0, le restaurant prend toute la remise.
-      // - Repli (décision utilisateur) : une commande livrée avec une remise mais SANS
-      //   règle de participation du tout est quand même comptée, avec sa remise à 100 % pour
-      //   la plateforme (participation restaurant = 0). En vue « Par article » Kool,
-      //   le repli s'applique aux lignes d'articles remisées sans règle article.
+      // - RÈGLE COMPTABLE (2026-11-26, KOOL UNIQUEMENT) : pour Kool, seules les offres
+      //   présentes dans la feuille « Offre Participation » sont comptées. Une commande
+      //   Kool livrée avec une remise mais SANS aucune règle applicable est IGNORÉE
+      //   (ni en Total Offres, ni en remise, ni en participation). En vue « Par article »
+      //   Kool, les lignes d'articles remisées sans règle article sont ignorées de la
+      //   même façon. Pour Yassir, le repli change de sens (règle 2026-11-26) : remise
+      //   sans règle → 100 % à la charge du restaurant (voir la branche Yassir
+      //   ci-dessous) — l'offre reste comptée (Total Offres, remise, budgets).
       function calculerParticipationParRestaurant(viewMode) {
         var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
         var view = viewMode === 'article' ? 'article' : 'carte';
@@ -268,13 +272,8 @@
                 e1.remiseTnd += dAmt;
                 e1.partRestoTnd += partRestoCarte;
                 e1.partPlateformeTnd += partPlatCarte;
-              } else if (dAmt > 0) {
-                // Repli : remise sans règle « Toute la carte » → 100 % plateforme.
-                var e1f = getEntry(rec.am, rawArea, rawResto);
-                e1f.totalOffres += 1;
-                e1f.remiseTnd += dAmt;
-                e1f.partPlateformeTnd += dAmt;
               }
+              // Sans règle « Toute la carte » : commande ignorée (remise non comptable).
             } else {
               if (evK && evK.isPromoArticle) {
                 // articlePartTnd = part restaurant (remise lignes − part plateforme,
@@ -286,19 +285,8 @@
                 e2.remiseTnd += discArt;
                 e2.partRestoTnd += evK.articlePartTnd;
                 e2.partPlateformeTnd += partPlatArt;
-              } else {
-                // Repli : articles remisés sans règle article → 100 % plateforme.
-                var discAll = 0;
-                if (window.yassirCalculerParticipationArticlesKool && c[idxOrderId]) {
-                  discAll = window.yassirCalculerParticipationArticlesKool(String(c[idxOrderId]), []).discountAllTnd || 0;
-                }
-                if (discAll > 0) {
-                  var e2f = getEntry(rec.am, rawArea, rawResto);
-                  e2f.totalOffres += 1;
-                  e2f.remiseTnd += discAll;
-                  e2f.partPlateformeTnd += discAll;
-                }
               }
+              // Sans règle article : lignes remisées ignorées (remise non comptable).
             }
           } else {
             var dTypeLower = String(c[idxDiscType] || '').toLowerCase();
@@ -321,13 +309,15 @@
               e3.partRestoTnd += partRestoY;
               e3.partPlateformeTnd += partPlatY;
             } else if (dAmt > 0) {
-              // Repli : remise sans règle → 100 % plateforme (vue selon le type d'offre).
+              // Repli Yassir (règle 2026-11-26) : remise sans règle → 100 % à la charge
+              // du restaurant (vue selon le type d'offre). Pour Kool, sans règle = exclu
+              // (voir la branche Kool ci-dessus).
               if (view === 'carte' && isArticleOffer) continue;
               if (view === 'article' && !isArticleOffer) continue;
               var e3f = getEntry(rec.am, rawArea, rawResto);
               e3f.totalOffres += 1;
               e3f.remiseTnd += dAmt;
-              e3f.partPlateformeTnd += dAmt;
+              e3f.partRestoTnd += dAmt;
             }
           }
         }
@@ -437,7 +427,9 @@
         if (banner) {
           var msg = '';
           if (res.note === 'no_data') msg = 'Aucune donnée chargée : importez d’abord votre fichier Data exp (ou lancez « Sync Yassir » / « Sync Kool »).';
-          else if (res.note === 'no_rules') msg = 'Aucune règle de participation chargée : les remises sont comptées à 100 % pour la plateforme. Lancez « Sync Yassir » (ou « Sync Kool ») pour charger la feuille « Offre Participation ».';
+          else if (res.note === 'no_rules') msg = isKool
+            ? 'Aucune règle de participation chargée : pour Kool, seules les offres de la feuille « Offre Participation » sont comptées — les remises sans règle ne sont pas comptables. Lancez « Sync Kool » pour charger la feuille « Offre Participation ».'
+            : 'Aucune règle de participation chargée : les remises sont comptées à 100 % à la charge du restaurant. Lancez « Sync Yassir » pour charger la feuille « Offre Participation ».';
           else if (res.note === 'no_items_loaded') msg = 'Aucun détail article chargé : faites un « Sync Kool » pour charger la feuille des détails articles.';
           else if (res.note === 'items_out_of_coverage') {
             var covMax = window.koolOrderItemsMaxDate || '';

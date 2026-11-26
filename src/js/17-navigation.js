@@ -13,6 +13,7 @@
           cancellations_analytics: { title: 'Analyse des Annulations (Types, % & Restaurant Rejected)', sub: 'Répartition des types d\'annulation, graphiques par jour de semaine et motifs détaillés', icon: 'fa-solid fa-ban' },
           global_analysis: { title: 'Global Analysis — Performance Hebdomadaire (Week 01 → 53)', sub: 'Tableau hebdomadaire Yassir : Reçu, Livré, GMV, CA, AOV, Variations WoW % et % Global Livré', icon: 'fa-solid fa-globe' },
           restaurant_analysis: { title: 'Restaurant Analysis — Growth & Drop Hebdomadaire', sub: 'Comparatif hebdomadaire par restaurant : Delivered vs AVG Last 4 Week, WoW, Promo, CVM, Raison & Offre', icon: 'fa-solid fa-arrow-trend-up' },
+          kool_clients: { title: 'Clients Kool — Nouveaux vs Retours vs Réactivés', sub: 'Clients distincts par ville et par partenaire, sur la période filtrée (ID Client + New Client)', icon: 'fa-solid fa-users' },
           portefeuilles: { title: 'Portefeuilles AM & Contribution au Global', sub: 'Suivi des 7 portefeuilles Account Managers et liste des restaurants attribués', icon: 'fa-solid fa-briefcase' },
           commissions: { title: 'Grille des Commissions (Restaurant par facture)', sub: 'Taux TTC personnalisés synchronisés avec Google Sheets', icon: 'fa-solid fa-percent' }
         };
@@ -123,6 +124,7 @@
           var anyVisible = false;
           items.forEach(function (btn) {
             if (btn.id === 'tabBtnSynthGlobal' && (!canSeeGlobalSynth() || (!isMarketOnlyViewer() && getEffectiveAmFilter() !== 'ALL'))) return;
+            if (btn.id === 'tabBtnKoolClients' && (typeof currentBrand === 'undefined' || currentBrand !== 'kool')) return;
             if (btn.id === 'tabBtnCommissions' && !isOwnerAdmin()) return;
             if (btn.id === 'tabBtnFood' && isMarketOnlyViewer()) return;
             if (btn.id === 'tabBtnMarket' && isFoodOnlyAm()) return;
@@ -147,6 +149,7 @@
         if (tabName === 'food' && isMarketOnlyViewer()) return;
         if (tabName === 'market' && isFoodOnlyAm()) return;
         if (tabName === 'synth_global' && (!canSeeGlobalSynth() || (!isMarketOnlyViewer() && getEffectiveAmFilter() !== 'ALL'))) return;
+        if (tabName === 'kool_clients' && (typeof currentBrand === 'undefined' || currentBrand !== 'kool')) return;
         state.activeTab = tabName;
         state.currentPage = 1;
         syncLmdSidebarActiveState(tabName);

@@ -442,6 +442,7 @@
         var panelPortefeuilles = document.getElementById('panelPortefeuilles');
         var panelComm = document.getElementById('panelCommissions');
         var panelParticipation = document.getElementById('panelParticipation');
+        var panelKoolClients = document.getElementById('panelKoolClients');
 
         panelData.classList.add('hidden');
         if (panelSynthGlobal) panelSynthGlobal.classList.add('hidden');
@@ -449,8 +450,21 @@
         if (panelGlobalAnalysis) panelGlobalAnalysis.classList.add('hidden');
         if (panelRestaurantAnalysis) panelRestaurantAnalysis.classList.add('hidden');
         if (panelParticipation) panelParticipation.classList.add('hidden');
+        if (panelKoolClients) panelKoolClients.classList.add('hidden');
         panelPortefeuilles.classList.add('hidden');
         panelComm.classList.add('hidden');
+
+        if (state.activeTab === 'kool_clients') {
+          if (typeof currentBrand !== 'undefined' && currentBrand !== 'kool') {
+            state.activeTab = 'synth_global';
+            if (panelSynthGlobal) panelSynthGlobal.classList.remove('hidden');
+            renderSynthGlobalPanel();
+            return;
+          }
+          if (panelKoolClients) panelKoolClients.classList.remove('hidden');
+          renderKoolClientsPanel();
+          return;
+        }
 
         if (state.activeTab === 'participation') {
           if (panelParticipation) panelParticipation.classList.remove('hidden');

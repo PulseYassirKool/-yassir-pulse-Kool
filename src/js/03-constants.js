@@ -18,7 +18,10 @@
         'Yassir+ Subscription Fee', 'Refunded', 'final earnings', 'returned', 'coupon admin', 'coupon restaurant',
         'Discount Amount', 'Discount Type', 'Night fare', 'Time Taken', 'Food Category', 'Food Item', 'Accepted By',
         'Assigned By', 'Rejection logs', 'Bonus Amount', 'Total Driver Payout', 'Tags', 'Discount Type Provider',
-        'Driver Rating', 'Restaurant Rating', 'Driver Adjustment Amount', 'Driver Adjustment Reason', 'Driver Adjustment Category'
+        'Driver Rating', 'Restaurant Rating', 'Driver Adjustment Amount', 'Driver Adjustment Reason', 'Driver Adjustment Category',
+        // Colonnes client Kool (lues par le normaliseur Data Kool : « ID Client » col. F, « New Client » col. AG) :
+        // ajoutées en FIN de liste pour ne pas décaler les indices des 109 colonnes existantes.
+        'customer id', 'new client'
       ];
 
       var KEY_HEADERS = [
@@ -33,7 +36,7 @@
 
       var NUMERIC_COLS = new Set([
         'item total', 'item total.1', 'Total Food', 'Total Food.1',
-        'original delivery amount', 'delivery amount'
+        'original delivery amount', 'delivery amount', 'new client'
       ]);
 
       var DATE_COLS = new Set(['order day', 'delivered day']);

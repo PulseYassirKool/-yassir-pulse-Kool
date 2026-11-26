@@ -643,7 +643,10 @@
         var activeStores26 = kpiMap['Active Store'] || 0;
 
         // Toutes les semaines de 2025 (Google Sheet 2025 en colonnes W 07..W 47) et de 2026 (Data exp)
-        var map25 = extract2025MetricsByWeekMap();
+        // Kool : aucune donnée 2025 — map25 reste vide (pas de comparaison YoY, pas de records 2025,
+        // la courbe 2025 est donc absente et le message l'explique).
+        var isKoolBrand = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        var map25 = isKoolBrand ? new Map() : extract2025MetricsByWeekMap();
         var map26AllWeeks = compute2026AllWeeksStatsMap();
         var allSortedW26 = Array.from(map26AllWeeks.keys()).sort(function (a, b) { return a - b; });
 
@@ -722,10 +725,16 @@
             });
             yoyGrid.className = 'grid grid-cols-1 md:grid-cols-2 gap-3';
             yoyGrid.innerHTML = cardsHtml;
+          } else if (isKoolBrand) {
+            yoyGrid.innerHTML = '<div class="col-span-full text-xs text-slate-500 py-1">Comparaison 2025 indisponible pour Kool : aucune donnée Kool 2025 (ni feuille 2025, ni historique).</div>';
           } else {
             yoyGrid.innerHTML = '<div class="col-span-full text-xs text-slate-500 py-1">Cliquez sur <strong>Sync YoY 2025</strong> pour charger les semaines de référence 2025 (W07–W47).</div>';
           }
         }
+
+        // Note Kool sous les graphiques YoY : la courbe 2025 est absente (aucune donnée Kool 2025).
+        var koolYoyNote = document.getElementById('koolNoYoyNote');
+        if (koolYoyNote) koolYoyNote.classList.toggle('hidden', !isKoolBrand);
 
         // 2. Calcul des métriques de la semaine précédente (Data préc ou W-1 automatique) pour WoW
         var prevReq = 0, prevDel = 0, prevGmvBrut = 0, prevGmvAfter = 0, prevCa = 0, prevPromo = 0, prevStoresCount = 0;
@@ -940,10 +949,32 @@
           var bestWAvg = bestWeekObj ? Math.round(bestWeekObj.del / 7) : avgDayDel;
           var vsBestAvgPct = bestWAvg > 0 ? Math.round(((avgDayDel - bestWAvg) / bestWAvg) * 100) : 0;
 
+          // Meilleur jour (commandes livrées) calculé sur les données disponibles.
+          // Yassir : record historique codé en dur (3006 le 25/11/2022).
+          // Kool : meilleur jour de l'archive chargée (oct.–nov. 2026) — jamais inventé.
+          var topDayTxt = '3006(25/11/2022)';
+          if (isKoolBrand) {
+            var bestDayVal = 0;
+            var bestDayIso = '';
+            map26AllWeeks.forEach(function (wObj) {
+              if (curSelectedW && wObj.week > curSelectedW) return;
+              if (!wObj.dailyDel) return;
+              wObj.dailyDel.forEach(function (cnt, iso) {
+                if (cnt > bestDayVal) { bestDayVal = cnt; bestDayIso = iso; }
+              });
+            });
+            if (bestDayVal > 0 && bestDayIso) {
+              var bdParts = bestDayIso.split('-');
+              topDayTxt = Number(bestDayVal).toLocaleString('fr-FR') + ' (' + bdParts[2] + '/' + bdParts[1] + '/' + bdParts[0] + ') • sur les données disponibles (oct.–nov. 2026)';
+            } else {
+              topDayTxt = 'n/a • sur les données disponibles (oct.–nov. 2026)';
+            }
+          }
+
           bulletsEl.innerHTML =
             '<li>• <span class="text-[#5B21B6] font-extrabold">Top Weekly Order performance : ' + escapeHtml(bestWLabel) + ' :</span> <span class="text-[#5B21B6] font-bold">' + escapeHtml(bestWStr) + '</span> <span class="text-[#FF1E6E] font-extrabold">__ ' + escapeHtml(vsTripleStr) + '</span></li>' +
             '<li>• <span class="text-[#5B21B6] font-extrabold">Top AVG Del/Day :</span> <span class="text-[#5B21B6] font-bold">' + bestWAvg.toLocaleString('fr-FR') + '(' + escapeHtml(bestWLabel) + ') <strong>VS</strong> ' + avgDayDel.toLocaleString('fr-FR') + '(' + escapeHtml(curWLabel) + ')</span> <span class="text-[#FF1E6E] font-extrabold">' + (vsBestAvgPct >= 0 ? '+' : '') + vsBestAvgPct + '%</span></li>' +
-            '<li>• <span class="text-[#5B21B6] font-extrabold">Top Del Ord/Day :</span> <span class="text-[#5B21B6] font-bold">3006(25/11/2022)</span></li>';
+            '<li>• <span class="text-[#5B21B6] font-extrabold">Top Del Ord/Day :</span> <span class="text-[#5B21B6] font-bold">' + escapeHtml(topDayTxt) + '</span></li>';
         }
 
         // Graphe Executive Summary (Lundi -> Dimanche : Barres Req & Del + Courbe GMV avec toutes les valeurs affichées)
@@ -1024,6 +1055,68 @@
         var w25DelArr = last4Weeks.map(function (w) { return map25.has(w) ? Math.round(map25.get(w).del) : null; });
         var w25GmvArr = last4Weeks.map(function (w) { return map25.has(w) ? Math.round(map25.get(w).gmv) : null; });
 
+        // Kool (slide 34 du deck) : Daily Orders (barres) vs Avg Daily GMV (courbe) par semaine.
+        // Avg Daily GMV = GMV de la semaine / 7 jours calendaires ; Daily Orders = livrées / 7.
+        // Yassir : graphique WoW inchangé (GMV + Received + Delivered).
+        var wowPerfTitle = document.getElementById('weeklyWowPerfTitle');
+        if (wowPerfTitle) wowPerfTitle.textContent = isKoolBrand ? 'Daily Orders vs Avg Daily GMV' : 'WoW Performance';
+        var wowPerfDatasets;
+        if (isKoolBrand) {
+          wowPerfDatasets = [
+            {
+              type: 'line',
+              label: 'Avg Daily GMV',
+              data: w26GmvArr.map(function (v) { return Math.round(v / 7); }),
+              borderColor: '#111111',
+              backgroundColor: '#111111',
+              borderWidth: 2,
+              borderDash: [2, 2],
+              pointRadius: 3.5,
+              yAxisID: 'y1',
+              order: 0
+            },
+            {
+              label: 'Daily Orders',
+              data: w26DelArr.map(function (v) { return Math.round(v / 7); }),
+              backgroundColor: '#FFD100',
+              borderRadius: 2,
+              yAxisID: 'y',
+              order: 1
+            }
+          ];
+        } else {
+          wowPerfDatasets = [
+            {
+              type: 'line',
+              label: 'GMV',
+              data: w26GmvArr,
+              borderColor: '#1A1A2E',
+              backgroundColor: '#1A1A2E',
+              borderWidth: 2,
+              borderDash: [2, 2],
+              pointRadius: 3.5,
+              yAxisID: 'y1',
+              order: 0
+            },
+            {
+              label: 'Received',
+              data: w26ReqArr,
+              backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9',
+              borderRadius: 2,
+              yAxisID: 'y',
+              order: 1
+            },
+            {
+              label: 'Delivered',
+              data: w26DelArr,
+              backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF1E6E',
+              borderRadius: 2,
+              yAxisID: 'y',
+              order: 2
+            }
+          ];
+        }
+
         var wowPerfCanvas = document.getElementById('weeklyWowPerfChartCanvas');
         if (wowPerfCanvas && window.Chart) {
           if (weeklyWowPerfChartInst) weeklyWowPerfChartInst.destroy();
@@ -1032,36 +1125,7 @@
             plugins: [yassirSlideDataLabelsPlugin],
             data: {
               labels: wLabelsLower,
-              datasets: [
-                {
-                  type: 'line',
-                  label: 'GMV',
-                  data: w26GmvArr,
-                  borderColor: '#1A1A2E',
-                  backgroundColor: '#1A1A2E',
-                  borderWidth: 2,
-                  borderDash: [2, 2],
-                  pointRadius: 3.5,
-                  yAxisID: 'y1',
-                  order: 0
-                },
-                {
-                  label: 'Received',
-                  data: w26ReqArr,
-                  backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#FFD100' : '#6C2BD9',
-                  borderRadius: 2,
-                  yAxisID: 'y',
-                  order: 1
-                },
-                {
-                  label: 'Delivered',
-                  data: w26DelArr,
-                  backgroundColor: (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? '#111111' : '#FF1E6E',
-                  borderRadius: 2,
-                  yAxisID: 'y',
-                  order: 2
-                }
-              ]
+              datasets: wowPerfDatasets
             },
             options: {
               responsive: true,
@@ -1451,6 +1515,13 @@
 
         var varSection = document.getElementById('synthVariationSection');
         var hasPrev = canSeeGlobalSynth() && ((state.prevSourceRows && state.prevSourceRows.length > 1) || ((state.prevDateStart || state.prevDateEnd) && state.rawSourceRows && state.rawSourceRows.length > 1));
+        // Bascule Top 20 / Top Growth (slides 35-36 du deck) : visible en Kool uniquement.
+        var varSortBtns = document.getElementById('variationSortButtons');
+        if (varSortBtns) {
+          var isKoolVar = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+          varSortBtns.classList.toggle('hidden', !isKoolVar);
+          if (isKoolVar) updateVariationSortButtonsUI();
+        }
         if (varSection) {
           if (hasPrev) {
             currentVariationRowsList = calculerVariationEntrePeriodes();

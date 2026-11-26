@@ -2,6 +2,28 @@
          E3. MODULE VARIATION ENTRE DEUX PÉRIODES (DATA EXP VS DATA PRÉC)
          ======================================================================== */
       var currentVariationRowsList = [];
+      // Mode de tri du tableau Variation — Kool uniquement (slides 35-36 du deck) :
+      // 'score' = score composite (défaut, Yassir inchangé), 'top20' = Top 20 par livrées,
+      // 'growth' = Top Growth par croissance % vs période précédente.
+      var variationSortMode = 'score';
+
+      function updateVariationSortButtonsUI() {
+        var btnIds = { score: 'btnVariationSortScore', top20: 'btnVariationSortTop20', growth: 'btnVariationSortGrowth' };
+        var activeCls = 'px-2 py-1 rounded-full text-[11px] font-extrabold cursor-pointer bg-[#FFD100] text-[#111111] border border-[#111111] transition';
+        var idleCls = 'px-2 py-1 rounded-full text-[11px] font-bold cursor-pointer bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 transition';
+        Object.keys(btnIds).forEach(function (m) {
+          var btn = document.getElementById(btnIds[m]);
+          if (btn) btn.className = (variationSortMode === m) ? activeCls : idleCls;
+        });
+      }
+
+      // Bascule Top 20 / Top Growth (Kool uniquement ; Yassir reste en tri par score).
+      window.yassirSetVariationSort = function (mode) {
+        if (mode !== 'top20' && mode !== 'growth') mode = 'score';
+        variationSortMode = mode;
+        updateVariationSortButtonsUI();
+        window.yassirRenderVariationTable();
+      };
 
       function chargerFichierPrecedent(file) {
         if (!file || !canSeeGlobalSynth()) return;
@@ -486,6 +508,23 @@
                  (r.segment && r.segment.toLowerCase().includes(q)) ||
                  (r.statutPartenaire && r.statutPartenaire.toLowerCase().includes(q));
         });
+
+        // Modes de tri Kool (slides 35-36 du deck) ; Yassir reste trié par score composite.
+        var isKoolBrand = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        var sortMode = isKoolBrand ? variationSortMode : 'score';
+        var subEl = document.getElementById('synthVariationSubDesc');
+        if (sortMode === 'top20') {
+          filtered.sort(function (a, b) { return (b.deliv - a.deliv) || a.partenaire.localeCompare(b.partenaire, 'fr'); });
+          filtered = filtered.slice(0, 20);
+          if (subEl) subEl.textContent = 'Top 20 — trié par commandes livrées décroissantes • Période précédente via « Data préc »';
+        } else if (sortMode === 'growth') {
+          filtered = filtered.filter(function (r) { return r.hasPrev; });
+          filtered.sort(function (a, b) { return (b.growthPct - a.growthPct) || (b.deliv - a.deliv); });
+          filtered = filtered.slice(0, 20);
+          if (subEl) subEl.textContent = 'Top Growth — trié par croissance % vs période précédente • Restaurants avec une période précédente uniquement';
+        } else if (isKoolBrand && subEl) {
+          subEl.textContent = 'Commandes Food VF uniquement • Trié par score composite';
+        }
 
         if (filtered.length === 0) {
           tbody.innerHTML = '<tr><td colspan="39" class="px-4 py-8 text-center text-slate-400">Aucun partenaire trouvé.</td></tr>';
