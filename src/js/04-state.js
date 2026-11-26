@@ -368,6 +368,9 @@
 
         var costTnd = 0;
         var discountTotalTnd = 0;
+        // Remise totale de toutes les lignes remisées, règle ou non : sert au repli
+        // « 100 % plateforme » de la section Participation (commandes sans règle).
+        var discountAllTnd = 0;
         var matchedItemsCount = 0;
         var breakdown = [];
 
@@ -384,6 +387,7 @@
             ? it.discountPrice
             : (it.unitPrice || it.originalPrice || 0);
           var lineDiscountTnd = Math.max(0, (origLineTotal - effUnitPrice * (it.quantity || 1)));
+          discountAllTnd += lineDiscountTnd;
 
           // Chercher une règle article correspondante (par nom d'article/détail, Super Promo, ou règle article générique du restaurant)
           var appliedRule = null;
@@ -423,10 +427,15 @@
         return {
           costTnd: Number(costTnd.toFixed(3)),
           discountTotalTnd: Number(discountTotalTnd.toFixed(3)),
+          discountAllTnd: Number(discountAllTnd.toFixed(3)),
           matchedItemsCount: matchedItemsCount,
           breakdown: breakdown
         };
       }
+
+      // Exposé pour la section Participation (repli « 100 % plateforme » en vue
+      // « Par article » quand la commande n'a pas de règle article).
+      window.yassirCalculerParticipationArticlesKool = calculerParticipationArticlesCommandeKool;
 
       // Évaluation ultra-rapide des offres & participation Kool (Toute la carte + Offres sur articles)
       function evaluerOffreKoolPourCommande(restoName, orderDayVal, orderIdVal) {

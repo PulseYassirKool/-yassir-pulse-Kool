@@ -196,9 +196,10 @@
       //   contractuelle du restaurant dépasse la remise sur certaines commandes.
       //   Yassir n'a pas de détail par article avec prix : la vue
       //   « Par article » y est calculée au niveau commande (offres Super Promo).
-      // - Seules les commandes avec une règle de participation partPct > 0 sont
-      //   comptées : sans règle, le partage resto / plateforme n'est pas défini (ces
-      //   commandes restent visibles dans l'onglet Offres).
+      // - Repli (décision utilisateur) : une commande livrée avec une remise mais SANS
+      //   règle de participation est quand même comptée, avec sa remise à 100 % pour
+      //   la plateforme (participation restaurant = 0). En vue « Par article » Kool,
+      //   le repli s'applique aux lignes d'articles remisées sans règle article.
       function calculerParticipationParRestaurant(viewMode) {
         var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
         var view = viewMode === 'article' ? 'article' : 'carte';
@@ -253,25 +254,44 @@
 
           if (isKool) {
             var evK = evaluerOffreKoolPourCommande(rawResto, c[idxOrderDay], c[idxOrderId]);
-            if (!evK) continue;
             if (view === 'carte') {
-              if (!(evK.partPct > 0)) continue;
-              var partRestoCarte = (evK.partPct / 100) * baseCarteKool;
-              var partPlatCarte = Math.max(0, dAmt - partRestoCarte);
-              var e1 = getEntry(rec.am, rawArea, rawResto);
-              e1.totalOffres += 1;
-              e1.remiseTnd += dAmt;
-              e1.partRestoTnd += partRestoCarte;
-              e1.partPlateformeTnd += partPlatCarte;
+              if (evK && evK.partPct > 0) {
+                var partRestoCarte = (evK.partPct / 100) * baseCarteKool;
+                var partPlatCarte = Math.max(0, dAmt - partRestoCarte);
+                var e1 = getEntry(rec.am, rawArea, rawResto);
+                e1.totalOffres += 1;
+                e1.remiseTnd += dAmt;
+                e1.partRestoTnd += partRestoCarte;
+                e1.partPlateformeTnd += partPlatCarte;
+              } else if (dAmt > 0) {
+                // Repli : remise sans règle « Toute la carte » → 100 % plateforme.
+                var e1f = getEntry(rec.am, rawArea, rawResto);
+                e1f.totalOffres += 1;
+                e1f.remiseTnd += dAmt;
+                e1f.partPlateformeTnd += dAmt;
+              }
             } else {
-              if (!(evK.articlePartTnd > 0)) continue;
-              var discArt = evK.articleDiscountTnd || 0;
-              var partPlatArt = Math.max(0, discArt - evK.articlePartTnd);
-              var e2 = getEntry(rec.am, rawArea, rawResto);
-              e2.totalOffres += 1;
-              e2.remiseTnd += discArt;
-              e2.partRestoTnd += evK.articlePartTnd;
-              e2.partPlateformeTnd += partPlatArt;
+              if (evK && evK.articlePartTnd > 0) {
+                var discArt = evK.articleDiscountTnd || 0;
+                var partPlatArt = Math.max(0, discArt - evK.articlePartTnd);
+                var e2 = getEntry(rec.am, rawArea, rawResto);
+                e2.totalOffres += 1;
+                e2.remiseTnd += discArt;
+                e2.partRestoTnd += evK.articlePartTnd;
+                e2.partPlateformeTnd += partPlatArt;
+              } else {
+                // Repli : articles remisés sans règle article → 100 % plateforme.
+                var discAll = 0;
+                if (window.yassirCalculerParticipationArticlesKool && c[idxOrderId]) {
+                  discAll = window.yassirCalculerParticipationArticlesKool(String(c[idxOrderId]), []).discountAllTnd || 0;
+                }
+                if (discAll > 0) {
+                  var e2f = getEntry(rec.am, rawArea, rawResto);
+                  e2f.totalOffres += 1;
+                  e2f.remiseTnd += discAll;
+                  e2f.partPlateformeTnd += discAll;
+                }
+              }
             }
           } else {
             var dTypeLower = String(c[idxDiscType] || '').toLowerCase();
@@ -280,18 +300,28 @@
             if (!hasOffer) continue;
             var orderIso = parseOrderDayToIsoDate(c[idxOrderDay]);
             var matchedRule = trouverRegleParticipationYassir(rulesByRestoYassir, rawResto.toLowerCase(), orderIso, dTypeLower, fCatLower, dAmt);
-            if (!matchedRule) continue;
-            var isCarteRule = estOffreTouteLaCarteKool(matchedRule);
-            if (view === 'carte' && !isCarteRule) continue;
-            if (view === 'article' && isCarteRule) continue;
-            if (view === 'article' && !(/super\s*promo/i.test(fCatLower) || /pack/i.test(dTypeLower))) continue;
-            var partRestoY = (matchedRule.partPct / 100) * baseCarteYassir;
-            var partPlatY = Math.max(0, dAmt - partRestoY);
-            var e3 = getEntry(rec.am, rawArea, rawResto);
-            e3.totalOffres += 1;
-            e3.remiseTnd += dAmt;
-            e3.partRestoTnd += partRestoY;
-            e3.partPlateformeTnd += partPlatY;
+            var isArticleOffer = /super\s*promo/i.test(fCatLower) || /pack/i.test(dTypeLower);
+            if (matchedRule) {
+              var isCarteRule = estOffreTouteLaCarteKool(matchedRule);
+              if (view === 'carte' && !isCarteRule) continue;
+              if (view === 'article' && isCarteRule) continue;
+              if (view === 'article' && !isArticleOffer) continue;
+              var partRestoY = (matchedRule.partPct / 100) * baseCarteYassir;
+              var partPlatY = Math.max(0, dAmt - partRestoY);
+              var e3 = getEntry(rec.am, rawArea, rawResto);
+              e3.totalOffres += 1;
+              e3.remiseTnd += dAmt;
+              e3.partRestoTnd += partRestoY;
+              e3.partPlateformeTnd += partPlatY;
+            } else if (dAmt > 0) {
+              // Repli : remise sans règle → 100 % plateforme (vue selon le type d'offre).
+              if (view === 'carte' && isArticleOffer) continue;
+              if (view === 'article' && !isArticleOffer) continue;
+              var e3f = getEntry(rec.am, rawArea, rawResto);
+              e3f.totalOffres += 1;
+              e3f.remiseTnd += dAmt;
+              e3f.partPlateformeTnd += dAmt;
+            }
           }
         }
 
@@ -400,7 +430,7 @@
         if (banner) {
           var msg = '';
           if (res.note === 'no_data') msg = 'Aucune donnée chargée : importez d’abord votre fichier Data exp (ou lancez « Sync Yassir » / « Sync Kool »).';
-          else if (res.note === 'no_rules') msg = 'Aucune règle de participation chargée : lancez « Sync Yassir » (ou « Sync Kool ») pour charger la feuille « Offre Participation ».';
+          else if (res.note === 'no_rules') msg = 'Aucune règle de participation chargée : les remises sont comptées à 100 % pour la plateforme. Lancez « Sync Yassir » (ou « Sync Kool ») pour charger la feuille « Offre Participation ».';
           else if (res.note === 'no_items_loaded') msg = 'Aucun détail article chargé : faites un « Sync Kool » pour charger la feuille des détails articles.';
           else if (res.note === 'items_out_of_coverage') {
             var covMax = window.koolOrderItemsMaxDate || '';

@@ -132,13 +132,23 @@ const koolCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], 
 
 // Variantes pour le test Participation : le Burger de la commande 1002 est remisé
 // (12 au lieu de 15) et Resto Alpha a en plus une règle article « Super Promo » à 10 %.
+// Resto Beta n'a AUCUNE règle : sa commande 1003 est remisée (3 TND) pour tester le
+// repli « 100 % plateforme » (remise sans règle), en vue carte comme en vue article.
+const koolCsvDataPart = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
+  ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '5'],
+  ['', '', '', '17/11/2026', '1003', '', 'Resto Beta', '', '', '18.00', '2', '3'],
+  ['oui', '', 'Client absent', '18/11/2026', '1004', '', 'Resto Alpha', '', '', '22.00', '3', '0'],
+  ['', '', '', '18/11/2026', '1005', '', 'Resto Alpha', '', '', '10.00', '2', '0']
+]);
 const koolCsvItemsPart = toCsv([
   ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
   ['1001', '16/11/2026', 'Resto Alpha', 'Pizza', 'Pizza Margherita', 2, 12, 0, 12, 'Food'],
   ['1001', '16/11/2026', 'Resto Alpha', 'Boisson', 'Coca Cola', 1, 3, 0, 3, 'Food'],
   ['1001', '16/11/2026', 'Resto Alpha', 'Extra', 'Sauce Fromage', 1, 2, 0, 2, 'Extra'],
   ['1002', '17/11/2026', 'Resto Alpha', 'Burger', 'Burger Classic', 1, 15, 12, 15, 'Food'],
-  ['1003', '17/11/2026', 'Resto Beta', 'Tacos', 'Tacos Poulet', 3, 9, 0, 9, 'Food']
+  ['1003', '17/11/2026', 'Resto Beta', 'Tacos', 'Tacos Poulet', 3, 9, 8, 9, 'Food']
 ]);
 const koolCsvOffrePart = toCsv([
   ['Restaurant', 'Participation', 'Tag', 'Période'],
@@ -365,7 +375,7 @@ test('Sync Yassir unique : les 6 synchros enchaînées en ordre, progression pui
 });
 
 test('Kool : section Participation (toute la carte / par article) et colonne Promo Admin masquée', async () => {
-  const w = bootKool({ items: koolCsvItemsPart, offre: koolCsvOffrePart });
+  const w = bootKool({ data: koolCsvDataPart, items: koolCsvItemsPart, offre: koolCsvOffrePart });
   await login(w, 'proprio', 'Proprio-Test-123');
   await w.yassirSyncKoolSheets(true);
   w.yassirSwitchBrand('kool');
@@ -391,26 +401,30 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   // Resto Alpha : 3 commandes livrées avec offre (1001, 1002, 1005), remise totale 5
   // (seule 1002), participation resto 10 % × (25.50 + 40 + 10) = 7.55, plateforme 1.00
   // (seule 1002 a une remise : 5 − 4.00 = 1.00 ; les autres ont une remise de 0).
+  // Repli « 100 % plateforme » : Resto Beta (sans règle), commande 1003 remisée de 3,
+  // apparaît avec remise 3.00, resto 0, plateforme 3.00 → totaux 4 offres / 8.00 / 7.55 / 4.00.
   w.yassirSwitchTab('participation');
   await wait(600);
   assert.equal(w.document.getElementById('activeSectionTitle').textContent, 'Participation des Offres');
-  assert.equal(w.document.getElementById('partKpiOffres').textContent, '3', 'Total Offres (carte)');
-  assert.equal(w.document.getElementById('partKpiRemise').textContent, '5.00 TND', 'Remise totale (carte)');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '4', 'Total Offres (carte)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '8.00 TND', 'Remise totale (carte)');
   assert.equal(w.document.getElementById('partKpiResto').textContent, '7.55 TND', 'Participation restaurant (carte)');
-  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '1.00 TND', 'Participation plateforme (carte)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '4.00 TND', 'Participation plateforme (carte)');
   const bodyTxt = w.document.getElementById('partTableBody').textContent;
   assert.ok(bodyTxt.includes('Resto Alpha'), 'Resto Alpha absent du tableau Participation');
-  assert.ok(!bodyTxt.includes('Resto Beta'), 'Resto Beta (sans règle) ne doit pas apparaître');
+  assert.ok(bodyTxt.includes('Resto Beta'), 'Resto Beta (remise sans règle) doit apparaître à 100 % plateforme');
   assert.ok(w.document.getElementById('partTableFoot').textContent.includes('7.55'), 'total Participation restaurant absent du pied de tableau');
 
-  // Vue « Par article » : seule la commande 1002 a un article remisé (Burger 15 → 12).
-  // Discount article = 3.00, participation resto = 10 % × 15 = 1.50, plateforme = 1.50.
+  // Vue « Par article » : 1002 a un article remisé (Burger 15 → 12, discount 3.00,
+  // resto 10 % × 15 = 1.50, plateforme 1.50) ; 1003 (Resto Beta, sans règle) a des
+  // Tacos remisés (9 → 8 × 3 = 3.00) → repli 100 % plateforme. Totaux : 2 / 6.00 / 1.50 / 4.50.
   w.yassirSetParticipationView('article');
-  assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres (article)');
-  assert.equal(w.document.getElementById('partKpiRemise').textContent, '3.00 TND', 'Discount article');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '2', 'Total Offres (article)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '6.00 TND', 'Discount article');
   assert.equal(w.document.getElementById('partKpiResto').textContent, '1.50 TND', 'Participation restaurant (article)');
-  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '1.50 TND', 'Participation plateforme (article)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '4.50 TND', 'Participation plateforme (article)');
   assert.ok(w.document.getElementById('partTableBody').textContent.includes('Resto Alpha'), 'Resto Alpha absent en vue article');
+  assert.ok(w.document.getElementById('partTableBody').textContent.includes('Resto Beta'), 'Resto Beta absent en vue article (repli 100 % plateforme)');
 
   // Filtre de date : 16/11 uniquement → seule 1001 (carte : remise 0, resto 2.55).
   w.yassirSetParticipationView('carte');
