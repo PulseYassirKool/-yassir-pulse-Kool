@@ -695,6 +695,11 @@
         store[key] = { at: new Date().toISOString(), brand: (typeof currentBrand !== 'undefined' && currentBrand) ? currentBrand : 'yassir', am: alert ? (alert.am || '') : '' };
         saveNotifTreatedStore(store);
         if (alert) alert.treated = true;
+        // Journal d'activité (AM uniquement) : l'alerte traitée, avec son type et son restaurant.
+        try {
+          var labelAlerte = alert ? ((alert.badge || alert.type || 'Alerte') + (alert.restaurant ? ' — ' + alert.restaurant : '')) : key;
+          window.yassirJournaliser('alerte', 'Alerte traitée : ' + labelAlerte);
+        } catch (e) {}
         renderSmartNotificationsUI();
       };
 
@@ -702,11 +707,15 @@
       window.yassirToutMarquerNotifLu = function () {
         var store = getNotifTreatedStore();
         var brand = (typeof currentBrand !== 'undefined' && currentBrand) ? currentBrand : 'yassir';
-        getNotificationsVisibles().forEach(function (a) {
+        var visibles = getNotificationsVisibles();
+        var nb = visibles.length;
+        visibles.forEach(function (a) {
           store[a.key] = { at: new Date().toISOString(), brand: brand, am: a.am || '' };
           a.treated = true;
         });
         saveNotifTreatedStore(store);
+        // Journal d'activité : une seule entrée pour le lot, avec le nombre.
+        try { if (nb > 0) window.yassirJournaliser('alerte', nb + ' alerte(s) marquée(s) traitée(s)'); } catch (e) {}
         renderSmartNotificationsUI();
       };
 
@@ -765,6 +774,7 @@
         var brandPrefix = (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? 'KOOL' : 'YASSIR';
         var fileName = brandPrefix + '_Alertes_' + dateStr + '.xlsx';
         XLSX.writeFile(wb, fileName);
+        window.yassirJournaliser('export', 'Export Excel : ' + fileName);
         showToast('Fichier <strong>' + escapeHtml(fileName) + '</strong> téléchargé.', 'success');
       };
 

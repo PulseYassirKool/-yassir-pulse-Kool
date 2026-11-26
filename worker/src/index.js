@@ -61,6 +61,21 @@ const publicUser = (a) => ({ username: a.username, role: a.role, displayName: a.
 const listAccounts = async (env) => (await env.PULSE_KV.get('accounts', 'json')) || [];
 const saveAccounts = (env, list) => env.PULSE_KV.put('accounts', JSON.stringify(list));
 
+// ---------- Journal d'activité (AM uniquement, jamais le propriétaire) ----------
+// Clé KV `activity_log` : tableau JSON [{ts, user, type, detail}], plafonné à
+// 500 entrées (FIFO). La journalisation ne doit JAMAIS faire échouer la
+// requête principale : appendActivity ne rejette jamais.
+const ACTIVITY_LOG_KEY = 'activity_log';
+const ACTIVITY_MAX = 500;
+const ACTIVITY_TYPES = ['login', 'logout', 'login_fail', 'export', 'alerte'];
+async function appendActivity(env, entry) {
+  try {
+    const list = (await env.PULSE_KV.get(ACTIVITY_LOG_KEY, 'json')) || [];
+    list.push(entry);
+    await env.PULSE_KV.put(ACTIVITY_LOG_KEY, JSON.stringify(list.slice(-ACTIVITY_MAX)));
+  } catch (e) { /* journal indisponible : on continue sans journaliser */ }
+}
+
 function cors(request, env) {
   const origin = request.headers.get('Origin');
   const allowed = (env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim());
@@ -106,6 +121,11 @@ export async function handle(request, env) {
     const result = account ? await verifyPassword(account, password, env) : (await pbkdf2(password, new Uint8Array(16)), { ok: false });
     if (!result.ok) {
       await env.PULSE_KV.put(rlKey, String(fails + 1), { expirationTtl: LOCK_SECONDS });
+      // Tentative échouée sur un compte existant (hors propriétaire) : journalisée.
+      // Jamais de mot de passe dans le journal, ni de journalisation si le compte n'existe pas.
+      if (account && account.role !== 'owner') {
+        await appendActivity(env, { ts: Date.now(), user: account.username, type: 'login_fail', detail: 'Tentative de connexion échouée' });
+      }
       return fail(401, 'Identifiant ou mot de passe incorrect.');
     }
     await env.PULSE_KV.delete(rlKey);
@@ -120,6 +140,10 @@ export async function handle(request, env) {
     // pv = version du mot de passe : quand le propriétaire change le mot de passe
     // d'un compte, pv est incrémenté et tous les jetons émis avant sont rejetés.
     const token = await sign({ sub: account.username, iat: now, exp: now + ttl, pv: account.pwdVersion || 0 }, env.JWT_SECRET);
+    // Connexion réussie d'un non-propriétaire : journalisée côté serveur.
+    if (account.role !== 'owner') {
+      await appendActivity(env, { ts: Date.now(), user: account.username, type: 'login', detail: 'Connexion' });
+    }
     return reply({ token, user: publicUser(account) });
   }
 
@@ -139,6 +163,29 @@ export async function handle(request, env) {
   if (path === '/api/bootstrap' && method === 'GET') {
     const [config, defaults] = await Promise.all([env.PULSE_KV.get('config', 'json'), env.PULSE_KV.get('defaults', 'json')]);
     return reply({ config: config || { live: {}, kool: {} }, defaults: defaults || { commissions: {}, portfolios: {} } });
+  }
+
+  // ---------- Journal d'activité (AM uniquement) ----------
+  if (path === '/api/activity') {
+    if (method === 'POST') {
+      const b = await request.json().catch(() => ({}));
+      // Le propriétaire n'est jamais journalisé : on répond OK sans rien stocker.
+      if (me.role === 'owner') return reply({ ok: true });
+      const type = String(b.type || '');
+      const detail = String(b.detail || '').slice(0, 200);
+      if (!ACTIVITY_TYPES.includes(type) || !detail) return fail(400, 'Événement invalide.');
+      await appendActivity(env, { ts: Date.now(), user: me.username, type, detail });
+      return reply({ ok: true });
+    }
+    if (me.role !== 'owner') return fail(403, 'Accès réservé au propriétaire.');
+    if (method === 'GET') {
+      const list = (await env.PULSE_KV.get(ACTIVITY_LOG_KEY, 'json')) || [];
+      return reply({ entries: list.slice(-ACTIVITY_MAX).reverse() });
+    }
+    if (method === 'DELETE') {
+      await env.PULSE_KV.delete(ACTIVITY_LOG_KEY);
+      return reply({ ok: true });
+    }
   }
 
   // ---------- Gestion des comptes (propriétaire admin uniquement) ----------

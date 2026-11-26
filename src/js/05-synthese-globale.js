@@ -1552,6 +1552,7 @@
         var link = document.createElement('a');
         link.download = filename;
         link.href = canvas.toDataURL('image/png');
+        window.yassirJournaliser('export', 'Graphique PNG : ' + filename);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -1778,6 +1779,7 @@
         }
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, (isMktMode ? 'YASSIR_Synthese_Market_' : 'YASSIR_Synthese_Food_') + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : ' + (isMktMode ? 'YASSIR_Synthese_Market_' : 'YASSIR_Synthese_Food_') + dateStr + '.xlsx');
         showToast('Fichier <strong>YASSIR_Synthese_Food_' + dateStr + '.xlsx</strong> téléchargé (commandes Food uniquement).', 'success');
       };
 
@@ -1804,5 +1806,6 @@
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
+        window.yassirJournaliser('export', 'Export CSV : YASSIR_Synthese_Globale.csv');
         showToast('Synthèse Globale exportée en CSV.', 'success');
       };

@@ -351,6 +351,11 @@
         if (syncSection) {
           if (isOwnerAdmin()) { syncSection.classList.remove('hidden'); } else { syncSection.classList.add('hidden'); }
         }
+        // Historique d'activité : strictement réservé au propriétaire.
+        var btnActivityLog = document.getElementById('btnOpenActivityLog');
+        if (btnActivityLog) {
+          if (isOwnerAdmin()) { btnActivityLog.classList.remove('hidden'); } else { btnActivityLog.classList.add('hidden'); }
+        }
         var btnReset = document.getElementById('btnResetAll');
         if (btnReset) {
           if (isOwnerAdmin() && state.rawSourceRows && state.rawSourceRows.length > 1) { btnReset.classList.remove('hidden'); btnReset.style.display = 'inline-flex'; } else { btnReset.classList.add('hidden'); btnReset.style.display = 'none'; }
@@ -381,6 +386,9 @@
       };
 
       window.yassirLogout = function () {
+        // Journaliser la déconnexion (AM uniquement) avant d'effacer la session.
+        // Fire-and-forget : l'envoi ne bloque jamais la déconnexion.
+        try { window.yassirJournaliser('logout', 'Déconnexion'); } catch (e) {}
         currentUser = null;
         state.selectedAm = 'ALL';
         amTableZeroOrderFilter = 'all';

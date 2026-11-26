@@ -272,6 +272,7 @@
         XLSX.utils.book_append_sheet(wb, ws, 'Global Analysis');
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Global_Analysis_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Global_Analysis_' + dateStr + '.xlsx');
         showToast('Tableau <strong>Global Analysis</strong> exporté en Excel (.xlsx).', 'success');
       };
 
@@ -899,5 +900,6 @@
 
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Restaurant_Analysis_Growth_Drop_0Cmd_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Restaurant_Analysis_Growth_Drop_0Cmd_' + dateStr + '.xlsx');
         showToast('Fichier <strong>Growth, Drop & Restaurants 0 Commande (.xlsx)</strong> téléchargé.', 'success');
       };

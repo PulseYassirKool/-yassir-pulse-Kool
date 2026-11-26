@@ -132,6 +132,7 @@
         XLSX.utils.book_append_sheet(wb, ws, modeSuffix ? 'Restos 0 Commande' : 'Portefeuilles AM');
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Portefeuilles_' + suffix + modeSuffix + '_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Portefeuilles_' + suffix + modeSuffix + '_' + dateStr + '.xlsx');
         showToast('Fichier Excel téléchargé (<strong>' + res.entries.length + ' restaurant(s)</strong>).', 'success');
       };
 
@@ -328,6 +329,7 @@
         XLSX.utils.book_append_sheet(wb, ws, modeSuffix ? 'Restos 0 Commande' : 'Portefeuilles AM');
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Portefeuilles_' + suffix + modeSuffix + '_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Portefeuilles_' + suffix + modeSuffix + '_' + dateStr + '.xlsx');
         showToast('Fichier Excel téléchargé (<strong>' + res.entries.length + ' restaurant(s)</strong>).', 'success');
       };
 

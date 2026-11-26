@@ -293,6 +293,7 @@
         link.href = img;
         document.body.appendChild(link);
         link.click();
+        window.yassirJournaliser('export', 'Graphique PNG : KOOL_Clients_Nouveaux-Retours-Reactivés_' + dateStr + '.png');
         document.body.removeChild(link);
         showToast('Graphique <strong>Clients Kool (.png)</strong> téléchargé.', 'success');
       };
@@ -325,5 +326,6 @@
         }
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'KOOL_Clients_Top10_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : KOOL_Clients_Top10_' + dateStr + '.xlsx');
         showToast('Top 10 <strong>Clients Kool (.xlsx)</strong> téléchargé.', 'success');
       };

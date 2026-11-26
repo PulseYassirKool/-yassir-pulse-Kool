@@ -47,7 +47,21 @@
             });
           });
         }
-        return { adopt: adopt, store: store, clear: clear, call: call };
+        // Journal d'activité (AM) : envoi brut, sans jamais déclencher une
+        // déconnexion sur 401 ni afficher d'erreur (fire-and-forget).
+        // keepalive : l'envoi survit au rechargement de la page (déconnexion).
+        function logActivity(type, detail) {
+          try {
+            return fetch(API + '/api/activity', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+              body: JSON.stringify({ type: type, detail: detail }),
+              cache: 'no-store',
+              keepalive: true
+            }).catch(function () {});
+          } catch (e) { return Promise.resolve(); }
+        }
+        return { adopt: adopt, store: store, clear: clear, call: call, log: logActivity };
       })();
 
       function applyBootstrap(boot) {

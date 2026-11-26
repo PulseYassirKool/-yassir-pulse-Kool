@@ -195,6 +195,7 @@
         XLSX.utils.book_append_sheet(wb, ws, 'Restaurants Commandes');
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Liste_Restaurants_Commandes_' + suffix + '_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Liste_Restaurants_Commandes_' + suffix + '_' + dateStr + '.xlsx');
         showToast('Liste des <strong>' + list.length + ' restaurant(s)</strong> exportée en Excel (.xlsx).', 'success');
       };
 
@@ -741,5 +742,6 @@
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
+        window.yassirJournaliser('export', 'Export CSV : Top_Items_' + selectedAnalyticsRestoKey.replace(/\s+/g, '_') + '.csv');
         showToast('Classement Top Items exporté en CSV.', 'success');
       };

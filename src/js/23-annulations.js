@@ -355,6 +355,7 @@
 
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Analyse_Annulations_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Analyse_Annulations_' + dateStr + '.xlsx');
         showToast('Analyse des annulations téléchargée en Excel (.xlsx).', 'success');
       };
 

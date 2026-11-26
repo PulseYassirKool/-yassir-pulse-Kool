@@ -620,5 +620,6 @@
         XLSX.utils.book_append_sheet(wb, ws, 'Variation & Potentiel');
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Variation_Potentiel_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Variation_Potentiel_' + dateStr + '.xlsx');
         showToast('Tableau de variation & potentiel complet téléchargé en Excel (.xlsx).', 'success');
       };

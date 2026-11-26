@@ -68,6 +68,94 @@ test('gestion des comptes : réservée au propriétaire, mot de passe >= 10, pas
   assert.ok(list.every((a) => !('hash' in a)));
 });
 
+test("journal d'activité : connexion AM et échec journalisés, proprio ignoré", async () => {
+  kvStore.delete('activity_log');
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  // Échec sur un compte AM existant -> entrée login_fail.
+  assert.equal((await call('POST', '/api/login', { username: 'omar.beldi', password: 'faux' })).status, 401);
+  // Échec sur un identifiant inexistant -> rien (ne pas révéler l'existence des comptes).
+  assert.equal((await call('POST', '/api/login', { username: 'inconnu', password: 'faux' })).status, 401);
+  // Connexion réussie AM -> entrée login ; connexion proprio -> rien.
+  assert.equal((await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 200);
+  assert.equal((await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).status, 200);
+  const entries = JSON.parse(kvStore.get('activity_log'));
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].type, 'login_fail');
+  assert.equal(entries[0].user, 'omar.beldi');
+  assert.equal(entries[1].type, 'login');
+  assert.equal(entries[1].user, 'omar.beldi');
+  assert.ok(!JSON.stringify(entries).includes('faux')); // jamais de mot de passe dans le journal
+});
+
+test("journal d'activité : POST/GET/DELETE — accès réservé au propriétaire", async () => {
+  kvStore.delete('activity_log');
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  // L'AM peut écrire (son export), mais pas lire ni effacer.
+  assert.equal((await call('POST', '/api/activity', { type: 'export', detail: 'Export Excel : Test.xlsx' }, am)).status, 200);
+  assert.equal((await call('GET', '/api/activity', null, am)).status, 403);
+  assert.equal((await call('DELETE', '/api/activity', null, am)).status, 403);
+  assert.equal((await call('GET', '/api/activity')).status, 401);
+  // Le propriétaire ne peut pas être journalisé (même via POST direct).
+  assert.equal((await call('POST', '/api/activity', { type: 'export', detail: 'Export Excel : Proprio.xlsx' }, owner)).status, 200);
+  // Entrées invalides refusées.
+  assert.equal((await call('POST', '/api/activity', { type: 'bidon', detail: 'x' }, am)).status, 400);
+  assert.equal((await call('POST', '/api/activity', { type: 'export', detail: '' }, am)).status, 400);
+  // Lecture propriétaire : plus récentes d'abord (export, puis connexion AM).
+  const list = (await call('GET', '/api/activity', null, owner)).json.entries;
+  assert.equal(list.length, 2);
+  assert.equal(list[0].type, 'export');
+  assert.equal(list[0].user, 'omar.beldi');
+  assert.equal(list[1].type, 'login');
+  // Effacement par le propriétaire.
+  assert.equal((await call('DELETE', '/api/activity', null, owner)).status, 200);
+  assert.equal((await call('GET', '/api/activity', null, owner)).json.entries.length, 0);
+});
+
+test("journal d'activité : plafond à 500 entrées, les plus anciennes sortent (FIFO)", async () => {
+  const seed = [];
+  for (let i = 0; i < 500; i++) seed.push({ ts: 1000 + i, user: 'omar.beldi', type: 'export', detail: 'Entrée ' + i });
+  kvStore.set('activity_log', JSON.stringify(seed));
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  assert.ok(am);
+  // La connexion AM ajoute 1 entrée : le journal reste à 500, la plus ancienne sort.
+  const entries = JSON.parse(kvStore.get('activity_log'));
+  assert.equal(entries.length, 500);
+  assert.equal(entries[0].detail, 'Entrée 1');
+  assert.equal(entries[499].type, 'login');
+});
+
+test("journal d'activité : un échec d'écriture KV ne casse ni le login ni l'envoi", async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const kvFailing = {
+    get: kv.get,
+    put: async (k, v) => { if (k === 'activity_log') throw new Error('KV indisponible'); return kv.put(k, v); },
+    delete: kv.delete
+  };
+  const envFailing = { ...env, PULSE_KV: kvFailing };
+  const callFailing = (method, path, body, token) => handle(new Request('https://api.test' + path, {
+    method, body: body ? JSON.stringify(body) : undefined,
+    headers: { Origin: 'https://app.test', ...(token ? { Authorization: 'Bearer ' + token } : {}) }
+  }), envFailing).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+  // Le login réussit même si le journal ne peut pas être écrit.
+  const r = await callFailing('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' });
+  assert.equal(r.status, 200);
+  // L'envoi d'activité répond OK même si l'écriture échoue.
+  assert.equal((await callFailing('POST', '/api/activity', { type: 'export', detail: 'Export Excel : Test.xlsx' }, r.json.token)).status, 200);
+});
+
 test('changement de mot de passe par le proprio -> ancien jeton AM rejeté, nouveau mot de passe accepté', async () => {
   kvStore.set('accounts', JSON.stringify([
     { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },

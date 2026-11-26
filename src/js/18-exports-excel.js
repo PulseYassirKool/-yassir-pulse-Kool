@@ -134,6 +134,7 @@
             XLSX.utils.book_append_sheet(wb, construireFeuilleStat(amStat), am.slice(0, 31));
           });
           XLSX.writeFile(wb, 'YASSIR_Export_Stat_Global_' + dateStr + '.xlsx');
+          window.yassirJournaliser('export', 'Export Excel : YASSIR_Export_Stat_Global_' + dateStr + '.xlsx');
           showToast('Fichier <strong>YASSIR_Export_Stat_Global_' + dateStr + '.xlsx</strong> téléchargé (Global + Portefeuilles).', 'success');
         } else {
           // Export ciblé sur le portefeuille sélectionné
@@ -141,6 +142,7 @@
           var suffix = activeFilter.replace(/\s+/g, '_');
           XLSX.utils.book_append_sheet(wb, construireFeuilleStat(filteredStat), ('Stat ' + activeFilter).slice(0, 31));
           XLSX.writeFile(wb, 'YASSIR_Export_Stat_' + suffix + '_' + dateStr + '.xlsx');
+          window.yassirJournaliser('export', 'Export Excel : YASSIR_Export_Stat_' + suffix + '_' + dateStr + '.xlsx');
           showToast('Fichier <strong>YASSIR_Export_Stat_' + suffix + '_' + dateStr + '.xlsx</strong> téléchargé.', 'success');
         }
       };
@@ -198,6 +200,7 @@
 
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_VF_Data_Offres_' + suffix + '_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_VF_Data_Offres_' + suffix + '_' + dateStr + '.xlsx');
         showToast('Classeur Excel complet exporté (<strong>' + escapeHtml(activeFilter === 'ALL' ? 'Vue Globale' : activeFilter) + '</strong>).', 'success');
       };
 
@@ -211,6 +214,7 @@
         XLSX.utils.book_append_sheet(wb, construireFeuilleOffres(list), 'Offres');
         var dateStr = new Date().toISOString().slice(0, 10);
         XLSX.writeFile(wb, 'YASSIR_Export_Offres_' + suffix + '_' + dateStr + '.xlsx');
+        window.yassirJournaliser('export', 'Export Excel : YASSIR_Export_Offres_' + suffix + '_' + dateStr + '.xlsx');
         showToast('Fichier <strong>YASSIR_Export_Offres_' + suffix + '_' + dateStr + '.xlsx</strong> téléchargé.', 'success');
       };
 
@@ -271,5 +275,6 @@
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
 
+        window.yassirJournaliser('export', 'Export CSV : ' + fileName);
         showToast('Fichier CSV <strong>' + fileName + '</strong> téléchargé (UTF-8).', 'success');
       };

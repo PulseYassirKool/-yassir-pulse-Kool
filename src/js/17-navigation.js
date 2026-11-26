@@ -128,7 +128,7 @@
             if (btn.id === 'tabBtnCommissions' && !isOwnerAdmin()) return;
             if (btn.id === 'tabBtnFood' && isMarketOnlyViewer()) return;
             if (btn.id === 'tabBtnMarket' && isFoodOnlyAm()) return;
-            if ((btn.id === 'btnOpenAccessManager' || btn.id === 'btnSyncYassirAll' || btn.id === 'btnSyncKoolSheetsNow') && !isOwnerAdmin()) return;
+            if ((btn.id === 'btnOpenAccessManager' || btn.id === 'btnOpenActivityLog' || btn.id === 'btnSyncYassirAll' || btn.id === 'btnSyncKoolSheetsNow') && !isOwnerAdmin()) return;
             var txt = btn.textContent.toLowerCase();
             if (!query || txt.includes(query)) {
               btn.style.display = '';
