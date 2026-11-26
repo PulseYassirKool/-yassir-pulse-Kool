@@ -615,7 +615,7 @@
           var cards = items.map(function (a) {
             var navigable = !!a.restoKey || a.type === 'OFFER_END' || a.type === 'BUDGET_90' || a.type === 'BUDGET_100';
             var clickAttr = navigable
-              ? ' onclick="window.yassirOuvrirAlerte(\'' + escapeHtml(a.restoKey || '') + '\', \'' + a.type + '\')" style="cursor:pointer"'
+              ? ' data-action="open-alert" data-key="' + escapeHtml(a.restoKey || '') + '" data-type="' + escapeHtml(a.type) + '" style="cursor:pointer"'
               : '';
             return '<div class="p-2.5 rounded-2xl border ' + a.colorClass + ' flex items-start gap-2.5 transition hover:shadow-xs"' + clickAttr + ' title="' + (navigable ? 'Cliquer pour ouvrir' : '') + '">' +
               '<div class="w-7 h-7 rounded-xl bg-white flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">' +
@@ -624,7 +624,7 @@
               '<div class="flex-1 min-w-0">' +
                 '<div class="flex items-center justify-between gap-1.5 mb-0.5">' +
                   '<span class="text-[10px] font-extrabold uppercase tracking-wider">' + escapeHtml(a.badge) + '</span>' +
-                  '<button type="button" onclick="event.stopPropagation(); window.yassirTraiterAlerte(\'' + escapeHtml(a.key) + '\')" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-white/90 hover:bg-white text-[#00897B] border border-emerald-200 cursor-pointer whitespace-nowrap" title="Marquer comme traitée (l\'alerte disparaît)">✓ Traité</button>' +
+                  '<button type="button" data-action="treat-alert" data-key="' + escapeHtml(a.key) + '" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-white/90 hover:bg-white text-[#00897B] border border-emerald-200 cursor-pointer whitespace-nowrap" title="Marquer comme traitée (l\'alerte disparaît)">✓ Traité</button>' +
                 '</div>' +
                 '<p class="text-[11px] leading-snug text-[#1A1A2E]">' + a.message + '</p>' +
               '</div>' +
@@ -1065,7 +1065,7 @@
                 var hasItemsBadge = (window.koolOrderItemsByOrderId && window.koolOrderItemsByOrderId.has(String(val).trim().toLowerCase()))
                   ? '<i class="fa-solid fa-receipt text-[#00BFA5] ml-1.5" title="Voir le détail des articles"></i>'
                   : '';
-                return '<td class="px-3.5 py-2 whitespace-nowrap"><button type="button" onclick="window.yassirOpenOrderItemsModal(\'' + oidEsc.replace(/'/g, "\\'") + '\')" class="font-mono font-bold text-[#6C2BD9] hover:underline cursor-pointer inline-flex items-center">' + oidEsc + hasItemsBadge + '</button></td>';
+                return '<td class="px-3.5 py-2 whitespace-nowrap"><button type="button" data-action="open-order-items" data-key="' + oidEsc + '" class="font-mono font-bold text-[#6C2BD9] hover:underline cursor-pointer inline-flex items-center">' + oidEsc + hasItemsBadge + '</button></td>';
               }
 
               var isNumeric = DECIMAL_FORMAT_COLS.has(h) || NUMERIC_COLS.has(h);

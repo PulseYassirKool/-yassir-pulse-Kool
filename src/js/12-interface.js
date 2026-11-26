@@ -39,7 +39,7 @@
           var selected = activeFilter === am;
           var countRestos = restoCountsByAm[am] || 0;
 
-          html += '<button type="button" onclick="window.yassirSelectAmFilter(\'' + escapeHtml(am) + '\')" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ' +
+          html += '<button type="button" data-action="select-am-filter" data-key="' + escapeHtml(am) + '" class="px-2.5 py-1 rounded-full text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ' +
             (selected ? 'bg-[#FF2A6D] text-white shadow-2xs' : 'bg-white text-[#1A1A2E] border border-purple-200 hover:bg-[#F3EBFF]') + '">' +
             '<span>' + escapeHtml(am) + '</span>' +
             '<span class="px-1.5 rounded-full text-[9px] ' + (selected ? 'bg-white/25 text-white' : 'bg-[#F3EBFF] text-[#6C2BD9]') + '">' + countRestos + '</span>' +

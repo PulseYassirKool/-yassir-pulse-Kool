@@ -35,5 +35,28 @@ for (const file of readdirSync(DIR).filter((f) => f.endsWith('.js')).sort()) {
     }
   });
 }
+// Règle anti-régression XSS (audit 2026-11-27, item 2) : aucune valeur
+// (escapeHtml(...), .replace(...)) ne doit être interpolée dans un attribut
+// onclick="..." — les clics passent par data-action + l'écouteur délégué
+// (src/js/28-clics-delegues.js). Un onclick avec une constante ('ALL',
+// 'RESTAURANT_REJECTED') reste toléré, tout comme onclick="f(this.getAttribute(...))"
+// (21-analyse-restaurant.js:154 : la valeur est relue, pas interpolée).
+// On ne regarde donc que ce qui suit « onclick » sur la ligne : une valeur
+// interpolée y apparaît après l'attribut. Sans cette règle, la faille
+// reviendrait au prochain copier-coller.
+let onclickFlagged = 0;
+for (const file of readdirSync(DIR).filter((f) => f.endsWith('.js')).sort()) {
+  const lines = readFileSync(join(DIR, file), 'utf8').split('\n');
+  lines.forEach((line, i) => {
+    const idx = line.indexOf('onclick');
+    if (idx === -1) return;
+    const rest = line.slice(idx);
+    if (/escapeHtml|\.replace\(/.test(rest)) {
+      onclickFlagged++;
+      console.log(`${file}:${i + 1}  ⚠ onclick avec valeur interpolée (utiliser data-action) : ${line.trim().slice(0, 120)}`);
+    }
+  });
+}
 console.log(`\n${total} assignations HTML, ${flagged} à relire.`);
-process.exit(flagged ? 1 : 0);
+if (onclickFlagged) console.log(`${onclickFlagged} onclick avec valeur interpolée (faille XSS) — voir 28-clics-delegues.js.`);
+process.exit(flagged || onclickFlagged ? 1 : 0);

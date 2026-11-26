@@ -23,7 +23,7 @@
           var rate = pair[1];
           var actionTd = ownerAdmin
             ? '<td class="px-4 py-2 text-right">' +
-                '<button type="button" onclick="window.yassirRemoveCommission(\'' + escapeHtml(restName).replace(/'/g, "\\'") + '\')" class="px-3 py-1 rounded-full text-xs font-bold bg-rose-50 hover:bg-rose-100 text-[#FF2A6D] transition cursor-pointer">' +
+                '<button type="button" data-action="remove-commission" data-key="' + escapeHtml(restName) + '" class="px-3 py-1 rounded-full text-xs font-bold bg-rose-50 hover:bg-rose-100 text-[#FF2A6D] transition cursor-pointer">' +
                 '<i class="fa-solid fa-trash-can mr-1"></i>Supprimer</button></td>'
             : '';
 

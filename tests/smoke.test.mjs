@@ -946,14 +946,14 @@ test('Notifications Kool : Traité / Tout lu, regroupement, tri, clic, nouvelles
   w.yassirSetNotifCategoryFilter('ALL');
 
   // « Traité » sur Beta : la cloche baisse, la carte disparaît.
-  // (jsdom tourne en runScripts 'outside-only' : les onclick inline ne se
-  // déclenchent pas au clic — on vérifie le câblage dans l'attribut, puis on
-  // appelle la fonction directement, comme le ferait le clic dans un vrai navigateur.)
+  // Les clics passent par l'écouteur délégué (data-action) : un vrai clic
+  // jsdom le déclenche, contrairement aux anciens onclick inline.
   const betaCard = groupCards().find((d) => d.textContent.includes('Resto Beta'));
   const traiteBtn = [...betaCard.querySelectorAll('button')].find((b) => b.textContent.includes('Traité'));
   assert.ok(traiteBtn, 'bouton Traité de Beta absent');
-  assert.ok(traiteBtn.getAttribute('onclick').includes("yassirTraiterAlerte('kool|ZERO_3D|resto beta|Nour Ali')"), 'câblage Traité de Beta incorrect : ' + traiteBtn.getAttribute('onclick'));
-  w.yassirTraiterAlerte('kool|ZERO_3D|resto beta|Nour Ali');
+  assert.equal(traiteBtn.getAttribute('data-action'), 'treat-alert', 'câblage Traité de Beta incorrect');
+  assert.equal(traiteBtn.getAttribute('data-key'), 'kool|ZERO_3D|resto beta|Nour Ali', 'clé Traité de Beta incorrecte');
+  traiteBtn.click();
   assert.equal(bell(), '4', 'cloche : 4 après avoir traité Beta');
   assert.ok(!listTxt().includes('Resto Beta'), 'Beta disparaît de la liste');
   // L'alerte traitée ne réapparaît pas au recalcul (la situation existe toujours).
@@ -961,12 +961,12 @@ test('Notifications Kool : Traité / Tout lu, regroupement, tri, clic, nouvelles
   assert.equal(bell(), '4', 'cloche : toujours 4 après recalcul (Beta reste traitée)');
 
   // Clic sur la carte Gamma : onglet Analyse Restaurant, Gamma sélectionné.
-  // (même remarque jsdom : on vérifie le câblage, puis on appelle directement.)
   const gammaCard = groupCards().find((d) => d.textContent.includes('Resto Gamma'));
-  const gammaItem = gammaCard.querySelector('[onclick*="yassirOuvrirAlerte"]');
-  assert.ok(gammaItem, 'carte Gamma sans onclick de navigation');
-  assert.ok(gammaItem.getAttribute('onclick').includes("yassirOuvrirAlerte('resto gamma', 'DROP_3D')"), 'câblage clic Gamma incorrect : ' + gammaItem.getAttribute('onclick'));
-  w.yassirOuvrirAlerte('resto gamma', 'DROP_3D');
+  const gammaItem = gammaCard.querySelector('[data-action="open-alert"]');
+  assert.ok(gammaItem, 'carte Gamma sans câblage de navigation');
+  assert.equal(gammaItem.getAttribute('data-key'), 'resto gamma', 'clé clic Gamma incorrecte');
+  assert.equal(gammaItem.getAttribute('data-type'), 'DROP_3D', 'type clic Gamma incorrect');
+  gammaItem.click();
   await wait(400);
   assert.equal(w.document.getElementById('panelRestoAnalytics').classList.contains('hidden'), false, 'clic Gamma : onglet Analyse Restaurant');
   assert.equal(w.document.getElementById('selectRestoAnalytics').value, 'resto gamma', 'clic Gamma : restaurant sélectionné');
@@ -974,10 +974,11 @@ test('Notifications Kool : Traité / Tout lu, regroupement, tri, clic, nouvelles
   // Clic sur la carte Alpha (fin d'offre) : section Participation.
   w.yassirSetNotifCategoryFilter('ALL');
   const alphaCard = groupCards().find((d) => d.textContent.includes('Resto Alpha'));
-  const alphaItem = alphaCard.querySelector('[onclick*="yassirOuvrirAlerte"]');
-  assert.ok(alphaItem, 'carte Alpha sans onclick de navigation');
-  assert.ok(alphaItem.getAttribute('onclick').includes("yassirOuvrirAlerte('resto alpha', 'OFFER_END')"), 'câblage clic Alpha incorrect : ' + alphaItem.getAttribute('onclick'));
-  w.yassirOuvrirAlerte('resto alpha', 'OFFER_END');
+  const alphaItem = alphaCard.querySelector('[data-action="open-alert"]');
+  assert.ok(alphaItem, 'carte Alpha sans câblage de navigation');
+  assert.equal(alphaItem.getAttribute('data-key'), 'resto alpha', 'clé clic Alpha incorrecte');
+  assert.equal(alphaItem.getAttribute('data-type'), 'OFFER_END', 'type clic Alpha incorrect');
+  alphaItem.click();
   await wait(400);
   assert.equal(w.document.getElementById('panelParticipation').classList.contains('hidden'), false, 'clic Alpha (fin offre) : section Participation');
 
@@ -1794,3 +1795,105 @@ test('thème : couleurs des graphiques adaptées en mode nuit, inchangées en mo
   w.yassirAppliquerTheme('clair');
   assert.equal(w.yassirCouleurGraphique('#6C2BD9'), '#6C2BD9', 'couleur graphique non restaurée en mode clair');
 });
+
+// ---- XSS (audit 2026-11-27, item 2) : valeurs interpolées dans onclick ----
+test('XSS : Test d\'essai, charge alert(1), raison piégée — Modifier/Supprimer fonctionnels, rien ne s\'exécute', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  // alert() piégé : si une charge s'exécute, le drapeau se lève.
+  w.alert = () => { w.__ALERT__ = true; };
+
+  const nameInput = w.document.getElementById('inputNewRestName');
+  const rateInput = w.document.getElementById('inputNewRestRate');
+  assert.ok(nameInput && rateInput, 'formulaire commission absent');
+  const tbody = w.document.getElementById('commTableBody');
+  const boutonSupprimer = (nom) => [...tbody.querySelectorAll('[data-action="remove-commission"]')].find((b) => b.getAttribute('data-key') === nom);
+  // Espion sur la suppression : le clic délégué doit appeler la fonction avec le nom exact.
+  let removed = null;
+  const origRemove = w.yassirRemoveCommission;
+  w.yassirRemoveCommission = (k) => { removed = k; return origRemove(k); };
+  const ajouterCommission = (nom, taux) => {
+    nameInput.value = nom;
+    rateInput.value = String(taux);
+    w.yassirAddCommission({ preventDefault() {} });
+  };
+
+  // 1. Restaurant « Test d'essai » (apostrophe réelle) : Supprimer fonctionne,
+  // y compris en cliquant sur l'icône <i> à l'intérieur du bouton (closest()).
+  ajouterCommission("Test d'essai", 15);
+  removed = null;
+  const btnEssai = boutonSupprimer("test d'essai");
+  assert.ok(btnEssai, 'bouton Supprimer (Test d\'essai) absent');
+  assert.equal(btnEssai.getAttribute('onclick'), null, 'onclick inline présent (Test d\'essai)');
+  btnEssai.querySelector('i').click();
+  assert.equal(removed, "test d'essai", 'la suppression ne reçoit pas le nom exact (Test d\'essai)');
+  assert.ok(!tbody.textContent.includes("test d'essai"), 'le restaurant est toujours là après suppression');
+
+  // 2. Charge de l'audit : ');alert(1);// — rien ne doit s'exécuter, la suppression reçoit le nom exact.
+  const charge = "');alert(1);//";
+  ajouterCommission(charge, 12);
+  removed = null;
+  const btnCharge = boutonSupprimer(charge);
+  assert.ok(btnCharge, 'bouton Supprimer (charge) absent');
+  assert.equal(btnCharge.getAttribute('onclick'), null, 'onclick inline présent (charge)');
+  assert.ok(!tbody.innerHTML.includes('yassirRemoveCommission('), 'appel interpolé présent dans le HTML');
+  btnCharge.click();
+  assert.equal(removed, charge, 'la suppression ne reçoit pas le nom exact (charge)');
+  assert.equal(w.__ALERT__, undefined, 'la charge alert(1) s\'est exécutée !');
+  assert.ok(!tbody.textContent.includes(charge), 'la charge est toujours là après suppression');
+
+  // 3. Autre charge (audit) : x');window.__xss__=1;//
+  const charge2 = "x');window.__xss__=1;//";
+  ajouterCommission(charge2, 10);
+  removed = null;
+  const btnCharge2 = boutonSupprimer(charge2.toLowerCase());
+  assert.ok(btnCharge2, 'bouton Supprimer (charge 2) absent');
+  btnCharge2.click();
+  assert.equal(removed, charge2.toLowerCase(), 'la suppression ne reçoit pas le nom exact (charge 2)');
+  assert.equal(w.__xss__, undefined, 'la charge window.__xss__ s\'est exécutée !');
+
+  // 4. Bouton Modifier du portefeuille : le clic délégué ouvre la modale avec le bon restaurant.
+  w.document.getElementById('inputAmRestName').value = "Test d'essai";
+  w.document.getElementById('selectAmAgent').value = 'Omar Beldi';
+  w.document.getElementById('inputAmRestVille').value = 'Tunis';
+  w.yassirAddRestoToAm({ preventDefault() {} });
+  // La table n'affiche que les 120 premiers restaurants par défaut : tout
+  // afficher pour retrouver « Test d'essai » (tri alphabétique).
+  w._amTableShowAll = true;
+  w.yassirRenderAmTable();
+  const btnModifier = [...w.document.querySelectorAll('[data-action="open-edit-resto"]')].find((b) => b.getAttribute('data-key') === "test d'essai");
+  assert.ok(btnModifier, 'bouton Modifier (Test d\'essai) absent');
+  assert.equal(btnModifier.getAttribute('onclick'), null, 'onclick inline présent (Modifier)');
+  btnModifier.click();
+  assert.equal(w.document.getElementById('editRestoModal').classList.contains('hidden'), false, 'la modale d\'édition ne s\'ouvre pas');
+  assert.equal(w.document.getElementById('editRestoName').value, "Test d'essai", 'la modale n\'affiche pas le bon restaurant');
+  w.yassirCloseEditRestoModal();
+
+  // 5. Raison d'annulation piégée (+ type piégé) : le clic délégué transmet la valeur exacte sans l'exécuter.
+  let raisonRecue = null;
+  const origRaison = w.yassirSetCancReasonFilter;
+  w.yassirSetCancReasonFilter = (r) => { raisonRecue = r; };
+  let typeRecu = null;
+  const origType = w.yassirSetCancTypeFilter;
+  w.yassirSetCancTypeFilter = (t) => { typeRecu = t; };
+  const raisonPiegee = "raison piégée');window.__XSS2__=1;//";
+  const trRaison = w.document.createElement('tr');
+  trRaison.setAttribute('data-action', 'set-canc-reason');
+  trRaison.setAttribute('data-key', raisonPiegee);
+  w.document.body.appendChild(trRaison);
+  trRaison.click();
+  assert.equal(raisonRecue, raisonPiegee, 'le filtre raison ne reçoit pas la valeur exacte');
+  assert.equal(w.__XSS2__, undefined, 'la raison piégée s\'est exécutée !');
+  const trType = w.document.createElement('tr');
+  trType.setAttribute('data-action', 'set-canc-type');
+  trType.setAttribute('data-key', "type piégé');alert(1);//");
+  w.document.body.appendChild(trType);
+  trType.click();
+  assert.equal(typeRecu, "type piégé');alert(1);//", 'le filtre type ne reçoit pas la valeur exacte');
+  assert.equal(w.__ALERT__, undefined, 'la charge alert(1) du type s\'est exécutée !');
+  w.yassirSetCancReasonFilter = origRaison;
+  w.yassirSetCancTypeFilter = origType;
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+

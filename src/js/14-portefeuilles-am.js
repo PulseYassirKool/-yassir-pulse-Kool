@@ -191,13 +191,13 @@
           var zeroOrdersBlock = showZeroStats
             ? '<div class="col-span-2 mt-1 pt-1.5 border-t border-dashed border-rose-200 flex items-center justify-between">' +
                 '<span class="text-slate-500 font-semibold"><i class="fa-solid fa-circle-exclamation text-[#FF2A6D] mr-1"></i>Restos 0 commande</span>' +
-                '<button type="button" onclick="window.yassirFilterAmZeroByCard(event, \'' + escapeHtml(am) + '\')" class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-50 hover:bg-[#FF2A6D] text-[#FF2A6D] hover:text-white transition cursor-pointer" title="Cliquer pour filtrer et télécharger les restaurants 0 commande de ' + escapeHtml(am) + '">' +
+                '<button type="button" data-action="filter-am-zero" data-key="' + escapeHtml(am) + '" class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-50 hover:bg-[#FF2A6D] text-[#FF2A6D] hover:text-white transition cursor-pointer" title="Cliquer pour filtrer et télécharger les restaurants 0 commande de ' + escapeHtml(am) + '">' +
                   st.zeroOrdersRestosCount + ' / ' + st.assignedRestosCount +
                 '</button>' +
               '</div>'
             : '';
 
-          return '<div onclick="window.yassirSelectAmFilter(\'' + escapeHtml(am) + '\')" class="rounded-2xl p-4 border transition cursor-pointer ' +
+          return '<div data-action="select-am-filter" data-key="' + escapeHtml(am) + '" class="rounded-2xl p-4 border transition cursor-pointer ' +
             (isSelected ? 'bg-[#F3EBFF] border-[#6C2BD9] ring-2 ring-[#6C2BD9]/30 shadow-md' : 'bg-white border-purple-100 hover:border-[#6C2BD9]/50 shadow-sm') + '">' +
             '<div class="flex items-center justify-between mb-2">' +
               '<span class="text-xs font-extrabold text-[#1A1A2E] truncate">' + escapeHtml(am) + '</span>' +
@@ -385,13 +385,13 @@
           var zeroOrdersBlock = showZeroStats
             ? '<div class="col-span-2 mt-1 pt-1.5 border-t border-dashed border-rose-200 flex items-center justify-between">' +
                 '<span class="text-slate-500 font-semibold"><i class="fa-solid fa-circle-exclamation text-[#FF2A6D] mr-1"></i>Restos 0 commande</span>' +
-                '<button type="button" onclick="window.yassirFilterAmZeroByCard(event, \'' + escapeHtml(am) + '\')" class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-50 hover:bg-[#FF2A6D] text-[#FF2A6D] hover:text-white transition cursor-pointer" title="Cliquer pour filtrer et télécharger les restaurants 0 commande de ' + escapeHtml(am) + '">' +
+                '<button type="button" data-action="filter-am-zero" data-key="' + escapeHtml(am) + '" class="px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-rose-50 hover:bg-[#FF2A6D] text-[#FF2A6D] hover:text-white transition cursor-pointer" title="Cliquer pour filtrer et télécharger les restaurants 0 commande de ' + escapeHtml(am) + '">' +
                   st.zeroOrdersRestosCount + ' / ' + st.assignedRestosCount +
                 '</button>' +
               '</div>'
             : '';
 
-          return '<div onclick="window.yassirSelectAmFilter(\'' + escapeHtml(am) + '\')" class="rounded-2xl p-4 border transition cursor-pointer ' +
+          return '<div data-action="select-am-filter" data-key="' + escapeHtml(am) + '" class="rounded-2xl p-4 border transition cursor-pointer ' +
             (isSelected ? 'bg-[#F3EBFF] border-[#6C2BD9] ring-2 ring-[#6C2BD9]/30 shadow-md' : 'bg-white border-purple-100 hover:border-[#6C2BD9]/50 shadow-sm') + '">' +
             '<div class="flex items-center justify-between mb-2">' +
               '<span class="text-xs font-extrabold text-[#1A1A2E] truncate">' + escapeHtml(am) + '</span>' +
@@ -467,8 +467,8 @@
 
           var actionsCell = ownerAdmin
             ? '<td class="px-4 py-2 text-right whitespace-nowrap">' +
-                '<button type="button" onclick="window.yassirOpenEditRestoModal(\'' + escapeHtml(key).replace(/'/g, "\\'") + '\')" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#F3EBFF] hover:bg-purple-200 text-[#6C2BD9] transition cursor-pointer mr-1"><i class="fa-solid fa-pen mr-1"></i>Modifier</button>' +
-                '<button type="button" onclick="window.yassirRemoveRestoFromAm(\'' + escapeHtml(key).replace(/'/g, "\\'") + '\')" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-[#FF2A6D] transition cursor-pointer"><i class="fa-solid fa-trash-can"></i></button>' +
+                '<button type="button" data-action="open-edit-resto" data-key="' + escapeHtml(key) + '" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#F3EBFF] hover:bg-purple-200 text-[#6C2BD9] transition cursor-pointer mr-1"><i class="fa-solid fa-pen mr-1"></i>Modifier</button>' +
+                '<button type="button" data-action="remove-resto" data-key="' + escapeHtml(key) + '" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-[#FF2A6D] transition cursor-pointer"><i class="fa-solid fa-trash-can"></i></button>' +
               '</td>'
             : '';
 

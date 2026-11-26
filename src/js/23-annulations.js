@@ -161,7 +161,7 @@
             var badgeClass = t.isRestoRej
               ? 'bg-rose-100 text-[#FF2A6D] font-extrabold'
               : 'bg-[#F3EBFF] text-[#6C2BD9] font-bold';
-            return '<tr onclick="window.yassirSetCancTypeFilter(\'' + escapeHtml(t.type).replace(/'/g, "\\\'") + '\')" class="hover:bg-[#F3EBFF]/45 cursor-pointer transition">' +
+            return '<tr data-action="set-canc-type" data-key="' + escapeHtml(t.type) + '" class="hover:bg-[#F3EBFF]/45 cursor-pointer transition">' +
               '<td class="px-3.5 py-2.5"><span class="px-2.5 py-0.5 rounded-full text-[11px] ' + badgeClass + '">' + escapeHtml(t.type) + '</span></td>' +
               '<td class="px-3.5 py-2.5 text-right font-mono font-extrabold text-[#1A1A2E]">' + t.count + '</td>' +
               '<td class="px-3.5 py-2.5 text-right font-mono font-bold text-[#FF2A6D]">' + t.pctOfCanc.toFixed(1) + '%</td>' +
@@ -263,7 +263,7 @@
         var reasonsTbody = document.getElementById('cancReasonsTableBody');
         if (reasonsTbody) {
           reasonsTbody.innerHTML = currentCancReasonsSummary.map(function (r) {
-            return '<tr onclick="window.yassirSetCancReasonFilter(\'' + escapeHtml(r.reason).replace(/'/g, "\\\'") + '\')" class="hover:bg-rose-50/60 cursor-pointer">' +
+            return '<tr data-action="set-canc-reason" data-key="' + escapeHtml(r.reason) + '" class="hover:bg-rose-50/60 cursor-pointer">' +
               '<td class="px-3 py-2 font-semibold text-[#1A1A2E]">' + escapeHtml(r.reason) + '</td>' +
               '<td class="px-3 py-2 text-right font-mono font-bold text-[#FF2A6D]">' + r.count + '</td>' +
               '<td class="px-3 py-2 text-right font-mono text-slate-600">' + r.pct.toFixed(1) + '%</td>' +
