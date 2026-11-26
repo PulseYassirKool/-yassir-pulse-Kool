@@ -512,7 +512,11 @@
         }
 
         var promises = LIVE_SHEETS_CONFIG.HISTORICAL_MONTHS.map(function (mCfg) {
-          return fetchGoogleSheetByGidSmart(mCfg.sheetId, mCfg.gid, mCfg.tab)
+          // Onglet principal du mois + onglets journaliers supplémentaires
+          // éventuels du même classeur, fusionnés dans les données du mois
+          // (un seul index __fileSourceIdx par mois : les libellés, la purge
+          // et les compteurs restent ceux d'aujourd'hui).
+          return yassirLireClasseurToutesFeuilles(mCfg.sheetId, mCfg.gid, yassirValiderEnTetesDataYassir, { fallbackTab: mCfg.tab, force: !!manualTrigger })
             .then(function (rows) {
               return { label: mCfg.label, rows: rows, ok: true };
             })
@@ -790,6 +794,208 @@
             return wb;
           });
       }
+
+      // ==================================================================
+      // LECTURE MULTI-ONGLETS (data journalière par onglet, 2026-11-26)
+      // ==================================================================
+      // Inventaire des onglets par classeur, mis en cache 6 h : évite de
+      // retélécharger le classeur à chaque synchro quand il n'a qu'un seul
+      // onglet. La synchro manuelle force la redécouverte (l'utilisateur
+      // vient d'ajouter un onglet).
+      var ONGLETS_CACHE_KEY = 'yassir_pulse_classeur_onglets_v1';
+      var ONGLETS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+      function lireCacheOnglets() {
+        try {
+          var parsed = JSON.parse(safeGet(ONGLETS_CACHE_KEY) || '{}');
+          return (parsed && typeof parsed === 'object') ? parsed : {};
+        } catch (e) { return {}; }
+      }
+      function ecrireCacheOnglets(cache) {
+        try { safeSet(ONGLETS_CACHE_KEY, JSON.stringify(cache || {})); } catch (e) {}
+      }
+      window.yassirViderCacheOngletsClasseur = function () { ecrireCacheOnglets({}); };
+
+      // Normalisation d'un en-tête pour la comparaison entre onglets.
+      function normaliserEnTeteMultiOnglets(h) {
+        return normalizeText(h === null || h === undefined ? '' : String(h)).replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+
+      // Ligne d'en-tête réelle d'un onglet : première ligne parmi les 5
+      // premières avec au moins 4 cellules non vides (même règle que
+      // normaliserLignesDataKool), sinon la ligne 0.
+      function trouverLigneEnTeteMultiOnglets(rows) {
+        if (!rows || rows.length === 0) return 0;
+        for (var r = 0; r < Math.min(5, rows.length); r++) {
+          var nonEmpty = (rows[r] || []).filter(function (c) { return String(c || '').trim() !== ''; }).length;
+          if (nonEmpty >= 4) return r;
+        }
+        return 0;
+      }
+
+      // Validateurs d'en-têtes par type de feuille : un onglet dont les
+      // en-têtes ne correspondent pas est ignoré silencieusement (jamais de
+      // plantage de la synchro).
+      function yassirValiderEnTetesDataKool(headersNorm) {
+        var aDate = headersNorm.indexOf('date') !== -1;
+        var aCmd = headersNorm.some(function (h) { return /^(n[°o]?\s*commande|order\s*id|numero\s*commande)$/.test(h); });
+        return aDate && aCmd;
+      }
+      function yassirValiderEnTetesDetailsKool(headersNorm) {
+        var aCmd = headersNorm.some(function (h) { return /^(order\s*id|n[°o]?\s*commande|numero\s*commande)$/.test(h); });
+        var aArt = headersNorm.some(function (h) { return h === 'article' || h.indexOf('article') !== -1 || h.indexOf('item') !== -1; });
+        return aCmd && aArt;
+      }
+      function yassirValiderEnTetesDataYassir(headersNorm) {
+        var aOid = headersNorm.indexOf('order id') !== -1;
+        var aDay = headersNorm.indexOf('order day') !== -1 || headersNorm.indexOf('delivered day') !== -1;
+        return aOid && aDay;
+      }
+      window.yassirValiderEnTetesDataKool = yassirValiderEnTetesDataKool;
+      window.yassirValiderEnTetesDetailsKool = yassirValiderEnTetesDetailsKool;
+      window.yassirValiderEnTetesDataYassir = yassirValiderEnTetesDataYassir;
+
+      // Découvre les onglets d'un classeur : inventaire en cache (TTL 6 h),
+      // sinon UN SEUL téléchargement XLSX. Retourne { wb, names, sheetIds }
+      // (wb null quand l'inventaire en cache suffit ou que le téléchargement
+      // a échoué).
+      function decouvrirOngletsClasseur(sheetId, force) {
+        var cache = lireCacheOnglets();
+        var entree = cache[sheetId];
+        if (!force && entree && entree.names && entree.names.length <= 1 &&
+            (Date.now() - (entree.savedAt || 0)) < ONGLETS_CACHE_TTL_MS) {
+          return Promise.resolve({ wb: null, names: entree.names.slice(), sheetIds: entree.sheetIds || [] });
+        }
+        return fetchGoogleWorkbookXlsx(sheetId)
+          .then(function (wb) {
+            var names = (wb && wb.SheetNames) || [];
+            var sheetIds = [];
+            try {
+              var ws = (wb.Workbook && wb.Workbook.Sheets) || [];
+              sheetIds = ws.map(function (s) {
+                if (!s) return '';
+                var sid = (s.sheetId !== undefined) ? s.sheetId : s.sheetid;
+                return (sid === undefined || sid === null) ? '' : String(sid);
+              });
+            } catch (e) { sheetIds = []; }
+            cache[sheetId] = { names: names.slice(), sheetIds: sheetIds, savedAt: Date.now() };
+            ecrireCacheOnglets(cache);
+            return { wb: wb, names: names, sheetIds: sheetIds };
+          })
+          .catch(function () { return { wb: null, names: [], sheetIds: [] }; });
+      }
+
+      // Identifie l'onglet principal dans le classeur XLSX, pour ne pas le
+      // fusionner deux fois : 1) par sheetId (l'export Google utilise le gid
+      // comme sheetId), 2) repli : mêmes en-têtes normalisés ET même nombre de
+      // lignes que la lecture par gid. Retourne l'index, ou -1 si introuvable
+      // (la fusion est alors abandonnée : on garde l'onglet principal seul).
+      function trouverOngletPrincipal(wb, names, mainGid, mainRows) {
+        var sheets = [];
+        try { sheets = (wb.Workbook && wb.Workbook.Sheets) || []; } catch (e) { sheets = []; }
+        for (var i = 0; i < names.length; i++) {
+          for (var j = 0; j < sheets.length; j++) {
+            if (sheets[j] && sheets[j].name === names[i]) {
+              var sid = (sheets[j].sheetId !== undefined) ? sheets[j].sheetId : sheets[j].sheetid;
+              if (sid !== undefined && sid !== null && String(sid) === String(mainGid)) return i;
+              break;
+            }
+          }
+        }
+        var mainHdr = (mainRows[0] || []).map(normaliserEnTeteMultiOnglets).join('|');
+        for (var k = 0; k < names.length; k++) {
+          try {
+            var tabRows = XLSX.utils.sheet_to_json(wb.Sheets[names[k]], { header: 1, defval: '' });
+            if (!tabRows || tabRows.length === 0) continue;
+            var hdrIdx = trouverLigneEnTeteMultiOnglets(tabRows);
+            var tabHdr = (tabRows[hdrIdx] || []).map(normaliserEnTeteMultiOnglets).join('|');
+            if (tabHdr === mainHdr && tabRows.length === mainRows.length) return k;
+          } catch (e) { /* ignore */ }
+        }
+        return -1;
+      }
+
+      // Lit TOUS les onglets d'un classeur de données et retourne les lignes
+      // fusionnées (en-tête de l'onglet principal + lignes de tous les onglets).
+      // Stratégie :
+      //  1) voie rapide inchangée : l'onglet principal par gid (CSV export
+      //     -> gviz -> JSONP) ;
+      //  2) UN SEUL téléchargement XLSX du classeur pour découvrir les onglets
+      //     supplémentaires et lire leurs lignes (inventaire mis en cache 6 h :
+      //     un classeur à un seul onglet ne retélécharge rien entre deux
+      //     découvertes) ;
+      //  3) chaque onglet supplémentaire est validé par ses en-têtes puis ses
+      //     lignes sont réalignées sur l'ordre des colonnes de l'onglet
+      //     principal, par nom d'en-tête (chaque onglet mappe ses colonnes par
+      //     ses propres en-têtes).
+      // Un onglet vide, invalide ou illisible est ignoré silencieusement ; un
+      // échec (XLSX illisible, etc.) ne remplace jamais les lignes de
+      // l'onglet principal ; la fonction ne rejette jamais.
+      // NOTE : il n'existe pas d'endpoint public léger pour lister les onglets
+      // d'un classeur (gviz ne renvoie que le 1er onglet) — le téléchargement
+      // XLSX est le seul moyen fiable de les découvrir. Pour un classeur à un
+      // seul onglet, le résultat est identique à aujourd'hui (mêmes lignes,
+      // mêmes compteurs).
+      // opts : { fallbackTab, force } (force = redécouverte immédiate, synchro manuelle).
+      function yassirLireClasseurToutesFeuilles(sheetId, mainGid, validerEnTetes, opts) {
+        if (!sheetId) return Promise.resolve([]);
+        var options = opts || {};
+        var mainRows = [];
+        return fetchGoogleSheetByGidSmart(sheetId, mainGid, options.fallbackTab || '')
+          .catch(function () { return []; })
+          .then(function (rows) {
+            if (rows && rows.length > 1) mainRows = rows;
+            // Lecture par gid en échec : le XLSX sert aussi de repli (comme
+            // aujourd'hui) — on force la découverte dans ce cas.
+            return decouvrirOngletsClasseur(sheetId, !!options.force || mainRows.length < 2);
+          })
+          .then(function (decouverte) {
+            var wb = decouverte && decouverte.wb;
+            var names = (decouverte && decouverte.names) || [];
+            if (!wb) return mainRows;
+            if (names.length === 0) return mainRows;
+            if (mainRows.length < 2) {
+              // Repli historique : l'onglet principal est le 1er onglet.
+              mainRows = XLSX.utils.sheet_to_json(wb.Sheets[names[0]], { header: 1, defval: '' });
+              if (!mainRows || mainRows.length < 2) return [];
+            }
+            if (names.length <= 1) return mainRows;
+            var idxPrincipal = trouverOngletPrincipal(wb, names, mainGid, mainRows);
+            if (idxPrincipal === -1) return mainRows;
+            var mainHeadersNorm = (mainRows[0] || []).map(normaliserEnTeteMultiOnglets);
+            var merged = mainRows.slice();
+            for (var n = 0; n < names.length; n++) {
+              if (n === idxPrincipal) continue;
+              try {
+                var tabRows = XLSX.utils.sheet_to_json(wb.Sheets[names[n]], { header: 1, defval: '' });
+                if (!tabRows || tabRows.length < 2) continue;
+                var hdrIdx = trouverLigneEnTeteMultiOnglets(tabRows);
+                var tabHeadersNorm = (tabRows[hdrIdx] || []).map(normaliserEnTeteMultiOnglets);
+                if (typeof validerEnTetes === 'function' && !validerEnTetes(tabHeadersNorm)) continue;
+                var used = {};
+                var colMap = mainHeadersNorm.map(function (mh, ci) {
+                  if (!mh) return -1; // colonne sans en-tête : ignorée (aucun lecteur ne l'utilise)
+                  for (var i = 0; i < tabHeadersNorm.length; i++) {
+                    if (tabHeadersNorm[i] === mh && !used[i]) { used[i] = true; return i; }
+                  }
+                  return -1;
+                });
+                for (var r = hdrIdx + 1; r < tabRows.length; r++) {
+                  var sRow = tabRows[r];
+                  if (!sRow || sRow.every(function (c) { return c === null || c === undefined || String(c).trim() === ''; })) continue;
+                  var aligned = new Array(mainRows[0].length).fill('');
+                  for (var c = 0; c < colMap.length; c++) {
+                    if (colMap[c] !== -1 && colMap[c] < sRow.length) aligned[c] = sRow[colMap[c]];
+                  }
+                  merged.push(aligned);
+                }
+              } catch (e) { /* onglet illisible : ignoré silencieusement */ }
+            }
+            return merged;
+          })
+          .catch(function () { return mainRows || []; });
+      }
+      window.yassirLireClasseurToutesFeuilles = yassirLireClasseurToutesFeuilles;
 
       window.yassirSyncAllFromGoogleSheets = function (manualTrigger) {
         if (manualTrigger && !isOwnerAdmin() && !canViewAllPortfolios()) return;

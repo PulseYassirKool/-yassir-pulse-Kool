@@ -1293,6 +1293,12 @@ test('Kool : données 2025 Kool synchronisées et utilisées par le panneau YoY'
   assert.ok(yoyGrid.classList.contains('xl:col-span-12'), 'grille YoY : doit garder xl:col-span-12 pour rester pleine largeur');
   assert.ok(!yoyGrid.textContent.includes('indisponible pour Kool'), 'la note « indisponible pour Kool » doit disparaître avec des données 2025 Kool');
   assert.ok(yoyGrid.textContent.includes('Variation YoY'), 'carte YoY W47 absente');
+  // Cartes YoY : semaine en cours W47 + semaine précédente W46 (comme le
+  // filtre) — plus W45 (bug : le code poussait curSelectedW - 2).
+  assert.ok(yoyGrid.textContent.includes('W47'), 'carte YoY W47 absente');
+  assert.ok(yoyGrid.textContent.includes('W46'), 'carte YoY W46 (semaine précédente) absente');
+  assert.ok(!yoyGrid.textContent.includes('W45'), 'carte YoY W45 : ne doit plus s\'afficher');
+  assert.ok(yoyGrid.textContent.indexOf('W47') < yoyGrid.textContent.indexOf('W46'), 'carte W47 : doit être avant W46');
   const note = w.document.getElementById('koolNoYoyNote');
   assert.ok(note && note.classList.contains('hidden'), 'note Kool sous les graphiques YoY : doit être masquée');
   // La série 2025 du graphique YoY n'est plus vide (W45 : 5 livrées, W46 : 6, W47 : 7).
@@ -1357,6 +1363,254 @@ test('2025 Kool : le stockage validé stocke et compte, l\'invalide retourne 0 s
   assert.equal(w.yassirStockerLignes2025Yassir(matrice), 5, 'lignes 2025 Yassir : 5 attendues');
   assert.ok(w.localStorage.getItem('yassir_vf_hist_2025_rows_v1').includes('Requested'), 'lignes 2025 Yassir non stockées');
   assert.equal(w.yassirStockerLignes2025Yassir(portefeuilles), 0, 'portefeuilles stockés comme 2025 Yassir');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Multi-onglets : data journalière par onglet (2026-11-26) ----
+// Construit un classeur XLSX simulé (ArrayBuffer) à partir d'une liste
+// [nomOnglet, aoa].
+const construireClasseurXlsx = (w, onglets) => {
+  const wb = w.XLSX.utils.book_new();
+  onglets.forEach(([nom, aoa]) => {
+    w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(aoa), nom);
+  });
+  const out = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  return (out instanceof ArrayBuffer) ? out : new Uint8Array(out).buffer;
+};
+// Lit un CSV (chaîne) en AoA via SheetJS (pour construire l'onglet principal
+// d'un classeur simulé à partir du deck CSV existant).
+const aoaDepuisCsv = (w, csv) => {
+  const wbCsv = w.XLSX.read(csv, { type: 'string' });
+  return w.XLSX.utils.sheet_to_json(wbCsv.Sheets[wbCsv.SheetNames[0]], { header: 1, defval: '' });
+};
+
+test('Multi-onglets : fusion des onglets, mapping par en-têtes, onglets invalides ignorés', async () => {
+  const w = bootKool();
+  const sheetId = 'TEST_MULTI_TAB_ID_000000000001';
+  const mainAoa = [
+    ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+    ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
+    ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '5']
+  ];
+  // Onglet journalier : mêmes colonnes dans un ordre différent + 2 commandes
+  // (1006 le 19/11, 1007 le 20/11).
+  const dailyAoa = [
+    ['Restaurant', 'Remise', 'N° commande', 'Date', 'Montant HT', 'Annulé', 'Raison annulation', '', '', '', 'Frais livraison', ''],
+    ['Resto Alpha', '2', '1006', '19/11/2026', '30.00', '', '', '', '', '', '4', ''],
+    ['Resto Beta', '0', '1007', '20/11/2026', '20.00', '', '', '', '', '', '3', '']
+  ];
+  const badAoa = [['Ville', 'Segment', 'Restaurant'], ['Tunis', 'Top', 'Resto X']];
+  const xlsxBuf = construireClasseurXlsx(w, [
+    ['Data', mainAoa],
+    ['2026-11-19', dailyAoa],
+    ['Portefeuilles', badAoa],
+    ['Vide', []]
+  ]);
+  let xlsxFetches = 0;
+  const origFetch = w.fetch;
+  w.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.includes(sheetId)) {
+      if (u.includes('format=xlsx')) {
+        xlsxFetches++;
+        return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => xlsxBuf };
+      }
+      return { ok: true, status: 200, text: async () => toCsv(mainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    }
+    return origFetch(url, opts);
+  };
+  w.yassirViderCacheOngletsClasseur();
+  const merged = await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, { force: true });
+  assert.equal(xlsxFetches, 1, 'découverte XLSX : 1 téléchargement attendu');
+  assert.equal(merged.length, 5, 'lignes fusionnées : 1 en-tête + 2 + 2, obtenu ' + merged.length);
+  const byOid = {};
+  merged.slice(1).forEach((r) => { byOid[String(r[4] || '').trim()] = r; });
+  assert.ok(byOid['1001'] && byOid['1002'], 'commandes de l\'onglet principal absentes');
+  assert.ok(byOid['1006'] && byOid['1007'], 'commandes de l\'onglet journalier absentes');
+  // Mapping par en-têtes : la commande 1006 a ses valeurs aux bons indices
+  // (Date en 3, Restaurant en 6, Montant HT en 9, Remise en 11) malgré
+  // l'ordre des colonnes différent dans son onglet.
+  assert.equal(byOid['1006'][3], '19/11/2026', 'date 1006 mal mappée');
+  assert.equal(byOid['1006'][6], 'Resto Alpha', 'restaurant 1006 mal mappé');
+  assert.equal(String(byOid['1006'][9]), '30.00', 'montant 1006 mal mappé');
+  assert.equal(String(byOid['1006'][11]), '2', 'remise 1006 mal mappée');
+  // Onglet invalide (portefeuilles) et onglet vide ignorés : pas de « Resto X ».
+  assert.ok(!merged.some((r) => String(r[6] || '').includes('Resto X')), 'onglet invalide non ignoré');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Multi-onglets : classeur à un seul onglet = comportement inchangé, pas de second téléchargement XLSX', async () => {
+  const w = bootKool();
+  const sheetId = 'TEST_SINGLE_TAB_ID_00000000001';
+  const mainAoa = [
+    ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+    ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
+    ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '5']
+  ];
+  const xlsxBuf = construireClasseurXlsx(w, [['Data', mainAoa]]);
+  let xlsxFetches = 0;
+  const origFetch = w.fetch;
+  w.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.includes(sheetId)) {
+      if (u.includes('format=xlsx')) {
+        xlsxFetches++;
+        return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => xlsxBuf };
+      }
+      return { ok: true, status: 200, text: async () => toCsv(mainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    }
+    return origFetch(url, opts);
+  };
+  w.yassirViderCacheOngletsClasseur();
+  const r1 = await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, {});
+  assert.equal(r1.length, 3, '1er appel : lignes de l\'onglet principal');
+  assert.equal(xlsxFetches, 1, '1er appel : une seule découverte XLSX');
+  const r2 = await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, {});
+  assert.equal(r2.length, 3, '2e appel : mêmes lignes');
+  assert.equal(xlsxFetches, 1, '2e appel : aucun téléchargement XLSX supplémentaire (cache 1 onglet)');
+  assert.deepEqual(r2, r1, 'résultat identique entre les deux appels');
+  // Synchro manuelle : force la redécouverte.
+  await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, { force: true });
+  assert.equal(xlsxFetches, 2, 'appel forcé : redécouverte XLSX');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Kool : synchro multi-onglets (Data + détails articles), pas de duplication au 2e sync', async () => {
+  const w = bootKool();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  // Onglet journalier Data : mêmes colonnes dans un ordre différent
+  // (1006 le 19/11, 1007 le 20/11). On reste en novembre : le site ignore
+  // les dates futures (garde préexistante de parseOrderDayToIsoDate), donc
+  // un onglet de décembre ne sera lu qu'à partir de décembre — la fenêtre
+  // décembre est testée unitairement plus bas (yassirEstDatePeriodeActive).
+  const dailyDataAoa = [
+    ['Restaurant', 'Remise', 'N° commande', 'Date', 'Montant HT', 'Annulé', 'Raison annulation', '', '', '', 'Frais livraison', ''],
+    ['Resto Alpha', '2', '1006', '19/11/2026', '30.00', '', '', '', '', '', '4', ''],
+    ['Resto Beta', '0', '1007', '20/11/2026', '20.00', '', '', '', '', '', '3', '']
+  ];
+  const dataWbBuf = construireClasseurXlsx(w, [
+    ['Data', aoaDepuisCsv(w, koolCsvData)],
+    ['2026-11-19', dailyDataAoa],
+    ['Portefeuilles', [['Ville', 'Segment', 'Restaurant'], ['Tunis', 'Top', 'Resto X']]]
+  ]);
+  // Onglet journalier Détails articles : colonnes dans un ordre différent.
+  const dailyItemsAoa = [
+    ['Article', 'Order ID', 'Date', 'Restaurant', 'Category', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+    ['Pizza Quatre Fromages', '1006', '19/11/2026', 'Resto Alpha', 'Pizza', 1, 14, 0, 14, 'Food'],
+    ['Tiramisu', '1006', '19/11/2026', 'Resto Alpha', 'Dessert', 1, 6, 0, 6, 'Food'],
+    ['Salade César', '1007', '20/11/2026', 'Resto Beta', 'Salade', 2, 8, 0, 8, 'Food']
+  ];
+  const itemsWbBuf = construireClasseurXlsx(w, [
+    ['Détails', aoaDepuisCsv(w, koolCsvItems)],
+    ['2026-11-19', dailyItemsAoa]
+  ]);
+  const origFetch = w.fetch;
+  w.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.includes(koolCfg.DATA_SHEET_ID) && u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => dataWbBuf };
+    if (u.includes(koolCfg.ORDER_ITEMS_SHEET_ID) && u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => itemsWbBuf };
+    return origFetch(url, opts);
+  };
+  const lireKpiGmvBrut = () => {
+    const kpi = {};
+    w.document.querySelectorAll('#synthGlobalKpisBody tr').forEach((tr) => {
+      const tds = tr.querySelectorAll('td');
+      if (tds.length >= 2) kpi[tds[0].textContent.trim()] = tds[1].textContent.trim();
+    });
+    return kpi['GMV Brut (Item total)'];
+  };
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+  w.yassirSwitchTab('synth_global');
+  await wait(600);
+  // GMV Brut deck 98.5 + 1006 (30+2) + 1007 (20+0) = 150.5.
+  assert.equal(lireKpiGmvBrut(), '150.5', 'GMV Brut Kool multi-onglets : ' + lireKpiGmvBrut());
+  // Détails articles : 5 lignes du deck + 3 de l'onglet journalier = 8.
+  assert.equal(w.koolOrderItemsRawCount, 8, 'détails articles multi-onglets : ' + w.koolOrderItemsRawCount);
+  assert.ok(w.koolOrderItemsByOrderId.has('1006'), 'commande 1006 absente des détails articles');
+  assert.ok(w.koolOrderItemsByOrderId.has('1007'), 'commande 1007 absente des détails articles');
+  // 2e synchro : pas de duplication (fusion par Order ID + réindexation).
+  await w.yassirSyncKoolSheets(true);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+  w.yassirSwitchTab('synth_global');
+  await wait(600);
+  assert.equal(lireKpiGmvBrut(), '150.5', 'GMV Brut après 2e sync (duplication ?) : ' + lireKpiGmvBrut());
+  assert.equal(w.koolOrderItemsRawCount, 8, 'détails articles après 2e sync : ' + w.koolOrderItemsRawCount);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Yassir : synchro multi-onglets par mois (fusion des onglets journaliers)', async () => {
+  // Mois simulés (la config de test n'en a pas par défaut) : on remplace la
+  // config du worker pour ce test puis on la restaure.
+  const octId = 'YASSIR_OCT_TEST_ID_000000000001';
+  const novId = 'YASSIR_NOV_TEST_ID_000000000002';
+  const prevConfig = store.get('config');
+  try {
+    store.set('config', JSON.stringify({ live: { ...seed.live, HISTORICAL_MONTHS: [
+      { label: 'Octobre (Google Sheets)', sheetId: octId, gid: '0', tab: 'Data exp' },
+      { label: 'Novembre (Google Sheets)', sheetId: novId, gid: '0', tab: 'Data exp' }
+    ] }, kool: koolCfg }));
+    const w = boot();
+    const mkRow = (date, oid, resto, itemTot) => yassirRow(date, oid, resto, itemTot, 0, '', '');
+    // Octobre : onglet principal (1 commande) + onglet journalier aux colonnes
+    // mélangées (2 commandes).
+    const octMainAoa = [TARGET_HEADERS_TEST.slice(), mkRow('16/10/2026', 'YAF-9001', 'Resto Yassir A', 100)];
+    const octDailyHeaders = [...TARGET_HEADERS_TEST].reverse();
+    const octDailyAoa = [octDailyHeaders,
+      [...mkRow('17/10/2026', 'YAF-9002', 'Resto Yassir B', 50)].reverse(),
+      [...mkRow('20/11/2026', 'YAF-9004', 'Resto Yassir C', 40)].reverse()];
+    const octWbBuf = construireClasseurXlsx(w, [
+      ['Data exp', octMainAoa],
+      ['2026-10-17', octDailyAoa]
+    ]);
+    // Novembre : un seul onglet (comportement inchangé).
+    const novMainAoa = [TARGET_HEADERS_TEST.slice(), mkRow('16/11/2026', 'YAF-9003', 'Resto Yassir A', 60)];
+    const novWbBuf = construireClasseurXlsx(w, [['Data exp', novMainAoa]]);
+    const origFetch = w.fetch;
+    w.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes(octId)) {
+        if (u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => octWbBuf };
+        return { ok: true, status: 200, text: async () => toCsv(octMainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      if (u.includes(novId)) {
+        if (u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => novWbBuf };
+        return { ok: true, status: 200, text: async () => toCsv(novMainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      return origFetch(url, opts);
+    };
+    await login(w, 'proprio', 'Proprio-Test-123');
+    await w.yassirSyncHistoricalSheets(true);
+    // 2 sources (Octobre + Novembre), 4 commandes (9001 + 9002 + 9004 + 9003).
+    assert.ok(w.document.getElementById('mainFileName').textContent.includes('2 source(s)'), 'sources Yassir : ' + w.document.getElementById('mainFileName').textContent);
+    assert.ok(w.document.getElementById('mainFileName').textContent.includes('4 commandes'), 'commandes Yassir fusionnées : ' + w.document.getElementById('mainFileName').textContent);
+    // La 4e commande (onglet journalier) est bien dans l'archive.
+    assert.ok(w.document.getElementById('mainFileSub').textContent.includes('2026-11-20'), 'période max sans 20/11 : ' + w.document.getElementById('mainFileSub').textContent);
+    // 2e synchro : pas de duplication.
+    await w.yassirSyncHistoricalSheets(true);
+    assert.ok(w.document.getElementById('mainFileName').textContent.includes('4 commandes'), 'commandes après 2e sync : ' + w.document.getElementById('mainFileName').textContent);
+    assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+  } finally {
+    store.set('config', prevConfig);
+  }
+});
+
+// ---- Fenêtre de données active : décembre accepté (data journalière) ----
+// Le site ignore les dates futures (garde préexistante de
+// parseOrderDayToIsoDate) : un onglet de décembre 2026 ne peut pas être
+// testé de bout en bout tant qu'on est en novembre — on teste donc la
+// fenêtre avec des dates de décembre déjà passées (2025).
+test('Fenêtre active : décembre accepté, mai rejeté', () => {
+  const w = boot();
+  assert.equal(w.yassirEstDatePeriodeActive('19/12/2025'), true, 'décembre doit être dans la fenêtre active');
+  assert.equal(w.yassirEstDatePeriodeActive('19/11/2026'), true, 'novembre doit être dans la fenêtre active');
+  assert.equal(w.yassirEstDatePeriodeActive('19/10/2026'), true, 'octobre doit être dans la fenêtre active');
+  assert.equal(w.yassirEstDatePeriodeActive('19/05/2026'), false, 'mai doit être hors fenêtre active');
+  assert.equal(w.yassirEstDatePeriodeActive(''), false, 'date vide rejetée');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 

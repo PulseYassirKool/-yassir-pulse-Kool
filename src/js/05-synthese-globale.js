@@ -819,11 +819,12 @@
         }
 
         // 1. Variation Year-over-Year (YoY) depuis le fichier 2025 :
-        // Prend les semaines de variation (ex: W47 et W45 du fichier 2025) et affiche les variations YoY exactes
+        // Prend la semaine en cours et la semaine précédente (ex: W47 et W46, comme le filtre) et affiche les variations YoY exactes
         if (yoyGrid) {
           var targetWeeksForYoy = [];
           if (curSelectedW && map25.has(curSelectedW)) targetWeeksForYoy.push(curSelectedW);
-          if (curSelectedW >= 3 && map25.has(curSelectedW - 2)) targetWeeksForYoy.push(curSelectedW - 2);
+          var prevWForYoy = prevSelectedW || (curSelectedW > 1 ? curSelectedW - 1 : 0);
+          if (prevWForYoy && prevWForYoy !== curSelectedW && map25.has(prevWForYoy)) targetWeeksForYoy.push(prevWForYoy);
           if (targetWeeksForYoy.length === 0) {
             last4Weeks.forEach(function (w) { if (map25.has(w)) targetWeeksForYoy.push(w); });
           }

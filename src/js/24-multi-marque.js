@@ -765,14 +765,9 @@
           showToast('Synchronisation complète <strong>Kool</strong> (Data Octobre & Novembre, Commissions, Portefeuilles & Offre Participation)...', 'info');
         }
 
-        // 1. Data Kool (Octobre & Novembre dans le même onglet gid=0)
-        var pData = fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.DATA_SHEET_ID, KOOL_SHEETS_CONFIG.DATA_GID, '')
-          .catch(function () {
-            return fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.DATA_SHEET_ID).then(function (wb) {
-              var sName = wb.SheetNames[0];
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            });
-          })
+        // 1. Data Kool (onglet principal gid=0 + onglets journaliers
+        //    supplémentaires éventuels, lus et fusionnés).
+        var pData = yassirLireClasseurToutesFeuilles(KOOL_SHEETS_CONFIG.DATA_SHEET_ID, KOOL_SHEETS_CONFIG.DATA_GID, yassirValiderEnTetesDataKool, { force: !!manualTrigger })
           .catch(function () { return []; });
 
         // 2. Commission Kool (onglet « Commissions » du classeur fusionné, gid=9)
@@ -821,14 +816,9 @@
           })
           .catch(function () { return []; });
 
-        // 5. Détails des commandes Kool (Articles, Catégories, Quantités, Prix)
-        var pOrderItems = fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.ORDER_ITEMS_SHEET_ID, KOOL_SHEETS_CONFIG.ORDER_ITEMS_GID, '')
-          .catch(function () {
-            return fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.ORDER_ITEMS_SHEET_ID).then(function (wb) {
-              var sName = wb.SheetNames[0];
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            });
-          })
+        // 5. Détails des commandes Kool (Articles, Catégories, Quantités, Prix) :
+        //    onglet principal + onglets journaliers supplémentaires éventuels.
+        var pOrderItems = yassirLireClasseurToutesFeuilles(KOOL_SHEETS_CONFIG.ORDER_ITEMS_SHEET_ID, KOOL_SHEETS_CONFIG.ORDER_ITEMS_GID, yassirValiderEnTetesDetailsKool, { force: !!manualTrigger })
           .catch(function () { return []; });
 
         // 6. Données 2025 Kool (onglet « 2025 Kool » du classeur fusionné, gid=14) :
@@ -1048,7 +1038,7 @@
                       return !String(m.name || '').toLowerCase().includes('google sheets') || String(m.name || '').toLowerCase().includes('kool');
                     })
                   }
-                : filtrerArchiveOctobreNovembre(
+                : filtrerArchivePeriodeActive(
                     archive.rawSourceRows,
                     Array.isArray(archive.storedFilesMeta) ? archive.storedFilesMeta : []
                   );

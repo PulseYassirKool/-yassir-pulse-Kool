@@ -66,14 +66,27 @@
         }).catch(function () { return null; });
       }
 
-      function estDateOctobreOuNovembre(val) {
+      // Fenêtre de données active : octobre, novembre et décembre. La data
+      // journalière par onglet continue en décembre : sans cette extension,
+      // les lignes de décembre seraient silencieusement ignorées à la fusion
+      // et au chargement de l'archive. À étendre (ajouter '01', ...) quand
+      // l'utilisateur passera à janvier — la purge 3 mois glissants, elle,
+      // est relative à la date max et n'a pas besoin d'être touchée.
+      var MOIS_PERIODE_ACTIVE = ['10', '11', '12'];
+      function estDatePeriodeActive(val) {
         var iso = parseOrderDayToIsoDate(val);
         if (!iso) return false;
         var m = iso.substring(5, 7);
-        return m === '10' || m === '11';
+        return MOIS_PERIODE_ACTIVE.indexOf(m) !== -1;
       }
 
-      function filtrerArchiveOctobreNovembre(aoa, filesMeta) {
+      // Exposé pour les tests : la fenêtre active inclut décembre (la data
+      // journalière continue en décembre). Les dates futures restent ignorées
+      // par parseOrderDayToIsoDate (garde préexistante) : un onglet daté de
+      // décembre n'est donc lu qu'à partir de décembre.
+      window.yassirEstDatePeriodeActive = estDatePeriodeActive;
+
+      function filtrerArchivePeriodeActive(aoa, filesMeta) {
         if (!aoa || aoa.length < 2) return { aoa: aoa || [], meta: filesMeta || [] };
         var hdrs = aoa[0].map(function (h) { return h !== null && h !== undefined ? String(h).trim().toLowerCase() : ''; });
         var idxDay = hdrs.indexOf('order day') !== -1 ? hdrs.indexOf('order day') : hdrs.indexOf('delivered day');
@@ -96,7 +109,7 @@
           var row = aoa[r];
           if (!row) continue;
           if (idxOid !== -1 && !estOrderIdYaf(row[idxOid])) continue;
-          if (!estDateOctobreOuNovembre(row[idxDay])) continue;
+          if (!estDatePeriodeActive(row[idxDay])) continue;
           var oldFIdx = row.__fileSourceIdx;
           if (typeof oldFIdx === 'number' && oldToNewFileIdx.has(oldFIdx)) {
             var newFIdx = oldToNewFileIdx.get(oldFIdx);
@@ -683,7 +696,7 @@
             }
           }
           var idxNewOrderDay = newHeadersClean.indexOf('order day') !== -1 ? newHeadersClean.indexOf('order day') : newHeadersClean.indexOf('delivered day');
-          if (idxNewOrderDay !== -1 && !estDateOctobreOuNovembre(sRow[idxNewOrderDay])) {
+          if (idxNewOrderDay !== -1 && !estDatePeriodeActive(sRow[idxNewOrderDay])) {
             continue;
           }
 
