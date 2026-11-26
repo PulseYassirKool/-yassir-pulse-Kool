@@ -1301,6 +1301,61 @@ test('Kool : données 2025 Kool synchronisées et utilisées par le panneau YoY'
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- 2025 : validation des lignes avant stockage (repli par nom d'onglet) ----
+// Risque corrigé (2026-11-26) : gviz ignore parfois le gid et renvoie le 1er
+// onglet (portefeuilles). Sans validation, ~1300 lignes de portefeuilles
+// étaient stockées comme « données 2025 » et la comparaison YoY restait vide
+// sans aucun message d'erreur.
+test('2025 : le validateur accepte une matrice 2025 et rejette le reste', () => {
+  const w = boot();
+  const matrice = [
+    ['', 'W 07', 'W 08', 'W 09'],
+    ['Requested', 100, 110, 120],
+    ['Delivered Orders', 5, 6, 7],
+    ['GMV (Total Food VF)', 100, 120, 140]
+  ];
+  assert.equal(w.yassirValiderLignes2025(matrice), true, 'matrice 2025 refusée');
+  // Lignes de portefeuilles (mauvaise feuille renvoyée malgré le gid).
+  const portefeuilles = [
+    ['Ville', 'Segment', 'restaurant Name', 'APP'],
+    ['Sousse', 'Top Performer', 'BABKE Kebab & Plates', 'Yassir'],
+    ['El Menzah', 'Top Performer', 'Plan B Ennasr', 'Yassir']
+  ];
+  assert.equal(w.yassirValiderLignes2025(portefeuilles), false, 'portefeuilles acceptés comme 2025');
+  assert.equal(w.yassirValiderLignes2025([]), false, 'lignes vides acceptées');
+  assert.equal(w.yassirValiderLignes2025([['', 'W 07', 'W 08'], ['Requested', 1, 2]]), false, 'moins de 3 colonnes semaine acceptées');
+  // « W15 » sans espace et « Semaine 10 » sont aussi des semaines.
+  assert.equal(w.yassirValiderLignes2025([['', 'W15', 'W16', 'Semaine 10'], ['Requested', 1, 2, 3]]), true, 'variantes W15 / Semaine 10 refusées');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('2025 Kool : le stockage validé stocke et compte, l\'invalide retourne 0 sans écraser', () => {
+  const w = boot();
+  const matrice = [
+    ['', 'W 45', 'W 46', 'W 47'],
+    ['Requested', 100, 110, 120],
+    ['Delivered Orders', 5, 6, 7],
+    ['GMV (Total Food VF)', 100, 120, 140],
+    ['CA KOOL', 10, 12, 14]
+  ];
+  assert.equal(w.yassirStockerLignes2025Kool(matrice), 5, 'lignes 2025 valides : 5 attendues');
+  const stored = w.localStorage.getItem('kool_vf_hist_2025_rows_v1');
+  assert.ok(stored && stored.includes('Requested'), 'lignes 2025 Kool non stockées');
+  // Lignes de portefeuilles : 0, et le bon stockage n'est pas écrasé.
+  const portefeuilles = [
+    ['Ville', 'Segment', 'restaurant Name', 'APP'],
+    ['Sousse', 'Top Performer', 'BABKE Kebab & Plates', 'Yassir']
+  ];
+  assert.equal(w.yassirStockerLignes2025Kool(portefeuilles), 0, 'portefeuilles stockés comme 2025');
+  assert.equal(w.localStorage.getItem('kool_vf_hist_2025_rows_v1'), stored, 'le stockage valide a été écrasé par des lignes invalides');
+  assert.equal(w.yassirStockerLignes2025Kool([]), 0, 'lignes vides stockées');
+  // Symétrique côté Yassir.
+  assert.equal(w.yassirStockerLignes2025Yassir(matrice), 5, 'lignes 2025 Yassir : 5 attendues');
+  assert.ok(w.localStorage.getItem('yassir_vf_hist_2025_rows_v1').includes('Requested'), 'lignes 2025 Yassir non stockées');
+  assert.equal(w.yassirStockerLignes2025Yassir(portefeuilles), 0, 'portefeuilles stockés comme 2025 Yassir');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Budget Kool : alertes « Budget à 90 % » et « Budget dépassé » en mode Kool ----
 // Données deck Kool (toute période) : coût = livraison gratuite (5 − K quand K < 5)
 // + part restaurant des offres Resto Alpha (règle 10 % : 2001 → 5 − 3.5 = 1.5,

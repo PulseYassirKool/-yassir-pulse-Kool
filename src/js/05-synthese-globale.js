@@ -361,6 +361,57 @@
         } catch (e) {}
       })();
 
+      // Validation d'une matrice 2025 : au moins 3 colonnes « semaine » dans
+      // les 8 premières lignes (même détection que extract2025MetricsByWeekMap).
+      // Protège contre une mauvaise feuille renvoyée par Google malgré le gid
+      // (gviz renvoie parfois le 1er onglet) : sans elle, des lignes de
+      // portefeuilles seraient stockées comme « données 2025 » et la comparaison
+      // YoY resterait vide sans aucun message d'erreur.
+      var WEEK_HEADER_RE_2025 = /^(?:w|week|semaine)\s*0*(\d{1,2})(?:\s*[-_]\s*\d{2,4})?$/i;
+      function yassirValiderLignes2025(rows) {
+        if (!Array.isArray(rows) || rows.length < 2) return false;
+        for (var r = 0; r < Math.min(8, rows.length); r++) {
+          var row = rows[r] || [];
+          var found = 0;
+          for (var c = 0; c < row.length; c++) {
+            var wm = String(row[c] || '').trim().match(WEEK_HEADER_RE_2025);
+            if (wm) {
+              var wNum = parseInt(wm[1], 10);
+              if (wNum >= 1 && wNum <= 53) found++;
+            }
+          }
+          if (found >= 3) return true;
+        }
+        return false;
+      }
+      window.yassirValiderLignes2025 = yassirValiderLignes2025;
+
+      function nettoyerLignes2025(rows) {
+        return (rows || []).filter(function (r) {
+          return Array.isArray(r) && r.some(function (c) { return String(c || '').trim() !== ''; });
+        });
+      }
+
+      // Valide puis stocke les lignes 2025 d'une marque. Retourne le nombre de
+      // lignes stockées, 0 sinon — sans jamais écraser de bonnes données déjà
+      // stockées par de mauvaises.
+      function stockerLignes2025Kool(rows) {
+        var cleaned = nettoyerLignes2025(rows);
+        if (cleaned.length < 2 || !yassirValiderLignes2025(cleaned)) return 0;
+        state.historical2025RowsKool = cleaned;
+        safeSet(KOOL_2025_STORAGE_KEY, JSON.stringify(cleaned));
+        return cleaned.length;
+      }
+      function stockerLignes2025Yassir(rows) {
+        var cleaned = nettoyerLignes2025(rows);
+        if (cleaned.length < 2 || !yassirValiderLignes2025(cleaned)) return 0;
+        state.historical2025Rows = cleaned;
+        safeSet(YASSIR_2025_STORAGE_KEY, JSON.stringify(cleaned));
+        return cleaned.length;
+      }
+      window.yassirStockerLignes2025Kool = stockerLignes2025Kool;
+      window.yassirStockerLignes2025Yassir = stockerLignes2025Yassir;
+
       window.yassirSync2025Sheet = function (manualTrigger) {
         var sheetId = LIVE_SHEETS_CONFIG.HISTORICAL_2025_SHEET_ID;
         var gid = LIVE_SHEETS_CONFIG.HISTORICAL_2025_GID || '0';
@@ -370,36 +421,43 @@
         if (icon) icon.classList.add('fa-spin');
         if (label) label.textContent = 'Sync YoY 2025...';
 
+        function finirSucces() {
+          if (icon) icon.classList.remove('fa-spin');
+          if (label) label.textContent = 'YoY 2025 OK';
+          if (state.activeTab === 'synth_global') renderSynth2025Panel();
+          if (manualTrigger) {
+            showToast('<strong>Données 2025 synchronisées</strong> pour les semaines YoY.', 'success');
+          }
+        }
+        function finirEchec() {
+          if (icon) icon.classList.remove('fa-spin');
+          if (label) label.textContent = 'Sync YoY 2025';
+        }
+
+        // Lecture par gid, puis replis par nom d'onglet (JSONP puis XLSX) :
+        // Google renvoie parfois le 1er onglet malgré le gid, donc chaque
+        // lecture est validée avant stockage.
         return fetchGoogleSheetByGidSmart(sheetId, gid, '')
-          .catch(function () {
-            return fetchGoogleWorkbookXlsx(sheetId).then(function (wb) {
-              // Le classeur fusionné a 14 onglets : SheetNames[0] serait 'Omar Beldi'
-              // (portefeuilles). On cherche l'onglet 2025 Yassir par son nom.
-              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('2025') && normalizeText(n).includes('yassir'); });
-              if (!sName) throw new Error('Onglet 2025 Yassir introuvable');
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            });
-          })
+          .catch(function () { return null; })
           .then(function (rows) {
-            if (icon) icon.classList.remove('fa-spin');
-            if (rows && rows.length > 1) {
-              var cleaned = rows.filter(function (r) {
-                return Array.isArray(r) && r.some(function (c) { return String(c || '').trim() !== ''; });
+            if (rows && stockerLignes2025Yassir(rows) > 0) { finirSucces(); return; }
+            return fetchGoogleSheetJsonp(sheetId, '2025 Yassir', false)
+              .catch(function () { return null; })
+              .then(function (rowsByName) {
+                if (rowsByName && stockerLignes2025Yassir(rowsByName) > 0) { finirSucces(); return; }
+                return fetchGoogleWorkbookXlsx(sheetId).then(function (wb) {
+                  // Le classeur fusionné a 14 onglets : SheetNames[0] serait 'Omar Beldi'
+                  // (portefeuilles). On cherche l'onglet 2025 Yassir par son nom.
+                  var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('2025') && normalizeText(n).includes('yassir'); });
+                  if (!sName) throw new Error('Onglet 2025 Yassir introuvable');
+                  return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
+                }).then(function (rowsXlsx) {
+                  if (stockerLignes2025Yassir(rowsXlsx) > 0) finirSucces(); else finirEchec();
+                });
               });
-              state.historical2025Rows = cleaned;
-              safeSet(YASSIR_2025_STORAGE_KEY, JSON.stringify(cleaned));
-              if (label) label.textContent = 'YoY 2025 OK';
-              if (state.activeTab === 'synth_global') renderSynth2025Panel();
-              if (manualTrigger) {
-                showToast('<strong>Données 2025 synchronisées</strong> pour les semaines YoY.', 'success');
-              }
-            } else {
-              if (label) label.textContent = 'Sync YoY 2025';
-            }
           })
           .catch(function () {
-            if (icon) icon.classList.remove('fa-spin');
-            if (label) label.textContent = 'Sync YoY 2025';
+            finirEchec();
             if (manualTrigger) {
               showToast('Impossible de lire la feuille 2025 (vérifiez le partage public en lecture).', 'error');
             }
@@ -426,19 +484,28 @@
             });
           })
           .then(function (rows) {
-            if (rows && rows.length > 1) {
-              var cleaned = rows.filter(function (r) {
-                return Array.isArray(r) && r.some(function (c) { return String(c || '').trim() !== ''; });
-              });
-              state.historical2025RowsKool = cleaned;
-              safeSet(KOOL_2025_STORAGE_KEY, JSON.stringify(cleaned));
+            var count = stockerLignes2025Kool(rows);
+            if (count > 0) {
               if (state.activeTab === 'synth_global' && typeof currentBrand !== 'undefined' && currentBrand === 'kool') renderSynth2025Panel();
               if (manualTrigger) {
                 showToast('<strong>Données 2025 Kool synchronisées</strong> pour les semaines YoY.', 'success');
               }
-              return cleaned.length;
+              return count;
             }
-            return 0;
+            // Lignes invalides (Google a renvoyé une autre feuille malgré le gid) :
+            // repli par NOM d'onglet, qui lui est fiable (gviz sheet=).
+            return fetchGoogleSheetJsonp(sheetId, '2025 Kool', false)
+              .then(function (rowsByName) {
+                var count2 = stockerLignes2025Kool(rowsByName);
+                if (count2 > 0) {
+                  if (state.activeTab === 'synth_global' && typeof currentBrand !== 'undefined' && currentBrand === 'kool') renderSynth2025Panel();
+                  if (manualTrigger) {
+                    showToast('<strong>Données 2025 Kool synchronisées</strong> pour les semaines YoY.', 'success');
+                  }
+                }
+                return count2;
+              })
+              .catch(function () { return 0; });
           })
           .catch(function () {
             if (manualTrigger) {
