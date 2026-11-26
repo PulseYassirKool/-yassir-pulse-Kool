@@ -165,7 +165,12 @@
         renderPolygonFilter();
       };
 
+      // « Effacer le filtre » : efface la recherche ET la sélection, et remet
+      // tous les polygones (filtre inactif).
       window.yassirClearPolygonFilter = function () {
+        _polygonSearchQuery = '';
+        var inp = document.getElementById('polygonSearchInput');
+        if (inp) inp.value = '';
         window.yassirSetPolygonFilter(null);
       };
 

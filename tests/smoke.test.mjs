@@ -752,10 +752,16 @@ test('Kool : filtre par Polygone Client (multi-sélection + recherche), Kool uni
   w.yassirSearchPolygones(inp.value);
   assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah'], 'recherche effacée : liste complète');
 
-  // Effacer → tout revient.
+  // « Effacer le filtre » efface AUSSI la recherche et remet tous les polygones.
+  inp.value = 'men';
+  w.yassirSearchPolygones(inp.value);
+  assert.deepEqual(polyBoxes(), ['Menzah'], 'recherche « men » avant effacement');
   w.yassirClearPolygonFilter();
+  assert.equal(w.document.getElementById('polygonSearchInput').value, '', 'recherche effacée');
+  assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah'], 'liste complète après effacement');
   assert.equal(foodCount(), '4', 'effacement : tout revient');
   assert.equal(polyLabel(), 'Polygone : Tous', 'libellé après effacement');
+  assert.equal(w.document.getElementById('polygonCheckAll').checked, true, 'case « Tous » cochée après effacement');
 
   // « Tous les polygones » décoché = tout désélectionner : 0 commande, « Aucun »,
   // toutes les cases décochées. Recocher un polygone ensuite filtre sur lui seul.
