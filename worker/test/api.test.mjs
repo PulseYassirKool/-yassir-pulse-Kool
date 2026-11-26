@@ -67,3 +67,23 @@ test('gestion des comptes : réservée au propriétaire, mot de passe >= 10, pas
   const list = (await call('GET', '/api/accounts', null, owner)).json.accounts;
   assert.ok(list.every((a) => !('hash' in a)));
 });
+
+test('changement de mot de passe par le proprio -> ancien jeton AM rejeté, nouveau mot de passe accepté', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const amOld = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  assert.equal((await call('GET', '/api/me', null, amOld)).status, 200);
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  assert.equal((await call('PUT', '/api/accounts/omar.beldi', { password: 'Nouveau-Password-3', role: 'am', amName: 'Omar Beldi', displayName: 'Omar' }, owner)).status, 200);
+  // L'ancien jeton meurt immédiatement (version du mot de passe incrémentée).
+  assert.equal((await call('GET', '/api/me', null, amOld)).status, 401);
+  assert.equal((await call('GET', '/api/bootstrap', null, amOld)).status, 401);
+  // L'ancien mot de passe ne marche plus, le nouveau oui — et son jeton est valide.
+  assert.equal((await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 401);
+  const amFresh = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Nouveau-Password-3' })).json.token;
+  assert.equal((await call('GET', '/api/me', null, amFresh)).status, 200);
+  // Le jeton du propriétaire, lui, n'est pas touché (seul le compte modifié est déconnecté).
+  assert.equal((await call('GET', '/api/me', null, owner)).status, 200);
+});

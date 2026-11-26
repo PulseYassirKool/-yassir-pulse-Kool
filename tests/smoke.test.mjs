@@ -860,3 +860,298 @@ test('Yassir : règle comptable — offre sans règle à 100 % restaurant (carte
 
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
+
+// ---- Notifications (étapes 1 et 2) ----
+// Données Kool 16-22/11/2026 (ref = 22/11, aujourd'hui = 26/11 → données vieilles de 4 jours) :
+// Alpha (1 livrée/jour, offre qui se termine le 23/11), Beta (dernière livrée le 17/11 → 0 cmd),
+// Gamma (drop 5 -> 3 -> 1), Delta (10 reçues dont 3 annulées = 30 %).
+const notifRow = (date, oid, resto, j, k, l, annule, raison) => {
+  const r = new Array(33).fill('');
+  r[0] = annule || ''; r[2] = raison || ''; r[3] = date; r[4] = oid; r[6] = resto;
+  r[9] = j; r[10] = k; r[11] = l;
+  return r;
+};
+const notifHeader = new Array(33).fill('');
+notifHeader[0] = 'Annulé'; notifHeader[2] = 'Raison annulation'; notifHeader[3] = 'Date';
+notifHeader[4] = 'N° commande'; notifHeader[6] = 'Restaurant';
+notifHeader[9] = 'Montant HT'; notifHeader[10] = 'Frais livraison'; notifHeader[11] = 'Remise';
+const notifDataRows = [notifHeader];
+{
+  let oid = 5000;
+  const addDeliv = (date, resto, n) => { for (let i = 0; i < n; i++) notifDataRows.push(notifRow(date, String(++oid), resto, '20.00', '3', '0')); };
+  ['16/11/2026', '17/11/2026', '18/11/2026', '19/11/2026', '20/11/2026', '21/11/2026', '22/11/2026'].forEach((d) => addDeliv(d, 'Resto Alpha', 1));
+  addDeliv('16/11/2026', 'Resto Beta', 1);
+  addDeliv('17/11/2026', 'Resto Beta', 1);
+  addDeliv('20/11/2026', 'Resto Gamma', 5);
+  addDeliv('21/11/2026', 'Resto Gamma', 3);
+  addDeliv('22/11/2026', 'Resto Gamma', 1);
+  ['16/11/2026', '17/11/2026', '18/11/2026', '19/11/2026', '20/11/2026', '21/11/2026', '22/11/2026'].forEach((d) => addDeliv(d, 'Resto Delta', 1));
+  ['18/11/2026', '19/11/2026', '20/11/2026'].forEach((d) => notifDataRows.push(notifRow(d, String(++oid), 'Resto Delta', '20.00', '3', '0', 'oui', 'Client absent')));
+}
+const notifCsvComm = toCsv([['Restaurant', 'Commission'], ['Resto Alpha', '20'], ['Resto Beta', '15'], ['Resto Gamma', '20'], ['Resto Delta', '20']]);
+const notifCsvPort = toCsv([['Restaurant', 'Ville', 'AM'], ['Resto Alpha', 'Tunis', 'Omar Beldi'], ['Resto Beta', 'Ariana', 'Nour Ali'], ['Resto Gamma', 'Tunis', 'Omar Beldi'], ['Resto Delta', 'Sfax', 'Omar Beldi']]);
+const notifCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], ['Resto Alpha', '10', 'Toute la carte', '01/11/2026 - 23/11/2026']]);
+
+test('Notifications Kool : Traité / Tout lu, regroupement, tri, clic, nouvelles alertes', async () => {
+  const w = bootKool({ data: toCsv(notifDataRows), comm: notifCsvComm, port: notifCsvPort, offre: notifCsvOffre });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+  w.yassirRecalculerNotifications();
+  await wait(200);
+
+  const bell = () => w.document.getElementById('notifBellBadgeCount').textContent;
+  const listTxt = () => w.document.getElementById('yassirNotifListBody').textContent;
+  const groupCards = () => [...w.document.querySelectorAll('#yassirNotifListBody > div')];
+
+  // 5 alertes non traitées : Beta 0 cmd, Gamma drop, Alpha fin offre, Delta annulations, données anciennes.
+  assert.equal(bell(), '5', 'cloche : 5 alertes non traitées');
+  assert.equal(w.document.getElementById('notifPanelTotalCount').textContent, '5', 'total panneau : 5');
+  assert.equal(groupCards().length, 5, '5 cartes (4 restos + Système)');
+  // Tri par gravité : Système d'abord, puis Beta (0 cmd) et Delta (annulations), Gamma (drop), Alpha (fin offre).
+  const txt = listTxt();
+  assert.ok(txt.indexOf('Système') < txt.indexOf('Resto Beta'), 'Système épinglé en haut');
+  assert.ok(txt.indexOf('Resto Beta') < txt.indexOf('Resto Delta'), 'Beta (0 cmd) avant Delta (annulations)');
+  assert.ok(txt.indexOf('Resto Delta') < txt.indexOf('Resto Gamma'), 'Delta avant Gamma (drop)');
+  assert.ok(txt.indexOf('Resto Gamma') < txt.indexOf('Resto Alpha'), 'Gamma (drop) avant Alpha (fin offre)');
+  // Compteurs par catégorie.
+  assert.equal(w.document.getElementById('notifCntZero').textContent, '1', 'compteur 0 cmd : 1');
+  assert.equal(w.document.getElementById('notifCntDrop').textContent, '1', 'compteur drop : 1');
+  assert.equal(w.document.getElementById('notifCntOffer').textContent, '1', 'compteur fin offre : 1');
+  assert.equal(w.document.getElementById('notifCntCanc').textContent, '1', 'compteur annulations : 1');
+  assert.equal(w.document.getElementById('notifCntSystem').textContent, '1', 'compteur système : 1');
+  assert.ok(txt.includes('4 jours'), 'alerte données anciennes : 4 jours');
+
+  // Filtre catégorie : Fin offre → seule Alpha visible (la cloche ne change pas).
+  w.yassirSetNotifCategoryFilter('OFFER_END');
+  assert.ok(listTxt().includes('Resto Alpha'), 'filtre Fin offre : Alpha visible');
+  assert.ok(!listTxt().includes('Resto Gamma'), 'filtre Fin offre : Gamma masqué');
+  assert.equal(bell(), '5', 'cloche inchangée par le filtre catégorie');
+  w.yassirSetNotifCategoryFilter('ALL');
+
+  // « Traité » sur Beta : la cloche baisse, la carte disparaît.
+  // (jsdom tourne en runScripts 'outside-only' : les onclick inline ne se
+  // déclenchent pas au clic — on vérifie le câblage dans l'attribut, puis on
+  // appelle la fonction directement, comme le ferait le clic dans un vrai navigateur.)
+  const betaCard = groupCards().find((d) => d.textContent.includes('Resto Beta'));
+  const traiteBtn = [...betaCard.querySelectorAll('button')].find((b) => b.textContent.includes('Traité'));
+  assert.ok(traiteBtn, 'bouton Traité de Beta absent');
+  assert.ok(traiteBtn.getAttribute('onclick').includes("yassirTraiterAlerte('kool|ZERO_3D|resto beta|Nour Ali')"), 'câblage Traité de Beta incorrect : ' + traiteBtn.getAttribute('onclick'));
+  w.yassirTraiterAlerte('kool|ZERO_3D|resto beta|Nour Ali');
+  assert.equal(bell(), '4', 'cloche : 4 après avoir traité Beta');
+  assert.ok(!listTxt().includes('Resto Beta'), 'Beta disparaît de la liste');
+  // L'alerte traitée ne réapparaît pas au recalcul (la situation existe toujours).
+  w.yassirRecalculerNotifications();
+  assert.equal(bell(), '4', 'cloche : toujours 4 après recalcul (Beta reste traitée)');
+
+  // Clic sur la carte Gamma : onglet Analyse Restaurant, Gamma sélectionné.
+  // (même remarque jsdom : on vérifie le câblage, puis on appelle directement.)
+  const gammaCard = groupCards().find((d) => d.textContent.includes('Resto Gamma'));
+  const gammaItem = gammaCard.querySelector('[onclick*="yassirOuvrirAlerte"]');
+  assert.ok(gammaItem, 'carte Gamma sans onclick de navigation');
+  assert.ok(gammaItem.getAttribute('onclick').includes("yassirOuvrirAlerte('resto gamma', 'DROP_3D')"), 'câblage clic Gamma incorrect : ' + gammaItem.getAttribute('onclick'));
+  w.yassirOuvrirAlerte('resto gamma', 'DROP_3D');
+  await wait(400);
+  assert.equal(w.document.getElementById('panelRestoAnalytics').classList.contains('hidden'), false, 'clic Gamma : onglet Analyse Restaurant');
+  assert.equal(w.document.getElementById('selectRestoAnalytics').value, 'resto gamma', 'clic Gamma : restaurant sélectionné');
+
+  // Clic sur la carte Alpha (fin d'offre) : section Participation.
+  w.yassirSetNotifCategoryFilter('ALL');
+  const alphaCard = groupCards().find((d) => d.textContent.includes('Resto Alpha'));
+  const alphaItem = alphaCard.querySelector('[onclick*="yassirOuvrirAlerte"]');
+  assert.ok(alphaItem, 'carte Alpha sans onclick de navigation');
+  assert.ok(alphaItem.getAttribute('onclick').includes("yassirOuvrirAlerte('resto alpha', 'OFFER_END')"), 'câblage clic Alpha incorrect : ' + alphaItem.getAttribute('onclick'));
+  w.yassirOuvrirAlerte('resto alpha', 'OFFER_END');
+  await wait(400);
+  assert.equal(w.document.getElementById('panelParticipation').classList.contains('hidden'), false, 'clic Alpha (fin offre) : section Participation');
+
+  // Synchro en échec : alerte épinglée, puis effacée.
+  w.localStorage.setItem('yassir_pulse_last_sync_fail_v1', JSON.stringify({ brand: 'kool', at: new Date().toISOString(), detail: 'Data Kool' }));
+  w.yassirRecalculerNotifications();
+  assert.equal(bell(), '5', 'cloche : 5 avec l\'alerte synchro en échec');
+  assert.ok(listTxt().includes('Synchro en échec'), 'alerte synchro en échec affichée');
+  w.yassirEffacerEchecSynchro('kool');
+  w.yassirRecalculerNotifications();
+  assert.equal(bell(), '4', 'cloche : 4 après effacement de l\'échec');
+
+  // « Tout marquer lu » : la cloche se vide.
+  assert.ok(w.document.getElementById('btnNotifMarkAllRead'), 'bouton Tout marquer lu absent');
+  w.yassirToutMarquerNotifLu();
+  assert.equal(bell(), '0', 'cloche : 0 après Tout marquer lu');
+  assert.ok(listTxt().includes('marquées comme traitées'), 'message « toutes traitées » affiché');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Notifications : alerte Budget (Yassir uniquement) ----
+// Même montage que le test de la règle comptable : Data exp + règles Offre
+// Participation. Coût restaurant total = 17 (A 0 + B 5 + C 8 + D 0 + E 4).
+// Budget global préréglé en localStorage avant le chargement de l'application.
+function bootYassirWithBudget(globalBudget) {
+  const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w = dom.window;
+  w.__PULSE_API__ = 'https://api.test';
+  w.localStorage.setItem('yassir_vf_budget_v1', JSON.stringify({ byAm: {}, global: globalBudget }));
+  w.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.startsWith('https://api.test')) {
+      const r = await handle(new Request(u, { method: opts.method || 'GET', body: opts.body, headers: { Origin: 'http://localhost', ...(opts.headers || {}) } }), env);
+      return { ok: r.ok, status: r.status, json: () => r.json(), text: () => r.text() };
+    }
+    sheetCalls.push(u);
+    return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+  };
+  w.addEventListener('error', (e) => errors.push(e.message));
+  w.addEventListener('unhandledrejection', (e) => errors.push(String(e.reason)));
+  w.eval(bundle);
+  return w;
+}
+
+test('Notifications Yassir : alerte Budget dépassé à 90 % puis 100 % (global)', async () => {
+  const build = async (globalBudget) => {
+    const w = bootYassirWithBudget(globalBudget);
+    await login(w, 'proprio', 'Proprio-Test-123');
+    const makeXlsxFile = (aoa, sheetName, fileName) => {
+      const wb = w.XLSX.utils.book_new();
+      w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(aoa), sheetName);
+      const buf = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      return new w.File([buf], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    };
+    const rulesFile = makeXlsxFile([
+      ['Restaurant', 'Participation', 'Tag', 'Période'],
+      ['Resto Yassir A', '10', 'Toute la carte', '01/11/2026 - 30/11/2026'],
+      ['Resto Yassir C', '', 'Toute la carte', '01/11/2026 - 30/11/2026'],
+      ['Resto Yassir D', '20', 'Super Promo', '01/11/2026 - 30/11/2026']
+    ], 'Offre Participation', 'offre-participation.xlsx');
+    w.yassirOnOffrePartFileChange({ target: { files: [rulesFile], value: 'x' } });
+    await wait(800);
+    const dataAoa = [TARGET_HEADERS_TEST.slice(),
+      yassirRow('16/11/2026', 'YAF-3001', 'Resto Yassir A', 100, 10, 'Percentage', ''),
+      yassirRow('17/11/2026', 'YAF-3002', 'Resto Yassir B', 50, 5, 'Percentage', ''),
+      yassirRow('17/11/2026', 'YAF-3003', 'Resto Yassir C', 80, 8, 'Percentage', ''),
+      yassirRow('18/11/2026', 'YAF-3004', 'Resto Yassir D', 60, 6, '', 'Super Promo'),
+      yassirRow('18/11/2026', 'YAF-3005', 'Resto Yassir E', 40, 4, '', 'Super Promo')
+    ];
+    // « Amount to restaurant » = montant brut (sinon la règle Comm. 100 % croit à tort
+    // que le restaurant ne touche rien — la colonne est remplie dans le vrai Data exp).
+    const idxAmtRest = TARGET_HEADERS_TEST.indexOf('amount to restaurant');
+    dataAoa.slice(1).forEach((r) => { r[idxAmtRest] = r[TARGET_HEADERS_TEST.indexOf('item total')]; });
+    const dataFile = makeXlsxFile(dataAoa, 'Data exp', 'data-exp.xlsx');
+    w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
+    await wait(1200);
+    w.yassirRecalculerNotifications();
+    await wait(200);
+    return w;
+  };
+
+  // Budget global 10 TND, coût 17 → 170 % : alerte « Budget dépassé ».
+  // (La cloche totale dépend du seed local — portefeuilles Yassir — on
+  // vérifie le compteur Budget, indépendant du seed.)
+  const w100 = await build(10);
+  assert.equal(w100.document.getElementById('notifCntBudget').textContent, '1', 'compteur Budget : 1 à 170 %');
+  w100.yassirSetNotifCategoryFilter('BUDGET');
+  assert.ok(w100.document.getElementById('yassirNotifListBody').textContent.includes('Budget dépassé'), 'alerte Budget dépassé absente');
+
+  // Budget global 18 TND, coût 17 → 94 % : alerte « Budget à 90 % ».
+  const w90 = await build(18);
+  assert.equal(w90.document.getElementById('notifCntBudget').textContent, '1', 'compteur Budget : 1 à 94 %');
+  w90.yassirSetNotifCategoryFilter('BUDGET');
+  assert.ok(w90.document.getElementById('yassirNotifListBody').textContent.includes('Budget à 90 %'), 'alerte Budget à 90 % absente');
+
+  // Budget global 100 TND, coût 17 → 17 % : aucune alerte budget.
+  const wOk = await build(100);
+  assert.equal(wOk.document.getElementById('notifCntBudget').textContent, '0', 'compteur Budget : 0 à 17 %');
+  wOk.yassirSetNotifCategoryFilter('BUDGET');
+  assert.ok(!wOk.document.getElementById('yassirNotifListBody').textContent.includes('Budget'), 'alerte Budget présente à tort');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Mission C : mot de passe changé par le proprio -> session AM tuée ----
+test('Mot de passe AM changé par le proprio : la session AM meurt au prochain contrôle (401 -> écran de connexion)', async () => {
+  const wAm = boot();
+  await login(wAm, 'omar.beldi', 'Omar-Test-12345');
+  assert.equal(wAm.document.getElementById('appWrapper').classList.contains('hidden'), false, 'AM non connecté');
+  assert.ok(wAm.sessionStorage.getItem('pulse_token_v1'), 'pas de jeton AM');
+
+  // Le proprio change le mot de passe d'Omar (même KV en mémoire, autre fenêtre).
+  const wOwner = boot();
+  await login(wOwner, 'proprio', 'Proprio-Test-123');
+  const ownerToken = wOwner.sessionStorage.getItem('pulse_token_v1');
+  const putRes = await handle(new Request('https://api.test/api/accounts/omar.beldi', {
+    method: 'PUT',
+    body: JSON.stringify({ password: 'Nouveau-Mot-De-Passe-1', role: 'am', amName: 'Omar Beldi', displayName: 'Omar Beldi' }),
+    headers: { Origin: 'http://localhost', Authorization: 'Bearer ' + ownerToken }
+  }), env);
+  assert.equal(putRes.status, 200, 'changement de mot de passe refusé');
+
+  // L'AM vérifie sa session : 401 -> jeton effacé, écran de connexion.
+  await wAm.yassirVerifierSession();
+  await wait(300);
+  assert.equal(wAm.sessionStorage.getItem('pulse_token_v1'), null, 'jeton AM toujours présent après 401');
+  assert.equal(wAm.localStorage.getItem('pulse_token_v1'), null, 'jeton AM persistant toujours présent après 401');
+  assert.equal(wAm.document.getElementById('loginScreen').classList.contains('hidden'), false, 'écran de connexion non affiché après 401');
+  assert.equal(wAm.document.getElementById('appWrapper').classList.contains('hidden'), true, 'application toujours visible après 401');
+
+  // L'ancien mot de passe ne marche plus, le nouveau oui.
+  await login(wAm, 'omar.beldi', 'Omar-Test-12345');
+  assert.equal(wAm.document.getElementById('appWrapper').classList.contains('hidden'), true, 'ancien mot de passe accepté à tort');
+  await login(wAm, 'omar.beldi', 'Nouveau-Mot-De-Passe-1');
+  assert.equal(wAm.document.getElementById('appWrapper').classList.contains('hidden'), false, 'nouveau mot de passe refusé');
+
+  // Remise en état pour les autres tests (même KV partagé) : mot de passe d'origine.
+  const amToken = wAm.sessionStorage.getItem('pulse_token_v1');
+  assert.ok(amToken, 'pas de jeton après reconnexion');
+  const restoreRes = await handle(new Request('https://api.test/api/accounts/omar.beldi', {
+    method: 'PUT',
+    body: JSON.stringify({ password: 'Omar-Test-12345', role: 'am', amName: 'Omar Beldi', displayName: 'Omar Beldi' }),
+    headers: { Origin: 'http://localhost', Authorization: 'Bearer ' + ownerToken }
+  }), env);
+  assert.equal(restoreRes.status, 200, 'restauration du mot de passe AM échouée');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Proprio change SON propre mot de passe : il reste connecté (reconnexion automatique)', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false, 'proprio non connecté');
+  const tokenBefore = w.sessionStorage.getItem('pulse_token_v1');
+
+  w.yassirOpenAccessModal();
+  await wait(800);
+  const rows = [...w.document.querySelectorAll('#accountsTableBody tr')];
+  const proprioIdx = rows.findIndex((tr) => tr.textContent.includes('proprio'));
+  assert.ok(proprioIdx >= 0, 'compte proprio absent du tableau');
+  w.yassirPrefillAccount(proprioIdx);
+  w.document.getElementById('newAccountPassword').value = 'Nouveau-Proprio-123';
+  w.yassirSaveAccount({ preventDefault() {} });
+  await wait(1200);
+
+  // Toujours connecté, avec un nouveau jeton (l'ancien est mort).
+  assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false, 'proprio déconnecté après changement de son propre mot de passe');
+  const tokenAfter = w.sessionStorage.getItem('pulse_token_v1');
+  assert.ok(tokenAfter && tokenAfter !== tokenBefore, 'jeton non renouvelé');
+  await w.yassirVerifierSession();
+  await wait(300);
+  assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false, 'session proprio invalide après vérification');
+
+  // Le nouveau mot de passe fonctionne ; l'ancien ne marche plus. Puis remise en état.
+  const w2 = boot();
+  await login(w2, 'proprio', 'Proprio-Test-123');
+  assert.equal(w2.document.getElementById('appWrapper').classList.contains('hidden'), true, 'ancien mot de passe proprio accepté à tort');
+  await login(w2, 'proprio', 'Nouveau-Proprio-123');
+  assert.equal(w2.document.getElementById('appWrapper').classList.contains('hidden'), false, 'nouveau mot de passe proprio refusé');
+  const ownerToken2 = w2.sessionStorage.getItem('pulse_token_v1');
+  const restoreRes = await handle(new Request('https://api.test/api/accounts/proprio', {
+    method: 'PUT',
+    body: JSON.stringify({ password: 'Proprio-Test-123', role: 'owner', displayName: 'Propriétaire Admin' }),
+    headers: { Origin: 'http://localhost', Authorization: 'Bearer ' + ownerToken2 }
+  }), env);
+  assert.equal(restoreRes.status, 200, 'restauration du mot de passe proprio échouée');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});

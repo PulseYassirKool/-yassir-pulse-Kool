@@ -901,9 +901,11 @@
             var mm = String(now.getMinutes()).padStart(2, '0');
             if (failed.length === 0) {
               setLabel('Yassir OK (' + hh + ':' + mm + ')');
+              if (typeof window.yassirEffacerEchecSynchro === 'function') window.yassirEffacerEchecSynchro('yassir');
               showToast('<strong>Synchronisation Yassir terminée !</strong> (6/6 : Portefeuilles & Comm., Octobre & Novembre, Budget, Statut, Participation Offres, Données 2025).', 'success');
             } else {
               setLabel('Yassir partiel (' + (steps.length - failed.length) + '/6)');
+              if (typeof window.yassirEnregistrerEchecSynchro === 'function') window.yassirEnregistrerEchecSynchro('yassir', failed.join(', '));
               showToast('<strong>Synchronisation Yassir partielle :</strong> en échec : ' + failed.join(', ') + '.', 'error');
             }
             return;

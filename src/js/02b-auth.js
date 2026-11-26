@@ -32,7 +32,12 @@
             cache: 'no-store'
           }).then(function (res) {
             return res.json().catch(function () { return {}; }).then(function (data) {
-              if (res.status === 401 && token) { clear(); window.location.reload(); }
+              // Jeton rejeté (expiré, mot de passe changé par le propriétaire,
+              // compte supprimé) : session effacée et retour à l'écran de connexion.
+              if (res.status === 401 && token) {
+                if (typeof window.yassirLogout === 'function') window.yassirLogout();
+                else { clear(); try { window.location.reload(); } catch (e) {} }
+              }
               if (!res.ok) {
                 var err = new Error(data.error || ('Erreur ' + res.status));
                 err.status = res.status;
@@ -66,12 +71,27 @@
         return PulseAuth.call('GET', '/api/bootstrap').then(function (boot) {
           applyBootstrap(boot);
           activateSession(user, remember);
+          startSessionWatchdog();
           startBackgroundDataLoadAfterLogin();
           if (fresh) {
             showToast('Bienvenue sur <strong>Yassir Pulse</strong>, <strong>' + escapeHtml(user.displayName || user.amName || user.username) + '</strong> !', 'success');
           }
         });
       }
+
+      // Surveille la session en arrière-plan : si le propriétaire change le mot
+      // de passe du compte (ou supprime le compte), le jeton est rejeté par
+      // l'API et le 401 ci-dessus déconnecte immédiatement (au plus 5 minutes
+      // après le changement, ou dès le retour sur l'onglet). Une coupure réseau
+      // ne déconnecte pas : seul un 401 déconnecte.
+      var _sessionWatchdogId = null;
+      function startSessionWatchdog() {
+        if (_sessionWatchdogId) return;
+        var check = function () { PulseAuth.call('GET', '/api/me').catch(function () {}); };
+        _sessionWatchdogId = setInterval(check, 5 * 60 * 1000);
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
+      }
+      window.yassirVerifierSession = function () { return PulseAuth.call('GET', '/api/me').catch(function () {}); };
 
       window.yassirHandleLogin = function (e) {
         if (e && e.preventDefault) e.preventDefault();
@@ -150,6 +170,18 @@
         var amName = role === 'am' ? binding : (role === 'market_am' ? 'Eya Majdoub' : null);
         PulseAuth.call('PUT', '/api/accounts/' + encodeURIComponent(login), {
           password: pwd || undefined, role: role, amName: amName, displayName: amName || login
+        }).then(function () {
+          // Le propriétaire vient de changer SON PROPRE mot de passe : son ancien
+          // jeton est déjà mort. On se reconnecte aussitôt avec le nouveau mot de
+          // passe (il est dans le formulaire) pour ne pas le déconnecter.
+          if (pwd && currentUser && login.toLowerCase() === String(currentUser.username || '').toLowerCase()) {
+            var remember = false;
+            try { remember = !!window.localStorage.getItem('pulse_token_v1'); } catch (e) {}
+            return PulseAuth.call('POST', '/api/login', { username: login, password: pwd, remember: remember }).then(function (res) {
+              PulseAuth.store(res.token, remember);
+              showToast('Votre mot de passe a changé — votre session a été mise à jour, vous restez connecté.', 'success');
+            }).catch(function () { PulseAuth.clear(); window.location.reload(); });
+          }
         }).then(refreshAccounts).then(function () {
           renderAccountsTable();
           showToast('Compte <strong>' + escapeHtml(login) + '</strong> enregistré.', 'success');

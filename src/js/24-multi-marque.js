@@ -941,6 +941,14 @@
               : 'Sync Kool (Oct, Nov & Comm.)';
           }
 
+          // Échec ou réussite de la synchro Kool : enregistré pour l'alerte
+          // « Synchro en échec » (épinglée tant que la synchro ne réussit pas).
+          var koolSyncOk = addedDataCount > 0 || commCount > 0 || portCount > 0 || koolOffreRules.length > 0;
+          if (typeof window.yassirEffacerEchecSynchro === 'function' && typeof window.yassirEnregistrerEchecSynchro === 'function') {
+            if (koolSyncOk) window.yassirEffacerEchecSynchro('kool');
+            else window.yassirEnregistrerEchecSynchro('kool', 'feuilles illisibles');
+          }
+
           if (manualTrigger) {
             if (addedDataCount > 0 || commCount > 0 || portCount > 0 || koolOffreRules.length > 0) {
               showToast(

@@ -117,7 +117,9 @@ export async function handle(request, env) {
     }
     const now = Math.floor(Date.now() / 1000);
     const ttl = body.remember ? 7 * 24 * 3600 : 8 * 3600;
-    const token = await sign({ sub: account.username, iat: now, exp: now + ttl }, env.JWT_SECRET);
+    // pv = version du mot de passe : quand le propriétaire change le mot de passe
+    // d'un compte, pv est incrémenté et tous les jetons émis avant sont rejetés.
+    const token = await sign({ sub: account.username, iat: now, exp: now + ttl, pv: account.pwdVersion || 0 }, env.JWT_SECRET);
     return reply({ token, user: publicUser(account) });
   }
 
@@ -128,6 +130,9 @@ export async function handle(request, env) {
   const accounts = await listAccounts(env);
   const me = accounts.find((a) => a.username === claims.sub); // rôle relu à chaque appel : une suppression prend effet tout de suite
   if (!me) return fail(401, 'Compte introuvable.');
+  // Mot de passe changé depuis l'émission du jeton (par le propriétaire) :
+  // la session meurt immédiatement (le front déconnecte sur ce 401).
+  if ((claims.pv || 0) !== (me.pwdVersion || 0)) return fail(401, 'Session expirée.');
 
   if (path === '/api/me' && method === 'GET') return reply({ user: publicUser(me) });
 
@@ -156,6 +161,9 @@ export async function handle(request, env) {
       const next = {
         username: idx === -1 ? name : accounts[idx].username,
         hash: b.password ? await hashPassword(String(b.password)) : accounts[idx].hash,
+        // Changer le mot de passe incrémente la version : tous les jetons
+        // émis avant (sessions en cours du compte) sont rejetés.
+        pwdVersion: b.password ? (((idx === -1 ? 0 : accounts[idx].pwdVersion) || 0) + 1) : (idx === -1 ? 0 : (accounts[idx].pwdVersion || 0)),
         role: b.role,
         displayName: String(b.displayName || b.amName || name).slice(0, 60),
         amName: b.amName ? String(b.amName).slice(0, 60) : null,

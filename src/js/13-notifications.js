@@ -1,9 +1,88 @@
       /* ========================================================================
-         I2. CENTRE DE NOTIFICATIONS INTELLIGENTES (4 RÈGLES MÉTIER + EXPORT)
+         I2. CENTRE DE NOTIFICATIONS INTELLIGENTES (8 RÈGLES MÉTIER + EXPORT)
+         Règles : A Inactive >= 3j (Yassir), B 0 commande >= 3j, C Drop 3j,
+         D Fin d'offre <= 2j, E Commission 100 % / absente, F Annulations en
+         hausse, G Données trop anciennes / synchro en échec, H Budget dépassé.
+         Une alerte « traitée » disparaît (stockée par utilisateur) ; elle ne
+         réapparaît que si la situation s'est résolue entre-temps puis revient.
          ======================================================================== */
       var currentSmartNotifications = [];
       var activeNotifCategoryFilter = 'ALL';
       var lastDesktopNotifSignature = '';
+
+      // Sévérité (tri des groupes) : 0 = système bloquant, 1 = grave,
+      // 2 = à surveiller, 3 = baisse / budget 90 %, 4 = offre qui se termine.
+      var NOTIF_SEVERITY = { SYNC_FAIL: 0, DATA_STALE: 0, COMM_100: 1, INACTIVE_3D: 1, BUDGET_100: 1, ZERO_3D: 2, CANC_HIGH: 2, DROP_3D: 3, BUDGET_90: 3, OFFER_END: 4 };
+      var NOTIF_CANC_RATE_THRESHOLD = 0.20; // alerte si >= 20 % d'annulations sur 7 jours
+      var NOTIF_CANC_MIN_RECEIVED = 5; // ... et au moins 5 commandes reçues (évite le bruit)
+      var NOTIF_DATA_STALE_DAYS = 3; // alerte si les données ont 3 jours ou plus
+      var NOTIF_BUDGET_WARN_PCT = 90;
+      var NOTIF_BUDGET_MAX_PCT = 100;
+
+      // --- Alertes traitées : par utilisateur, clé stable par situation ---
+      // Clé = marque | type | restaurant (ou AM / global) | AM | suffixe (ex. fin d'offre).
+      // La situation est identifiée sans ses chiffres (ex. « Beta à 0 commande »),
+      // donc une alerte traitée ne réapparaît pas tant que la situation existe.
+      var NOTIF_TREATED_PREFIX = 'yassir_pulse_notif_traitees_v1_';
+      function getNotifTreatedStore() {
+        if (!currentUser) return {};
+        try {
+          var raw = safeGet(NOTIF_TREATED_PREFIX + currentUser.username);
+          var obj = raw ? JSON.parse(raw) : {};
+          return (obj && typeof obj === 'object') ? obj : {};
+        } catch (e) { return {}; }
+      }
+      function saveNotifTreatedStore(store) {
+        if (!currentUser) return;
+        try { safeSet(NOTIF_TREATED_PREFIX + currentUser.username, JSON.stringify(store)); } catch (e) {}
+      }
+
+      // --- Dernier échec de synchro (enregistré par les synchros, lu ici) ---
+      var NOTIF_SYNC_FAIL_KEY = 'yassir_pulse_last_sync_fail_v1';
+      window.yassirEnregistrerEchecSynchro = function (brand, detail) {
+        try {
+          safeSet(NOTIF_SYNC_FAIL_KEY, JSON.stringify({ brand: String(brand || ''), at: new Date().toISOString(), detail: String(detail || '') }));
+        } catch (e) {}
+      };
+      window.yassirEffacerEchecSynchro = function (brand) {
+        try {
+          var raw = safeGet(NOTIF_SYNC_FAIL_KEY);
+          if (!raw) return;
+          var rec = JSON.parse(raw);
+          if (!brand || rec.brand === brand) safeRemove(NOTIF_SYNC_FAIL_KEY);
+        } catch (e) {}
+      };
+      function lireEchecSynchro() {
+        try {
+          var raw = safeGet(NOTIF_SYNC_FAIL_KEY);
+          if (!raw) return null;
+          var rec = JSON.parse(raw);
+          return (rec && rec.brand) ? rec : null;
+        } catch (e) { return null; }
+      }
+
+      // Fabrique une alerte enrichie : clé stable, sévérité, catégorie de filtre,
+      // groupe d'affichage (un restaurant = une carte ; « Système » ; « Budget — AM »).
+      function newAlert(o) {
+        var brand = (typeof currentBrand !== 'undefined' && currentBrand) ? currentBrand : 'yassir';
+        var keyParts = [brand, o.type];
+        if (o.restoKey) keyParts.push(o.restoKey);
+        else if (o.am) keyParts.push(o.am);
+        else keyParts.push('global');
+        if (o.am && o.restoKey) keyParts.push(o.am);
+        if (o.keySuffix) keyParts.push(o.keySuffix);
+        var cat = o.cat || o.type;
+        var groupKey = o.groupKey || ('RESTO|' + (o.restoKey || ''));
+        var groupTitle = o.groupTitle || o.restaurant || '';
+        return Object.assign({}, o, {
+          key: keyParts.join('|'),
+          severity: (NOTIF_SEVERITY[o.type] !== undefined) ? NOTIF_SEVERITY[o.type] : 5,
+          cat: cat,
+          groupKey: groupKey,
+          groupTitle: groupTitle,
+          treated: false
+        });
+      }
 
       function diffDaysBetweenIso(isoEarlier, isoLater) {
         if (!isoEarlier || !isoLater) return null;
@@ -166,8 +245,9 @@
           // RÈGLE A : Restaurant Inactive depuis >= 3 jours (Yassir uniquement — supprimé pour Kool)
           if (!isKoolBrandNotif && isInactiveStatus && (!lastDate || diffDaysBetweenIso(lastDate, refIso) >= 3)) {
             var daysInactive = lastDate ? diffDaysBetweenIso(lastDate, refIso) : null;
-            alerts.push({
+            alerts.push(newAlert({
               type: 'INACTIVE_3D',
+              restoKey: rKey,
               badge: 'Inactive >= 3j',
               colorClass: 'bg-slate-100 text-slate-700 border-slate-300',
               icon: 'fa-solid fa-power-off text-slate-600',
@@ -176,12 +256,13 @@
               message: daysInactive !== null
                 ? ('Le restaurant <strong>' + escapeHtml(info.displayName) + '</strong> est <strong>Inactive</strong> depuis <strong>' + daysInactive + ' jours</strong> (dernière cmd : ' + escapeHtml(lastDate) + ').')
                 : ('Le restaurant <strong>' + escapeHtml(info.displayName) + '</strong> est <strong>Inactive</strong> depuis au moins 3 jours (aucune commande récente).')
-            });
+            }));
           } else if (hasZeroLast3Days && (aoa && aoa.length > 1)) {
             // RÈGLE B : Restaurant avec 0 commande depuis 3 jours
             var daysZero = lastDate ? diffDaysBetweenIso(lastDate, refIso) : null;
-            alerts.push({
+            alerts.push(newAlert({
               type: 'ZERO_3D',
+              restoKey: rKey,
               badge: '0 cmd >= 3j',
               colorClass: 'bg-amber-50 text-amber-800 border-amber-200',
               icon: 'fa-solid fa-triangle-exclamation text-amber-500',
@@ -190,20 +271,21 @@
               message: daysZero !== null
                 ? ('Le restaurant <strong>' + escapeHtml(info.displayName) + '</strong> a <strong>0 commande depuis ' + daysZero + ' jours</strong> (dernière cmd : ' + escapeHtml(lastDate) + ').')
                 : ('Le restaurant <strong>' + escapeHtml(info.displayName) + '</strong> a <strong>0 commande depuis 3 jours</strong> (' + escapeHtml(dMinus2) + ' -> ' + escapeHtml(dMinus0) + ').')
-            });
+            }));
           }
 
           // RÈGLE C : Drop successif depuis 3 jours (c2 > c1 > c0 sur les 3 derniers jours)
           if (dMap && c2 > c1 && c1 > c0 && c2 >= 2) {
-            alerts.push({
+            alerts.push(newAlert({
               type: 'DROP_3D',
+              restoKey: rKey,
               badge: 'Drop 3j consécutifs',
               colorClass: 'bg-rose-50 text-[#FF2A6D] border-pink-200',
               icon: 'fa-solid fa-arrow-trend-down text-[#FF2A6D]',
               am: info.am,
               restaurant: info.displayName,
               message: 'Le restaurant <strong>' + escapeHtml(info.displayName) + '</strong> est en <strong>drop successif depuis 3 jours</strong> (' + c2 + ' -> ' + c1 + ' -> <strong>' + c0 + '</strong> cmd livrées).'
-            });
+            }));
           }
         });
 
@@ -239,15 +321,17 @@
               ? ("se termine <strong>le " + rl.endDate + " (J-0)</strong>")
               : (daysLeft === 1 ? ("se termine <strong>demain / J-1 (" + rl.endDate + ")</strong>") : ("se termine <strong>dans 2 jours / J-2 (" + rl.endDate + ")</strong>"));
 
-            alerts.push({
+            alerts.push(newAlert({
               type: 'OFFER_END',
+              restoKey: rKey,
+              keySuffix: rl.endDate,
               badge: daysLeft === 0 ? 'Fin offre J-0' : ('Fin offre J-' + daysLeft),
               colorClass: 'bg-amber-50 text-amber-900 border-amber-300',
               icon: 'fa-solid fa-hourglass-half text-amber-600',
               am: amOwner,
               restaurant: displayR,
               message: 'Le restaurant <strong>' + escapeHtml(displayR) + '</strong> : son offre (<em>' + escapeHtml(formaterLibelleOffreKool(rl)) + '</em>) ' + delayTxt + (rl.startDate ? ' (du ' + rl.startDate + ' au ' + rl.endDate + ').' : '.')
-            });
+            }));
           }
         });
 
@@ -273,41 +357,194 @@
                                      !Object.prototype.hasOwnProperty.call(state.customCommissions, rKey.replace(/\s+/g, ' ').trim());
 
             if (isKoolBrandNotif && isMissingInFacture) {
-              alerts.push({
+              alerts.push(newAlert({
                 type: 'COMM_100',
+                restoKey: rKey,
                 badge: 'Sans Commission (' + daysCount + 'j)',
                 colorClass: 'bg-amber-50 text-amber-900 border-amber-300',
                 icon: 'fa-solid fa-circle-exclamation text-amber-600',
                 am: amOwner,
                 restaurant: displayR,
                 message: '<strong>[Alerte Proprio]</strong> Le restaurant <strong>' + escapeHtml(displayR) + '</strong> n’a <strong>aucun taux de commission</strong> dans le fichier Commissions Kool (<strong>' + cInfo.ordersCount + ' cmd livrée(s)</strong>, GMV : <strong>' + cInfo.totalCa.toFixed(2) + ' TND</strong>, dernier : ' + lastDateStr + ').'
-              });
+              }));
             } else {
               var sourceNote = isMissingInFacture ? ' <em>(absent du fichier Commissions)</em>' : ' <em>(taux 100% dans Commissions)</em>';
-              alerts.push({
+              alerts.push(newAlert({
                 type: 'COMM_100',
+                restoKey: rKey,
                 badge: 'Comm. 100% (' + daysCount + 'j / 7j)',
                 colorClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
                 icon: 'fa-solid fa-percent text-[#00897B]',
                 am: amOwner,
                 restaurant: displayR,
                 message: 'Le restaurant <strong>' + escapeHtml(displayR) + '</strong> est à <strong>100 % de commission</strong>' + sourceNote + ' sur <strong>' + cInfo.ordersCount + ' cmd livrée(s)</strong> (<strong>' + cInfo.totalCa.toFixed(2) + ' TND</strong>) durant les 7 derniers jours (dernier : ' + lastDateStr + ').'
-              });
+              }));
             }
           });
+        }
+
+        // 5. RÈGLE F : Annulations en hausse sur 7 jours (taux >= 20 % et >= 5 reçues).
+        // Sources : colonnes « Annulée? » / « Raison d'annulation » (Kool) ou statut
+        // non livré (Yassir), via les lignes normalisées (même base que l'onglet Annulations).
+        (function () {
+          var idxRestoC = TARGET_HEADERS.indexOf('restaurant name');
+          var idxOrderDayC = TARGET_HEADERS.indexOf('order day');
+          var idxStatusC = TARGET_HEADERS.indexOf('status');
+          if (idxRestoC === -1 || idxOrderDayC === -1 || idxStatusC === -1) return;
+          var dMin7 = shiftIsoDateByDays(refIso, -6);
+          var base = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.marketRows.concat(state.foodRows)));
+          var byResto = new Map();
+          base.forEach(function (rec) {
+            var iso = parseOrderDayToIsoDate(rec.cells[idxOrderDayC]);
+            if (!iso || iso < dMin7 || iso > refIso) return;
+            var rawResto = String(rec.cells[idxRestoC] || '').trim();
+            var k = rawResto.toLowerCase();
+            if (!k) return;
+            if (!byResto.has(k)) byResto.set(k, { req: 0, canc: 0, displayName: rawResto, am: rec.am || 'Non attribué' });
+            var e = byResto.get(k);
+            e.req += 1;
+            if (!estCommandeLivree(rec.cells[idxStatusC])) e.canc += 1;
+          });
+          byResto.forEach(function (e, k) {
+            if (e.req < NOTIF_CANC_MIN_RECEIVED) return;
+            var rate = e.canc / e.req;
+            if (rate < NOTIF_CANC_RATE_THRESHOLD) return;
+            var portInfo = state.amPortfolios[k];
+            var amOwner = portInfo ? portInfo.am : e.am;
+            var displayR = portInfo ? portInfo.displayName : e.displayName;
+            if (!canViewAllPortfolios() && allowedAms.indexOf(amOwner) === -1) return;
+            if (activeFilter !== 'ALL' && amOwner !== activeFilter) return;
+            var isMktResto = k.includes('mg market') || k.includes('market');
+            if (isMktMode && !isMktResto) return;
+            if (isFoodAm && isMktResto) return;
+            alerts.push(newAlert({
+              type: 'CANC_HIGH',
+              restoKey: k,
+              badge: 'Annul. en hausse',
+              colorClass: 'bg-rose-50 text-[#FF2A6D] border-pink-200',
+              icon: 'fa-solid fa-ban text-[#FF2A6D]',
+              am: amOwner,
+              restaurant: displayR,
+              message: 'Le restaurant <strong>' + escapeHtml(displayR) + '</strong> a un <strong>taux d’annulation de ' + (rate * 100).toFixed(0) + ' % sur 7 jours</strong> (<strong>' + e.canc + ' annulée(s) / ' + e.req + ' reçue(s)</strong>).'
+            }));
+          });
+        })();
+
+        // 6. RÈGLE G : Données trop anciennes / dernière synchro en échec (épinglées en haut).
+        var ageDataDays = state.maxAvailableDate ? diffDaysBetweenIso(state.maxAvailableDate, todayIso) : null;
+        if (ageDataDays !== null && ageDataDays >= NOTIF_DATA_STALE_DAYS) {
+          alerts.push(newAlert({
+            type: 'DATA_STALE',
+            cat: 'SYSTEM',
+            groupKey: 'SYSTEM',
+            groupTitle: 'Système',
+            badge: 'Données anciennes',
+            colorClass: 'bg-slate-100 text-slate-700 border-slate-300',
+            icon: 'fa-solid fa-clock text-slate-600',
+            am: '',
+            restaurant: '',
+            message: 'Les données chargées datent du <strong>' + escapeHtml(state.maxAvailableDate) + '</strong> (il y a <strong>' + ageDataDays + ' jours</strong>) — pensez à synchroniser Google Sheets, les alertes ci-dessous sont calculées sur ces vieilles données.'
+          }));
+        }
+        var lastFail = lireEchecSynchro();
+        if (lastFail && lastFail.brand === (currentBrand || 'yassir')) {
+          var failDate = String(lastFail.at || '').slice(0, 10);
+          alerts.push(newAlert({
+            type: 'SYNC_FAIL',
+            cat: 'SYSTEM',
+            groupKey: 'SYSTEM',
+            groupTitle: 'Système',
+            badge: 'Synchro en échec',
+            colorClass: 'bg-rose-50 text-[#FF2A6D] border-pink-200',
+            icon: 'fa-solid fa-cloud-arrow-down text-[#FF2A6D]',
+            am: '',
+            restaurant: '',
+            message: 'La dernière synchronisation <strong>' + escapeHtml(lastFail.brand === 'kool' ? 'Kool' : 'Yassir') + '</strong> a <strong>échoué</strong>' + (lastFail.detail ? ' (' + escapeHtml(lastFail.detail) + ')' : '') + (failDate ? ' — le ' + escapeHtml(failDate) : '') + '. Relancez la synchronisation.'
+          }));
+        }
+
+        // 7. RÈGLE H : Budget dépassé — 90 % puis 100 % (Yassir uniquement : il n'y a
+        // pas de feuille Budget Kool, le budget affiché en Kool est celui de Yassir).
+        // Même calcul que la carte « Reste Budget » (coût LR/LG + participation offres
+        // sur les livrées du périmètre courant : filtre de date et polygone actifs).
+        if (!isKoolBrandNotif) {
+          var budgetScopes = [];
+          if (canViewAllPortfolios()) {
+            budgetScopes.push({ scope: 'ALL', label: 'Global' });
+            allowedAms.forEach(function (amName) { budgetScopes.push({ scope: amName, label: amName }); });
+          } else if (currentUser && currentUser.amName) {
+            budgetScopes.push({ scope: currentUser.amName, label: currentUser.amName });
+          }
+          budgetScopes.forEach(function (bs) {
+            var st = calculerStatsPourAm(bs.scope);
+            if (!st || !(st.budgetTnd > 0)) return;
+            var pct = (st.totalBudgetUsedTnd / st.budgetTnd) * 100;
+            if (pct < NOTIF_BUDGET_WARN_PCT) return;
+            var isMax = pct >= NOTIF_BUDGET_MAX_PCT;
+            alerts.push(newAlert({
+              type: isMax ? 'BUDGET_100' : 'BUDGET_90',
+              cat: 'BUDGET',
+              groupKey: 'BUDGET|' + bs.scope,
+              groupTitle: 'Budget — ' + bs.label,
+              am: bs.scope === 'ALL' ? '' : bs.scope,
+              restaurant: '',
+              badge: isMax ? 'Budget dépassé' : 'Budget à ' + NOTIF_BUDGET_WARN_PCT + ' %',
+              colorClass: isMax ? 'bg-rose-50 text-[#FF2A6D] border-pink-200' : 'bg-amber-50 text-amber-800 border-amber-200',
+              icon: 'fa-solid fa-wallet text-amber-600',
+              message: 'Budget <strong>' + escapeHtml(bs.label) + '</strong> : <strong>' + pct.toFixed(0) + ' % utilisé</strong> (' + Number(st.totalBudgetUsedTnd).toFixed(2) + ' / ' + Number(st.budgetTnd).toFixed(2) + ' TND).'
+            }));
+          });
+        }
+
+        // Alertes traitées : on marque les alertes connues, et on oublie celles
+        // dont la situation n'existe plus (résolue) — elles pourront réapparaître
+        // si la situation revient. On ne purge que dans le périmètre visible
+        // (marque courante + AM filtré ou tous) pour ne pas effacer ce qui est
+        // simplement masqué par un filtre.
+        var treatedStore = getNotifTreatedStore();
+        var currentKeys = {};
+        alerts.forEach(function (a) { currentKeys[a.key] = true; });
+        var pruneAm = canViewAllPortfolios() ? activeFilter : (currentUser && currentUser.amName ? currentUser.amName : 'ALL');
+        var storeChanged = false;
+        Object.keys(treatedStore).forEach(function (k) {
+          var entry = treatedStore[k] || {};
+          if (entry.brand && entry.brand !== (currentBrand || 'yassir')) return;
+          if (pruneAm !== 'ALL' && entry.am && entry.am !== pruneAm) return;
+          if (!currentKeys[k]) { delete treatedStore[k]; storeChanged = true; }
+        });
+        if (storeChanged) saveNotifTreatedStore(treatedStore);
+        alerts.forEach(function (a) {
+          var entry = treatedStore[a.key];
+          if (entry) a.treated = true;
+        });
+
+        // En mode Kool, le filtre « Inactive >= 3j » n'existe pas : si c'était le
+        // filtre actif avant la bascule, on revient à « Toutes » (sinon la liste
+        // affiche « Aucune alerte » sans moyen de revenir en arrière).
+        if (isKoolBrandNotif && activeNotifCategoryFilter === 'INACTIVE_3D') {
+          activeNotifCategoryFilter = 'ALL';
         }
 
         currentSmartNotifications = alerts;
         renderSmartNotificationsUI();
       }
 
+      // Alertes visibles = non traitées ; la catégorie filtre ensuite (par `cat`).
+      function getNotificationsVisibles() {
+        return currentSmartNotifications.filter(function (a) { return !a.treated; });
+      }
+      function getNotificationsVisiblesFiltrees() {
+        var visible = getNotificationsVisibles();
+        return activeNotifCategoryFilter === 'ALL'
+          ? visible
+          : visible.filter(function (a) { return a.cat === activeNotifCategoryFilter; });
+      }
+
       function renderSmartNotificationsUI() {
-        var total = currentSmartNotifications.length;
-        var cntInactive = currentSmartNotifications.filter(function (a) { return a.type === 'INACTIVE_3D'; }).length;
-        var cntZero = currentSmartNotifications.filter(function (a) { return a.type === 'ZERO_3D'; }).length;
-        var cntOffer = currentSmartNotifications.filter(function (a) { return a.type === 'OFFER_END'; }).length;
-        var cntDrop = currentSmartNotifications.filter(function (a) { return a.type === 'DROP_3D'; }).length;
-        var cntComm100 = currentSmartNotifications.filter(function (a) { return a.type === 'COMM_100'; }).length;
+        refreshNotifFilterButtons();
+        var visible = getNotificationsVisibles();
+        var total = visible.length;
+        var countByCat = function (cat) { return visible.filter(function (a) { return a.cat === cat; }).length; };
 
         var elBell = document.getElementById('notifBellBadgeCount');
         var elPanelTot = document.getElementById('notifPanelTotalCount');
@@ -317,51 +554,104 @@
         var elOff = document.getElementById('notifCntOffer');
         var elDrp = document.getElementById('notifCntDrop');
         var elC100 = document.getElementById('notifCntComm100');
+        var elCanc = document.getElementById('notifCntCanc');
+        var elSys = document.getElementById('notifCntSystem');
+        var elBud = document.getElementById('notifCntBudget');
 
+        // La cloche compte les alertes NON traitées (pas le total des situations).
         if (elBell) elBell.textContent = total;
         if (elPanelTot) elPanelTot.textContent = total;
         if (elAll) elAll.textContent = total;
-        if (elIna) elIna.textContent = cntInactive;
-        if (elZer) elZer.textContent = cntZero;
-        if (elOff) elOff.textContent = cntOffer;
-        if (elDrp) elDrp.textContent = cntDrop;
-        if (elC100) elC100.textContent = cntComm100;
+        if (elIna) elIna.textContent = countByCat('INACTIVE_3D');
+        if (elZer) elZer.textContent = countByCat('ZERO_3D');
+        if (elOff) elOff.textContent = countByCat('OFFER_END');
+        if (elDrp) elDrp.textContent = countByCat('DROP_3D');
+        if (elC100) elC100.textContent = countByCat('COMM_100');
+        if (elCanc) elCanc.textContent = countByCat('CANC_HIGH');
+        if (elSys) elSys.textContent = countByCat('SYSTEM');
+        if (elBud) elBud.textContent = countByCat('BUDGET');
 
         var listEl = document.getElementById('yassirNotifListBody');
         if (!listEl) return;
 
-        var filtered = activeNotifCategoryFilter === 'ALL'
-          ? currentSmartNotifications
-          : currentSmartNotifications.filter(function (a) { return a.type === activeNotifCategoryFilter; });
+        var filtered = getNotificationsVisiblesFiltrees();
 
         if (filtered.length === 0) {
-          listEl.innerHTML = '<div class="py-8 text-center text-slate-400"><i class="fa-solid fa-circle-check text-[#00BFA5] text-xl mb-1.5 block"></i>Aucune alerte dans cette catégorie.</div>';
+          listEl.innerHTML = currentSmartNotifications.length > 0 && total === 0
+            ? '<div class="py-8 text-center text-slate-400"><i class="fa-solid fa-circle-check text-[#00BFA5] text-xl mb-1.5 block"></i>Toutes les alertes sont marquées comme traitées.</div>'
+            : '<div class="py-8 text-center text-slate-400"><i class="fa-solid fa-circle-check text-[#00BFA5] text-xl mb-1.5 block"></i>Aucune alerte dans cette catégorie.</div>';
           return;
         }
 
-        listEl.innerHTML = filtered.slice(0, 150).map(function (a) {
-          return '<div class="p-2.5 rounded-2xl border ' + a.colorClass + ' flex items-start gap-2.5 transition hover:shadow-xs">' +
-            '<div class="w-7 h-7 rounded-xl bg-white flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">' +
-              '<i class="' + a.icon + ' text-xs"></i>' +
-            '</div>' +
-            '<div class="flex-1 min-w-0">' +
-              '<div class="flex items-center justify-between gap-1.5 mb-0.5">' +
-                '<span class="text-[10px] font-extrabold uppercase tracking-wider">' + escapeHtml(a.badge) + '</span>' +
-                '<span class="px-2 py-0.2 rounded-full text-[10px] font-bold bg-white/80 text-[#1A1A2E]">' + escapeHtml(a.am) + '</span>' +
+        // Plafond d'affichage (comme avant : 150) mais signalé, pas silencieux.
+        // Le tri par gravité se fait AVANT le plafond : sinon les alertes les
+        // plus graves (budget, données anciennes), calculées en dernier, seraient
+        // coupées par des centaines d'alertes moins graves (0 commande).
+        var sorted = filtered.slice().sort(function (x, y) {
+          return (x.severity - y.severity) || String(x.groupTitle || x.restaurant || '').localeCompare(String(y.groupTitle || y.restaurant || ''), 'fr');
+        });
+        var hiddenCount = Math.max(0, sorted.length - 150);
+        var shown = sorted.slice(0, 150);
+
+        // Regroupement par restaurant (un restaurant = une carte), trié par gravité.
+        var groups = {};
+        var groupOrder = [];
+        shown.forEach(function (a) {
+          var gk = a.groupKey;
+          if (!groups[gk]) {
+            groups[gk] = { title: a.groupTitle || a.restaurant || 'Système', am: a.am, sev: a.severity, items: [] };
+            groupOrder.push(gk);
+          }
+          groups[gk].items.push(a);
+          if (a.severity < groups[gk].sev) groups[gk].sev = a.severity;
+        });
+        groupOrder.sort(function (x, y) {
+          return (groups[x].sev - groups[y].sev) || String(groups[x].title).localeCompare(String(groups[y].title), 'fr');
+        });
+
+        listEl.innerHTML = groupOrder.map(function (gk) {
+          var g = groups[gk];
+          var items = g.items.slice().sort(function (x, y) { return x.severity - y.severity; });
+          var cards = items.map(function (a) {
+            var navigable = !!a.restoKey || a.type === 'OFFER_END' || a.type === 'BUDGET_90' || a.type === 'BUDGET_100';
+            var clickAttr = navigable
+              ? ' onclick="window.yassirOuvrirAlerte(\'' + escapeHtml(a.restoKey || '') + '\', \'' + a.type + '\')" style="cursor:pointer"'
+              : '';
+            return '<div class="p-2.5 rounded-2xl border ' + a.colorClass + ' flex items-start gap-2.5 transition hover:shadow-xs"' + clickAttr + ' title="' + (navigable ? 'Cliquer pour ouvrir' : '') + '">' +
+              '<div class="w-7 h-7 rounded-xl bg-white flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">' +
+                '<i class="' + a.icon + ' text-xs"></i>' +
               '</div>' +
-              '<p class="text-[11px] leading-snug text-[#1A1A2E]">' + a.message + '</p>' +
+              '<div class="flex-1 min-w-0">' +
+                '<div class="flex items-center justify-between gap-1.5 mb-0.5">' +
+                  '<span class="text-[10px] font-extrabold uppercase tracking-wider">' + escapeHtml(a.badge) + '</span>' +
+                  '<button type="button" onclick="event.stopPropagation(); window.yassirTraiterAlerte(\'' + escapeHtml(a.key) + '\')" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-white/90 hover:bg-white text-[#00897B] border border-emerald-200 cursor-pointer whitespace-nowrap" title="Marquer comme traitée (l\'alerte disparaît)">✓ Traité</button>' +
+                '</div>' +
+                '<p class="text-[11px] leading-snug text-[#1A1A2E]">' + a.message + '</p>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+          return '<div class="rounded-2xl border border-purple-100 bg-[#F8F9FC] p-2 space-y-2">' +
+            '<div class="flex items-center justify-between gap-2 px-1 pt-0.5">' +
+              '<span class="text-[11px] font-extrabold text-[#1A1A2E] truncate">' + escapeHtml(g.title) + '</span>' +
+              '<span class="flex items-center gap-1 shrink-0">' +
+                (g.am ? '<span class="px-2 py-0.2 rounded-full text-[10px] font-bold bg-white text-[#1A1A2E] border border-purple-100">' + escapeHtml(g.am) + '</span>' : '') +
+                '<span class="px-2 py-0.2 rounded-full text-[10px] font-extrabold bg-[#FF2A6D] text-white">' + g.items.length + '</span>' +
+              '</span>' +
             '</div>' +
+            cards +
           '</div>';
-        }).join('');
+        }).join('') + (hiddenCount > 0
+          ? '<p class="py-2 text-center text-[11px] text-slate-400">… et ' + hiddenCount + ' autre(s) alerte(s) non affichée(s) (limite 150).</p>'
+          : '');
 
         // Si les notifications bureau Windows/Mac sont autorisées, envoyer un résumé une seule fois par changement
         if ('Notification' in window && window.Notification.permission === 'granted' && total > 0) {
-          var sig = currentUser ? (currentUser.username + ':' + total + ':' + cntOffer + ':' + cntDrop) : '';
+          var sig = currentUser ? (currentUser.username + ':' + total + ':' + countByCat('OFFER_END') + ':' + countByCat('DROP_3D')) : '';
           if (sig && sig !== lastDesktopNotifSignature) {
             lastDesktopNotifSignature = sig;
             try {
               new window.Notification('Yassir Pulse — ' + total + ' alerte(s)', {
-                body: cntOffer + ' offre(s) finissent <= 2j • ' + cntDrop + ' drop 3j • ' + (cntZero + cntInactive) + ' inactif/0 cmd >= 3j.'
+                body: countByCat('OFFER_END') + ' offre(s) finissent <= 2j • ' + countByCat('DROP_3D') + ' drop 3j • ' + (countByCat('ZERO_3D') + countByCat('INACTIVE_3D')) + ' inactif/0 cmd >= 3j.'
               });
             } catch (e) {}
           }
@@ -379,15 +669,65 @@
         }
       };
 
-      window.yassirSetNotifCategoryFilter = function (cat) {
-        activeNotifCategoryFilter = cat;
+      function refreshNotifFilterButtons() {
         document.querySelectorAll('.notif-cat-btn').forEach(function (btn) {
-          var isAct = btn.getAttribute('data-notif-filter') === cat;
+          var isAct = btn.getAttribute('data-notif-filter') === activeNotifCategoryFilter;
           btn.className = isAct
             ? 'notif-cat-btn px-2.5 py-1 rounded-full bg-[#6C2BD9] text-white cursor-pointer'
             : 'notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer';
         });
+      }
+
+      window.yassirSetNotifCategoryFilter = function (cat) {
+        activeNotifCategoryFilter = cat;
+        refreshNotifFilterButtons();
         renderSmartNotificationsUI();
+      };
+
+      // Marquer UNE alerte comme traitée : elle disparaît de la cloche et de la
+      // liste (stockée par utilisateur). Si la situation se résout puis revient,
+      // l'alerte réapparaît (purge au prochain recalcul, voir ci-dessus).
+      window.yassirTraiterAlerte = function (key) {
+        if (!key) return;
+        var store = getNotifTreatedStore();
+        var alert = null;
+        currentSmartNotifications.forEach(function (a) { if (a.key === key) alert = a; });
+        store[key] = { at: new Date().toISOString(), brand: (typeof currentBrand !== 'undefined' && currentBrand) ? currentBrand : 'yassir', am: alert ? (alert.am || '') : '' };
+        saveNotifTreatedStore(store);
+        if (alert) alert.treated = true;
+        renderSmartNotificationsUI();
+      };
+
+      // Tout marquer lu : toutes les alertes visibles en ce moment sont traitées.
+      window.yassirToutMarquerNotifLu = function () {
+        var store = getNotifTreatedStore();
+        var brand = (typeof currentBrand !== 'undefined' && currentBrand) ? currentBrand : 'yassir';
+        getNotificationsVisibles().forEach(function (a) {
+          store[a.key] = { at: new Date().toISOString(), brand: brand, am: a.am || '' };
+          a.treated = true;
+        });
+        saveNotifTreatedStore(store);
+        renderSmartNotificationsUI();
+      };
+
+      // Cliquer sur une alerte ouvre l'endroit où agir : l'analyse du restaurant,
+      // la section Participation pour une offre ou un budget, rien pour le système.
+      window.yassirOuvrirAlerte = function (restoKey, type) {
+        window.yassirToggleNotifPanel(false);
+        if (type === 'OFFER_END' || type === 'BUDGET_90' || type === 'BUDGET_100') {
+          window.yassirSwitchTab('participation');
+          return;
+        }
+        if (!restoKey) return;
+        window.yassirSwitchTab('resto_analytics');
+        window.yassirOnSelectRestoAnalytics(restoKey);
+      };
+
+      // Forcer un recalcul immédiat (tests, débogage) — le recalcul normal est
+      // débouncé via scheduleSmartNotificationsUpdate().
+      window.yassirRecalculerNotifications = function () {
+        _notifCacheSig = '';
+        calculerEtAfficherNotifications();
       };
 
       window.yassirEnableDesktopNotifications = function () {
@@ -407,12 +747,13 @@
       };
 
       window.yassirExportNotificationsExcel = function () {
-        if (!currentSmartNotifications || currentSmartNotifications.length === 0) {
+        var list = getNotificationsVisiblesFiltrees();
+        if (!list || list.length === 0) {
           showToast('Aucune alerte à exporter.', 'info');
           return;
         }
         var aoa = [['Type Alerte', 'Portefeuille AM', 'Restaurant', "Détail de l'alerte"]];
-        currentSmartNotifications.forEach(function (a) {
+        list.forEach(function (a) {
           var plainMsg = a.message.replace(/<[^>]+>/g, '');
           aoa.push([a.badge, a.am, a.restaurant, plainMsg]);
         });
@@ -421,8 +762,10 @@
         ws['!cols'] = [{ wch: 20 }, { wch: 22 }, { wch: 30 }, { wch: 65 }];
         XLSX.utils.book_append_sheet(wb, ws, 'Alertes Operations');
         var dateStr = new Date().toISOString().slice(0, 10);
-        XLSX.writeFile(wb, 'YASSIR_Alertes_' + dateStr + '.xlsx');
-        showToast('Fichier <strong>YASSIR_Alertes_' + dateStr + '.xlsx</strong> téléchargé.', 'success');
+        var brandPrefix = (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? 'KOOL' : 'YASSIR';
+        var fileName = brandPrefix + '_Alertes_' + dateStr + '.xlsx';
+        XLSX.writeFile(wb, fileName);
+        showToast('Fichier <strong>' + escapeHtml(fileName) + '</strong> téléchargé.', 'success');
       };
 
       document.addEventListener('click', function (ev) {

@@ -633,6 +633,9 @@
                   </div>
                 </div>
                 <div class="flex items-center gap-1.5">
+                  <button type="button" id="btnNotifMarkAllRead" onclick="window.yassirToutMarquerNotifLu()" class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/15 hover:bg-white/25 text-white transition cursor-pointer" title="Marquer toutes les alertes visibles comme traitées">
+                    <i class="fa-solid fa-check-double mr-1"></i>Tout lu
+                  </button>
                   <button type="button" onclick="window.yassirEnableDesktopNotifications()" id="btnDesktopNotifPerm" class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-white/15 hover:bg-white/25 text-white transition cursor-pointer" title="Recevoir aussi une notification Windows/Mac">
                     <i class="fa-solid fa-desktop mr-1"></i>Bureau
                   </button>
@@ -653,6 +656,9 @@
                 <button type="button" data-notif-filter="OFFER_END" onclick="window.yassirSetNotifCategoryFilter('OFFER_END')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">Fin offre &le;2j (<span id="notifCntOffer">0</span>)</button>
                 <button type="button" data-notif-filter="DROP_3D" onclick="window.yassirSetNotifCategoryFilter('DROP_3D')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">Drop 3j (<span id="notifCntDrop">0</span>)</button>
                 <button type="button" data-notif-filter="COMM_100" onclick="window.yassirSetNotifCategoryFilter('COMM_100')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">Comm. 100% 1-7j (<span id="notifCntComm100">0</span>)</button>
+                <button type="button" data-notif-filter="CANC_HIGH" onclick="window.yassirSetNotifCategoryFilter('CANC_HIGH')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">Annul. en hausse (<span id="notifCntCanc">0</span>)</button>
+                <button type="button" data-notif-filter="SYSTEM" onclick="window.yassirSetNotifCategoryFilter('SYSTEM')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">Système (<span id="notifCntSystem">0</span>)</button>
+                <button type="button" data-notif-filter="BUDGET" onclick="window.yassirSetNotifCategoryFilter('BUDGET')" class="notif-cat-btn px-2.5 py-1 rounded-full bg-white text-slate-600 border border-slate-200 hover:bg-[#F3EBFF] cursor-pointer">Budget (<span id="notifCntBudget">0</span>)</button>
               </div>
 
               <!-- Liste scrollable des notifications -->
