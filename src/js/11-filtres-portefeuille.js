@@ -21,18 +21,22 @@
       /* ========================================================================
          H2. FILTRE PAR POLYGONE CLIENT (Kool uniquement — colonne « Polygone Client »,
          col. AB de la feuille Data Kool, lue par le normaliseur Kool).
-         Comme le filtre AM : état en mémoire uniquement (state.polygonFilter,
-         tableau ; vide = tous les polygones, pas de filtre). Yassir n'a pas
-         cette colonne : le filtre ne s'applique jamais en mode Yassir.
+         Comme le filtre AM : état en mémoire uniquement. Sémantique :
+         state.polygonFilter = null → pas de filtre (« Tous les polygones ») ;
+         [] → filtre actif sans aucune sélection (aucun résultat) ;
+         [...] → filtre actif sur la sélection. Yassir n'a pas cette colonne :
+         le filtre ne s'applique jamais en mode Yassir.
          ======================================================================== */
       function getEffectivePolygonFilter() {
-        if (typeof currentBrand === 'undefined' || currentBrand !== 'kool') return [];
-        if (!Array.isArray(state.polygonFilter)) return [];
+        if (typeof currentBrand === 'undefined' || currentBrand !== 'kool') return null;
+        if (!Array.isArray(state.polygonFilter)) return null;
         return state.polygonFilter.slice();
       }
 
       function getPolygonFilterKey() {
-        return getEffectivePolygonFilter().map(function (p) { return String(p).trim().toLowerCase(); }).sort().join(',');
+        var sel = getEffectivePolygonFilter();
+        if (sel === null) return 'ALL';
+        return sel.map(function (p) { return String(p).trim().toLowerCase(); }).sort().join(',');
       }
 
       function getRowPolygon(rec) {
@@ -44,7 +48,8 @@
 
       function filtrerParPolygoneSelectionne(recordsList) {
         var sel = getEffectivePolygonFilter();
-        if (sel.length === 0) return recordsList;
+        if (sel === null) return recordsList;
+        if (sel.length === 0) return [];
         var norm = {};
         sel.forEach(function (p) { norm[String(p).trim().toLowerCase()] = true; });
         return recordsList.filter(function (rec) {
@@ -63,7 +68,8 @@
           var p = getRowPolygon(rec);
           if (p && !seen[p.toLowerCase()]) { seen[p.toLowerCase()] = true; list.push(p); }
         });
-        getEffectivePolygonFilter().forEach(function (p) {
+        var selPolys = getEffectivePolygonFilter();
+        if (selPolys) selPolys.forEach(function (p) {
           var t = String(p).trim();
           if (t && !seen[t.toLowerCase()]) { seen[t.toLowerCase()] = true; list.push(t); }
         });
@@ -71,10 +77,10 @@
         return list;
       }
 
-      // Appliquer le filtre polygone (Kool uniquement) à une sélection, sans
-      // casser la sémantique « vide = tous ».
+      // Appliquer le filtre polygone (Kool uniquement) : null = pas de filtre
+      // (« Tous »), [] = filtre actif sans sélection (aucun résultat).
       window.yassirSetPolygonFilter = function (arr) {
-        state.polygonFilter = Array.isArray(arr) ? arr.slice() : [];
+        state.polygonFilter = (arr === null || arr === undefined) ? null : (Array.isArray(arr) ? arr.slice() : null);
         state.currentPage = 1;
         mettreAJourInterface();
       };

@@ -746,6 +746,21 @@ test('Kool : filtre par Polygone Client (multi-sélection + saisie manuelle), Ko
   w.yassirClearPolygonFilter();
   assert.equal(foodCount(), '4', 'effacement final : tout revient');
 
+  // « Tous les polygones » décoché = tout désélectionner : 0 commande, « Aucun »,
+  // toutes les cases décochées. Recocher un polygone ensuite filtre sur lui seul.
+  w.yassirToggleAllPolygones(false);
+  assert.equal(foodCount(), '0', 'tout désélectionner : 0 commande');
+  assert.equal(polyLabel(), 'Polygone : Aucun', 'libellé après désélection de tous');
+  assert.equal(w.document.getElementById('polygonCheckAll').checked, false, 'case « Tous » décochée');
+  assert.ok([...w.document.querySelectorAll('#polygonCheckList input[type="checkbox"]')].every((cb) => !cb.checked), 'toutes les cases décochées');
+  const marsaBox = [...w.document.querySelectorAll('#polygonCheckList input[type="checkbox"]')].find((cb) => cb.dataset.poly === 'Marsa');
+  w.yassirTogglePolygon(marsaBox);
+  assert.equal(foodCount(), '2', 'Marsa seul après désélection totale : 2 commandes');
+  assert.equal(polyLabel(), 'Polygone : Marsa', 'libellé Marsa seul');
+  w.yassirToggleAllPolygones(true);
+  assert.equal(foodCount(), '4', '« Tous » recoché : tout revient');
+  assert.equal(polyLabel(), 'Polygone : Tous', 'libellé « Tous » recoché');
+
   // En mode Yassir, la ligne du filtre est masquée (pas de colonne polygone).
   w.yassirSwitchBrand('yassir');
   await wait(600);

@@ -59,7 +59,8 @@
       }
 
       // --- Filtre Polygone Client (Kool uniquement) : menu déroulant multi-sélection ---
-      // État en mémoire uniquement, comme le filtre AM (state.polygonFilter, vide = tous).
+      // État en mémoire uniquement, comme le filtre AM (state.polygonFilter :
+      // null = pas de filtre (« Tous »), [] = actif sans sélection (aucun résultat)).
       var _polygonMenuOpen = false;
 
       function renderPolygonFilter() {
@@ -72,7 +73,8 @@
         var listed = getDistinctPolygones();
         var labelEl = document.getElementById('polygonFilterBtnLabel');
         if (labelEl) {
-          labelEl.textContent = sel.length === 0 ? 'Polygone : Tous'
+          labelEl.textContent = sel === null ? 'Polygone : Tous'
+            : sel.length === 0 ? 'Polygone : Aucun'
             : sel.length === 1 ? ('Polygone : ' + sel[0])
             : ('Polygone : ' + sel.length + ' sélectionnés');
         }
@@ -83,13 +85,14 @@
             : 'aucun polygone dans les données chargées';
         }
         var isSel = function (p) {
-          return sel.some(function (s) { return String(s).trim().toLowerCase() === String(p).trim().toLowerCase(); });
+          return sel !== null && sel.some(function (s) { return String(s).trim().toLowerCase() === String(p).trim().toLowerCase(); });
         };
         var allBox = document.getElementById('polygonCheckAll');
         if (allBox) {
-          // « Tous » est coché quand le filtre est inactif (vide = tous) ou quand
-          // tous les polygones listés sont sélectionnés.
-          allBox.checked = sel.length === 0 || listed.every(isSel);
+          // « Tous » est coché quand le filtre est inactif (null = tous) ou quand
+          // tous les polygones listés sont sélectionnés. Décoché = filtre actif
+          // sans sélection (tout désélectionner) ou sélection partielle.
+          allBox.checked = sel === null || (listed.length > 0 && listed.every(isSel));
         }
         var listEl = document.getElementById('polygonCheckList');
         if (listEl) {
@@ -97,8 +100,9 @@
             listEl.innerHTML = '<p class="px-2 py-1.5 text-[11px] text-slate-400">Aucun polygone dans les données chargées — écrivez-en un ci-dessous.</p>';
           } else {
             listEl.innerHTML = listed.map(function (p) {
-              // Filtre inactif (vide) = tous inclus : les cases sont cochées.
-              var checked = sel.length === 0 || isSel(p);
+              // Filtre inactif (null) = tous inclus : les cases sont cochées.
+              // Filtre actif vide ([]) = aucune case cochée.
+              var checked = sel === null || isSel(p);
               return '<label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-[#F3EBFF] cursor-pointer text-xs text-[#1A1A2E]">' +
                 '<input type="checkbox" data-poly="' + escapeHtml(p) + '" ' + (checked ? 'checked' : '') + ' onchange="window.yassirTogglePolygon(this)" class="accent-[#6C2BD9]" />' +
                 '<span>' + escapeHtml(p) + '</span></label>';
@@ -128,7 +132,7 @@
           }
           return -1;
         };
-        if (sel.length === 0) {
+        if (sel === null) {
           sel = getDistinctPolygones().slice();
           var k = findIdx(sel);
           if (k !== -1) sel.splice(k, 1);
@@ -140,11 +144,10 @@
         window.yassirSetPolygonFilter(sel);
       };
 
-      // « Tous les polygones » : coché = filtre inactif (tous) ; décoché = filtre
-      // actif avec tous les polygones listés sélectionnés (on peut ensuite en
-      // retirer un par un).
+      // « Tous les polygones » : coché = filtre inactif (tous) ; décoché = tout
+      // désélectionner (filtre actif sans sélection → aucun résultat).
       window.yassirToggleAllPolygones = function (checked) {
-        window.yassirSetPolygonFilter(checked ? [] : getDistinctPolygones().slice());
+        window.yassirSetPolygonFilter(checked ? null : []);
       };
 
       // Saisie manuelle : tape un nom de polygone (même absent des données) et
@@ -157,9 +160,9 @@
         if (!name) return;
         var sel = getEffectivePolygonFilter();
         var norm = name.toLowerCase();
-        var exists = sel.some(function (s) { return String(s).trim().toLowerCase() === norm; });
+        var exists = sel !== null && sel.some(function (s) { return String(s).trim().toLowerCase() === norm; });
         if (!exists) {
-          if (sel.length === 0) sel = [name];
+          if (sel === null) sel = [name];
           else sel.push(name);
           window.yassirSetPolygonFilter(sel);
         }
@@ -167,7 +170,7 @@
       };
 
       window.yassirClearPolygonFilter = function () {
-        window.yassirSetPolygonFilter([]);
+        window.yassirSetPolygonFilter(null);
       };
 
       // Fermer le menu quand on clique ailleurs (même mécanisme que le menu des notifications).
