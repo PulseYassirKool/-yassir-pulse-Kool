@@ -296,3 +296,34 @@
         document.body.removeChild(link);
         showToast('Graphique <strong>Clients Kool (.png)</strong> téléchargé.', 'success');
       };
+
+      // Télécharger les Top 10 Clients Kool en Excel : un classeur, une feuille
+      // par Top (Acquisition / Returning / Reactivated), avec les chiffres
+      // affichés à l'écran (mêmes filtres actifs : AM, polygone, période).
+      window.yassirConstruireClasseurTop10Kool = function () {
+        var res = calculerClientsKool();
+        if (typeof XLSX === 'undefined') return null;
+        var wb = XLSX.utils.book_new();
+        var tops = [
+          ['Acquisition', res.topAcq, 'nouveaux', 'Nouveaux'],
+          ['Returning', res.topRet, 'retours', 'Retours'],
+          ['Reactivated', res.topRea, 'reactives', 'Réactivés']
+        ];
+        tops.forEach(function (t) {
+          var rows = t[1].filter(function (x) { return x[t[2]] > 0; });
+          var aoa = [['#', 'Restaurant', 'Ville (Area)', t[3]]];
+          rows.forEach(function (x, i) { aoa.push([i + 1, x.resto, x.area || '', x[t[2]]]); });
+          XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), t[0]);
+        });
+        return wb;
+      };
+      window.yassirDownloadKoolClientsTop10 = function () {
+        var wb = window.yassirConstruireClasseurTop10Kool();
+        if (!wb) {
+          showToast('Export Excel <strong>non disponible</strong> pour le moment.', 'warning');
+          return;
+        }
+        var dateStr = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(wb, 'KOOL_Clients_Top10_' + dateStr + '.xlsx');
+        showToast('Top 10 <strong>Clients Kool (.xlsx)</strong> téléchargé.', 'success');
+      };

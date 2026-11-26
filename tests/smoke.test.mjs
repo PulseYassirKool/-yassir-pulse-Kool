@@ -660,6 +660,18 @@ test('Kool : vues du deck (Executive Summary, Daily Orders vs Avg Daily GMV, Top
   // Bouton de téléchargement du graphique Clients Kool (.png).
   assert.ok(w.document.getElementById('btnDownloadKoolClientsChart'), 'bouton Télécharger le graphique absent');
   assert.equal(typeof w.yassirDownloadKoolClientsChart, 'function', 'fonction de téléchargement du graphique absente');
+  // Bouton de téléchargement des Top 10 Clients Kool (.xlsx) : 3 feuilles,
+  // mêmes chiffres que les tableaux affichés.
+  assert.ok(w.document.getElementById('btnDownloadKoolClientsTop10'), 'bouton Télécharger les Top 10 absent');
+  assert.equal(typeof w.yassirDownloadKoolClientsTop10, 'function', 'fonction de téléchargement des Top 10 absente');
+  const wbTop10 = w.yassirConstruireClasseurTop10Kool();
+  assert.ok(wbTop10, 'classeur Top 10 non construit');
+  assert.deepEqual([...wbTop10.SheetNames], ['Acquisition', 'Returning', 'Reactivated'], 'feuilles du classeur Top 10');
+  const topSheet = (n) => w.XLSX.utils.sheet_to_json(wbTop10.Sheets[n], { header: 1 });
+  assert.deepEqual([...topSheet('Acquisition')[0]], ['#', 'Restaurant', 'Ville (Area)', 'Nouveaux'], 'en-tête Acquisition');
+  assert.deepEqual([...topSheet('Acquisition').slice(1).map((r) => r[1])], ['Resto Alpha', 'Resto Gamma'], 'Top Acquisition : Alpha puis Gamma');
+  assert.deepEqual([...topSheet('Returning').slice(1).map((r) => r[1])], ['Resto Alpha', 'Resto Beta'], 'Top Returning : Alpha puis Beta');
+  assert.deepEqual([...topSheet('Reactivated').slice(1).map((r) => r[1])], ['Resto Alpha'], 'Top Reactivated : Alpha seul');
 
   // En mode Yassir, l'onglet Clients Kool disparaît (la vue est Kool uniquement).
   w.yassirSwitchBrand('yassir');
