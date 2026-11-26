@@ -859,7 +859,10 @@
                 '</div>' +
               '</div>';
             });
-            yoyGrid.className = 'grid grid-cols-1 md:grid-cols-2 gap-3';
+            // Ne pas écraser xl:col-span-12 (défini dans index.html) : sans lui,
+            // la grille ne prend qu'1 des 12 colonnes et les cartes sont
+            // écrasées dans une étroite bande à gauche (vu en capture).
+            yoyGrid.className = 'xl:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-3';
             yoyGrid.innerHTML = cardsHtml;
           } else if (isKoolBrand) {
             yoyGrid.innerHTML = '<div class="col-span-full text-xs text-slate-500 py-1">Comparaison 2025 indisponible pour Kool : aucune donnée Kool 2025 (ni feuille 2025, ni historique).</div>';

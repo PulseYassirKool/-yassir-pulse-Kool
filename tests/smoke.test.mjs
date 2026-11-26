@@ -1287,6 +1287,10 @@ test('Kool : données 2025 Kool synchronisées et utilisées par le panneau YoY'
   await wait(600);
   const yoyGrid = w.document.getElementById('synth2025YoyCardsGrid');
   assert.ok(yoyGrid, 'grille YoY absente');
+  // La grille doit garder xl:col-span-12 (pleine largeur de la slide) :
+  // renderSynth2025Panel écrasait className et les cartes finissaient
+  // écrasées dans une étroite bande à gauche (capture du 2026-11-26).
+  assert.ok(yoyGrid.classList.contains('xl:col-span-12'), 'grille YoY : doit garder xl:col-span-12 pour rester pleine largeur');
   assert.ok(!yoyGrid.textContent.includes('indisponible pour Kool'), 'la note « indisponible pour Kool » doit disparaître avec des données 2025 Kool');
   assert.ok(yoyGrid.textContent.includes('Variation YoY'), 'carte YoY W47 absente');
   const note = w.document.getElementById('koolNoYoyNote');
