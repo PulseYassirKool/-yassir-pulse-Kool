@@ -62,6 +62,7 @@
       // État en mémoire uniquement, comme le filtre AM (state.polygonFilter :
       // null = pas de filtre (« Tous »), [] = actif sans sélection (aucun résultat)).
       var _polygonMenuOpen = false;
+      var _polygonSearchQuery = '';
 
       function renderPolygonFilter() {
         var row = document.getElementById('polygonFilterRow');
@@ -71,6 +72,11 @@
         if (!isKool) return;
         var sel = getEffectivePolygonFilter();
         var listed = getDistinctPolygones();
+        // Recherche : le champ en bas du menu filtre la liste affichée, sans
+        // toucher à la sélection en cours.
+        var shown = _polygonSearchQuery
+          ? listed.filter(function (p) { return String(p).toLowerCase().indexOf(_polygonSearchQuery) !== -1; })
+          : listed;
         var labelEl = document.getElementById('polygonFilterBtnLabel');
         if (labelEl) {
           labelEl.textContent = sel === null ? 'Polygone : Tous'
@@ -97,9 +103,11 @@
         var listEl = document.getElementById('polygonCheckList');
         if (listEl) {
           if (listed.length === 0) {
-            listEl.innerHTML = '<p class="px-2 py-1.5 text-[11px] text-slate-400">Aucun polygone dans les données chargées — écrivez-en un ci-dessous.</p>';
+            listEl.innerHTML = '<p class="px-2 py-1.5 text-[11px] text-slate-400">Aucun polygone dans les données chargées.</p>';
+          } else if (shown.length === 0) {
+            listEl.innerHTML = '<p class="px-2 py-1.5 text-[11px] text-slate-400">Aucun polygone ne correspond à la recherche.</p>';
           } else {
-            listEl.innerHTML = listed.map(function (p) {
+            listEl.innerHTML = shown.map(function (p) {
               // Filtre inactif (null) = tous inclus : les cases sont cochées.
               // Filtre actif vide ([]) = aucune case cochée.
               var checked = sel === null || isSel(p);
@@ -150,23 +158,11 @@
         window.yassirSetPolygonFilter(checked ? null : []);
       };
 
-      // Saisie manuelle : tape un nom de polygone (même absent des données) et
-      // l'ajoute à la sélection. Si le filtre était inactif, la saisie crée une
-      // sélection sur ce seul polygone.
-      window.yassirAddPolygonManually = function () {
-        var inp = document.getElementById('polygonManualInput');
-        if (!inp) return;
-        var name = inp.value.trim();
-        if (!name) return;
-        var sel = getEffectivePolygonFilter();
-        var norm = name.toLowerCase();
-        var exists = sel !== null && sel.some(function (s) { return String(s).trim().toLowerCase() === norm; });
-        if (!exists) {
-          if (sel === null) sel = [name];
-          else sel.push(name);
-          window.yassirSetPolygonFilter(sel);
-        }
-        inp.value = '';
+      // Recherche dans la liste des polygones : taper quelques lettres filtre la
+      // liste aussitôt (sans toucher à la sélection en cours).
+      window.yassirSearchPolygones = function (q) {
+        _polygonSearchQuery = String(q || '').trim().toLowerCase();
+        renderPolygonFilter();
       };
 
       window.yassirClearPolygonFilter = function () {

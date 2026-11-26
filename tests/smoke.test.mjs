@@ -706,7 +706,7 @@ const koolCsvDataPoly = toCsv([
 const koolCsvCommPoly = toCsv([['Restaurant', 'Commission'], ['Resto Alpha', '20'], ['Resto Beta', '15'], ['Resto Gamma', '10']]);
 const koolCsvPortPoly = toCsv([['Restaurant', 'Ville', 'AM'], ['Resto Alpha', 'Tunis', 'Omar Beldi'], ['Resto Beta', 'Ariana', 'Nour Ali'], ['Resto Gamma', 'Tunis', 'Omar Beldi']]);
 
-test('Kool : filtre par Polygone Client (multi-sélection + saisie manuelle), Kool uniquement', async () => {
+test('Kool : filtre par Polygone Client (multi-sélection + recherche), Kool uniquement', async () => {
   const w = bootKool({ data: koolCsvDataPoly, comm: koolCsvCommPoly, port: koolCsvPortPoly });
   await login(w, 'proprio', 'Proprio-Test-123');
   await w.yassirSyncKoolSheets(true);
@@ -735,28 +735,27 @@ test('Kool : filtre par Polygone Client (multi-sélection + saisie manuelle), Ko
   assert.equal(foodCount(), '3', 'filtre Menzah + Marsa : 3 commandes');
   assert.equal(polyLabel(), 'Polygone : 2 sélectionnés', 'libellé 2 sélections');
 
-  // Saisie manuelle d'un polygone absent des données : il S'AJOUTE à la sélection.
-  const inp = w.document.getElementById('polygonManualInput');
-  inp.value = 'Soukra 1';
-  w.yassirAddPolygonManually();
-  assert.equal(foodCount(), '3', 'polygone manuel ajouté à la sélection (Menzah + Marsa + Soukra 1 absent = 3)');
-  assert.equal(polyLabel(), 'Polygone : 3 sélectionnés', 'libellé 3 sélections');
-  assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah', 'Soukra 1'], 'le polygone manuel reste affiché tant qu’il est sélectionné');
+  // Recherche : taper « mar » ne montre que Marsa, sans toucher à la sélection.
+  const inp = w.document.getElementById('polygonSearchInput');
+  inp.value = 'mar';
+  w.yassirSearchPolygones(inp.value);
+  assert.deepEqual(polyBoxes(), ['Marsa'], 'recherche « mar » : seul Marsa affiché');
+  assert.equal(foodCount(), '3', 'la recherche ne change pas le filtre (Menzah + Marsa = 3)');
+  assert.equal(polyLabel(), 'Polygone : 2 sélectionnés', 'libellé inchangé pendant la recherche');
+  // Recherche sans résultat : message explicite, liste vide.
+  inp.value = 'zzz';
+  w.yassirSearchPolygones(inp.value);
+  assert.deepEqual(polyBoxes(), [], 'recherche sans résultat : liste vide');
+  assert.ok(w.document.getElementById('polygonCheckList').textContent.includes('ne correspond'), 'message « aucun polygone » affiché');
+  // Effacer la recherche : la liste complète revient.
+  inp.value = '';
+  w.yassirSearchPolygones(inp.value);
+  assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah'], 'recherche effacée : liste complète');
 
-  // Effacer → tout revient, le polygone manuel disparaît de la liste.
+  // Effacer → tout revient.
   w.yassirClearPolygonFilter();
   assert.equal(foodCount(), '4', 'effacement : tout revient');
   assert.equal(polyLabel(), 'Polygone : Tous', 'libellé après effacement');
-  assert.deepEqual(polyBoxes(), ['Marsa', 'Menzah'], 'le polygone manuel disparaît une fois désélectionné');
-
-  // Saisie manuelle quand le filtre est inactif : elle crée une sélection sur ce
-  // seul polygone (absent des données → 0 commande).
-  inp.value = 'Soukra 1';
-  w.yassirAddPolygonManually();
-  assert.equal(foodCount(), '0', 'polygone manuel seul (absent des données) : 0 commande');
-  assert.equal(polyLabel(), 'Polygone : Soukra 1', 'libellé polygone manuel seul');
-  w.yassirClearPolygonFilter();
-  assert.equal(foodCount(), '4', 'effacement final : tout revient');
 
   // « Tous les polygones » décoché = tout désélectionner : 0 commande, « Aucun »,
   // toutes les cases décochées. Recocher un polygone ensuite filtre sur lui seul.
