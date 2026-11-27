@@ -136,6 +136,16 @@ function isTotalRow(row) {
 // front) : une ligne qui mentionne un restaurant, un AM, un statut ou un
 // budget. Repli : ligne 0.
 function findHeaderRowIdx(rows) {
+  if (!rows || rows.length === 0) return 0;
+  // Matrice 2025 : la ligne d'en-tête est la ligne 0 ('', 'W 07', 'W 08', …)
+  // et les libellés de lignes plus bas (« Accepted by restaurant ») ne sont
+  // PAS des en-têtes. Sans cette garde, la recherche par mot-clé prenait la
+  // ligne 11 et ne renvoyait que les 6 lignes suivantes — le front refusait
+  // les lignes (moins de 3 en-têtes semaine) et l'étape « Données 2025 »
+  // était marquée en échec (diagnostic 2026-11-27).
+  const firstRow = normRow(rows[0]);
+  const weekHeaders = firstRow.filter((x) => /^w\s*\d{1,2}$/.test(x)).length;
+  if (weekHeaders >= 3) return 0;
   const maxScan = Math.min(rows.length, 12);
   for (let sr = 0; sr < maxScan; sr++) {
     const h = normRow(rows[sr]);

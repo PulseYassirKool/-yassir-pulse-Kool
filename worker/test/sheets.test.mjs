@@ -583,3 +583,30 @@ test('data-oct : « Restaurant ID » avant « restaurant name » — l\'AM voit 
     assert.deepEqual(rOmar.json.rows.slice(1).map((r) => r[0]), ['1001', '1004']);
   } finally { restoreFetch(originalFetch); }
 });
+
+
+test('hist2025 : matrice 2025 — la ligne « Accepted by restaurant » n\'est pas l\'en-tête', async () => {
+  const originalFetch = globalThis.fetch;
+  installMock();
+  try {
+    // Matrice réelle : en-tête ligne 0 ('', 'W 07', …), libellés de lignes
+    // ensuite — dont « Accepted by restaurant » (ligne 3 ici, ligne 11 en
+    // vrai). Sans la garde, le Worker prenait cette ligne pour l'en-tête et
+    // ne renvoyait que les lignes suivantes (front : refus, étape YoY en échec).
+    sheetsData[UNIQUE]['2025 Yassir'] = [
+      ['', 'W 07', 'W 08', 'W 09'],
+      ['Requested', '100', '110', '120'],
+      ['Accepted by restaurant', '90', '100', '110'],
+      ['Delivered Orders', '80', '90', '100'],
+      ['Cancelled', '5', '6', '7'],
+      ['CA YASSIR', '2000', '2100', '2200']
+    ];
+    const proprio = await login('proprio', 'Secret-Proprio-1');
+    const h = await call('GET', '/api/sheets/hist2025?brand=yassir', null, proprio);
+    assert.equal(h.status, 200);
+    assert.equal(h.json.totalRows, 5);
+    assert.deepEqual(h.json.rows[1], ['Requested', '100', '110', '120']);
+    assert.deepEqual(h.json.rows[2], ['Accepted by restaurant', '90', '100', '110']);
+    assert.deepEqual(h.json.rows[0], ['', 'W 07', 'W 08', 'W 09']);
+  } finally { restoreFetch(originalFetch); }
+});
