@@ -530,6 +530,80 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Correctif 1 (diagnostic 2026-11-27) : partPct Kool lu 100 fois trop petit ----
+// La feuille « Offre Participation » écrit la participation « 0,1 » (= 10 %) ;
+// la synchro Kool lit la feuille en CSV (chaînes) et parsePercentNumber ne
+// multipliait par 100 que les NOMBRES entre 0 et 1, pas les chaînes.
+// W47 réel ramené à une commande : brut 37 076,50, remise 31 017,42, règle
+// partPct « 0,1 » (CSV) = 10 points. Avant le correctif : plateforme 37,08
+// (0,1 % du brut), restaurant 30 980,34. Après : 3 707,65 / 27 309,77.
+const koolCsvDataW47 = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '20/11/2026', '2001', '', 'Resto W47', '', '', '6059.08', '0', '31017.42']
+]);
+const koolCsvItemsW47 = toCsv([
+  ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+  ['2001', '20/11/2026', 'Resto W47', 'Food', 'Menu W47', 1, 37076.50, 6059.08, 37076.50, 'Food']
+]);
+const koolCsvOffreW47 = toCsv([
+  ['Restaurant', 'Participation', 'Tag', 'Période'],
+  ['Resto W47', '0,1', 'Toute la carte', '01/11/2026 - 30/11/2026']
+]);
+
+test('partPct CSV : "0,1" vaut 10 points, "0,238" vaut 23,8 (bug ×100 Kool)', () => {
+  const w = boot();
+  const p = w.yassirParsePercentNumber;
+  assert.ok(typeof p === 'function', 'yassirParsePercentNumber non exposé');
+  // Chaînes CSV (synchro Kool) : la feuille écrit 0,1 pour 10 %.
+  assert.equal(p('0,1'), 10, '"0,1" doit valoir 10 points');
+  assert.equal(p('0,238'), 23.8, '"0,238" doit valoir 23,8 points');
+  assert.equal(p('0'), 0, '"0" doit valoir 0');
+  assert.equal(p('10'), 10, '"10" inchangé');
+  assert.equal(p('10%'), 10, '"10%" inchangé');
+  assert.equal(p('23,8'), 23.8, '"23,8" inchangé');
+  assert.equal(p(''), 0, 'chaîne vide = 0');
+  assert.equal(p('abc'), 0, 'non numérique = 0');
+  // Nombres (XLSX Yassir) : comportement inchangé.
+  assert.equal(p(0.1), 10, '0.1 (nombre) = 10');
+  assert.equal(p(0.238), 23.8, '0.238 (nombre) = 23,8');
+  assert.equal(p(10), 10, '10 (nombre) inchangé');
+  assert.equal(p(0), 0, '0 (nombre) = 0');
+  // Par la feuille : des lignes « Offre Participation » en CSV.
+  const rules = w.yassirParseOffreParticipationRows([
+    ['Restaurant', 'Participation', 'Tag', 'Période'],
+    ['Resto Alpha', '0,1', 'Toute la carte', '01/11/2026 - 30/11/2026'],
+    ['Resto Beta', '0,238', 'Toute la carte', '01/11/2026 - 30/11/2026'],
+    ['Resto Gamma', '0', 'Toute la carte', '01/11/2026 - 30/11/2026']
+  ], 'Kool');
+  assert.equal(rules.length, 3, '3 règles lues');
+  assert.equal(rules[0].partPct, 10, 'Alpha partPct 10');
+  assert.equal(rules[1].partPct, 23.8, 'Beta partPct 23,8');
+  assert.equal(rules[2].partPct, 0, 'Gamma partPct 0');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Kool : partPct CSV "0,1" — chiffres W47 reproduits (plateforme 3 707,65, restaurant 27 309,77)', async () => {
+  const w = bootKool({ data: koolCsvDataW47, items: koolCsvItemsW47, offre: koolCsvOffreW47 });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+
+  // Vue « Toute la carte » : brut 37 076,50, remise 31 017,42, règle 10 points.
+  // Plateforme = min(10 % × 37 076,50 ; 31 017,42) = 3 707,65 ; restaurant = 27 309,77.
+  w.yassirSwitchTab('participation');
+  await wait(600);
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres W47');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '31017.42 TND', 'Remise totale W47');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '3707.65 TND', 'Plateforme W47 (10 % du brut, pas 0,1 %)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '27309.77 TND', 'Restaurant W47');
+  // KPI budget « Participation Offres » (coût restaurant) : même montant.
+  assert.equal(w.yassirCalculerCoutParticipationOffresLivrees(w.yassirGetDeliveredRecords()), 27309.77, 'KPI budget W47 (coût restaurant)');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Vues du deck Kool (slides 33-38) : Executive Summary, Daily Orders vs Avg Daily
 // GMV, Top 20 / Top Growth, Clients (Nouveaux vs Retours vs Réactivés) ----
 // Données simulées à 33 colonnes : « ID Client » en col. F (index 5) et

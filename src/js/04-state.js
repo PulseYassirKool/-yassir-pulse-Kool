@@ -160,8 +160,16 @@
         }
         var str = String(val).replace(/%/g, '').replace(/,/g, '.').trim();
         var num = parseFloat(str);
-        return Number.isFinite(num) ? num : 0;
+        if (!Number.isFinite(num)) return 0;
+        // Même règle que pour les nombres : une valeur entre 0 et 1 est une
+        // fraction. La synchro Kool lit la feuille en CSV (chaînes) et la
+        // feuille écrit « 0,1 » pour 10 % : sans ce ×100, « 0,1 » était lu
+        // 0,1 point au lieu de 10 (diagnostic 2026-11-27 : plateforme W47
+        // affichée 37,08 TND au lieu de 3 707,65 TND).
+        if (num > 0 && num < 1) return Number((num * 100).toFixed(4));
+        return num;
       }
+      window.yassirParsePercentNumber = parsePercentNumber;
 
       function parseOffreParticipationRows(rows, brandFilter) {
         if (!rows || rows.length < 2) return [];
