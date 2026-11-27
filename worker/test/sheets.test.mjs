@@ -640,3 +640,25 @@ test('budget fermé (audit point 4) : faute de frappe / case vide / prénom seul
     assert.equal(bOwner.json.totalRows, 6); // le proprio voit tout, faute de frappe comprise
   } finally { restoreFetch(originalFetch); }
 });
+
+
+test('repli sans cache (audit point 3) : écriture KV en échec -> lignes servies en mémoire, pas de 502', async () => {
+  const originalFetch = globalThis.fetch;
+  installMock();
+  const originalKv = env.PULSE_KV;
+  try {
+    const owner = await login('proprio', 'Secret-Proprio-1');
+    // KV dont les écritures échouent (quota) mais les lectures marchent.
+    env.PULSE_KV = {
+      get: originalKv.get.bind(originalKv),
+      put: async () => { throw new Error('KV quota exceeded (simulé)'); },
+      delete: originalKv.delete.bind(originalKv),
+      list: originalKv.list ? originalKv.list.bind(originalKv) : undefined
+    };
+    const r = await call('GET', '/api/sheets/budget?brand=yassir', null, owner);
+    assert.equal(r.status, 200);
+    assert.equal(r.json.totalRows, 3);
+    assert.ok(JSON.stringify(r.json.rows).includes('Omar Beldi'));
+    assert.ok(JSON.stringify(r.json.rows).includes('Global'));
+  } finally { env.PULSE_KV = originalKv; restoreFetch(originalFetch); }
+});

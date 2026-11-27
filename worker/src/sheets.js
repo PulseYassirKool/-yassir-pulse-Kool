@@ -246,6 +246,9 @@ async function readChunk(env, key, idx) {
 
 // Accumulateur de lignes filtrées : écrit les paquets en KV au fil de l'eau
 // (la mémoire reste bornée) et gère la déduplication entre onglets.
+// Repli sans cache (2026-11-27, audit point 3) : si une écriture KV échoue
+// (quota), le puits bascule en mémoire et les lignes sont servies sans cache
+// plutôt que de renvoyer une erreur 502 à l'AM (voir finishLoad).
 class RowSink {
   constructor(env, key) {
     this.env = env;
@@ -256,8 +259,10 @@ class RowSink {
     this.byOrder = new Map(); // clé de dédupe -> index global
     this.overwrites = new Map(); // index global -> ligne (doublon dans un paquet déjà écrit)
     this.dedupe = null; // 'order' | 'order-article' | null
+    this.cacheFailed = false; // une écriture KV a échoué : mode mémoire
+    this.memoryRows = null; // lignes complètes en mémoire, si cacheFailed
   }
-  get total() { return this.flushed + this.buffer.length; }
+  get total() { return this.memoryRows ? this.memoryRows.length : this.flushed + this.buffer.length; }
   push(row, dedupeKey) {
     if (this.dedupe && dedupeKey) {
       const prev = this.byOrder.get(dedupeKey);
@@ -278,8 +283,15 @@ class RowSink {
   }
   async flush() {
     if (this.buffer.length === 0) return;
+    if (this.cacheFailed) return; // bascule mémoire : on garde tout en tampon
     const idx = this.chunks;
-    await this.env.PULSE_KV.put(`${this.key}:c${idx}`, JSON.stringify(this.buffer), { expirationTtl: CACHE_TTL_SECONDS });
+    try {
+      await this.env.PULSE_KV.put(`${this.key}:c${idx}`, JSON.stringify(this.buffer), { expirationTtl: CACHE_TTL_SECONDS });
+    } catch (e) {
+      // Écriture KV en échec (quota) : basculer en mémoire, ne pas lever.
+      this.cacheFailed = true;
+      return;
+    }
     this.chunks += 1;
     this.flushed += this.buffer.length;
     this.buffer = [];
@@ -290,6 +302,22 @@ class RowSink {
       if (idx >= this.flushed) this.buffer[idx - this.flushed] = row;
     }
     await this.flush();
+    if (this.cacheFailed) {
+      // Reconstruire les lignes complètes en mémoire : paquets KV déjà
+      // écrits (relus) + tampon courant (jamais écrit), écrasements appliqués.
+      const rows = [];
+      for (let c = 0; c < this.chunks; c++) {
+        const chunk = await readChunk(this.env, this.key, c);
+        if (chunk) rows.push(...chunk);
+      }
+      rows.push(...this.buffer);
+      for (const [idx, row] of this.overwrites) {
+        if (idx < rows.length) rows[idx] = row;
+      }
+      this.memoryRows = rows;
+      this.buffer = [];
+      return;
+    }
     // Puis ceux qui visent des paquets déjà écrits (rares : doublon entre onglets).
     const byChunk = new Map();
     for (const [idx, row] of this.overwrites) {
@@ -302,7 +330,26 @@ class RowSink {
       const rows = await readChunk(this.env, this.key, c);
       if (!rows) continue;
       for (const [off, row] of patches) rows[off] = row;
-      await this.env.PULSE_KV.put(`${this.key}:c${c}`, JSON.stringify(rows), { expirationTtl: CACHE_TTL_SECONDS });
+      try {
+        await this.env.PULSE_KV.put(`${this.key}:c${c}`, JSON.stringify(rows), { expirationTtl: CACHE_TTL_SECONDS });
+      } catch (e) {
+        // Ré-écriture d'un paquet corrigé en échec (quota) : basculer en
+        // mémoire plutôt que de lever — reconstruction ci-dessous.
+        this.cacheFailed = true;
+      }
+    }
+    if (this.cacheFailed) {
+      const rows = [];
+      for (let c = 0; c < this.chunks; c++) {
+        const chunk = await readChunk(this.env, this.key, c);
+        if (chunk) rows.push(...chunk);
+      }
+      rows.push(...this.buffer);
+      for (const [idx, row] of this.overwrites) {
+        if (idx < rows.length) rows[idx] = row;
+      }
+      this.memoryRows = rows;
+      this.buffer = [];
     }
   }
 }
@@ -622,10 +669,37 @@ async function finishLoad(env, key, ctx, sink) {
     tabs: ctx.tabs,
     skippedTabs: [...new Set(ctx.skippedTabs)],
     partial: ctx.partial,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    cacheFailed: !!sink.cacheFailed
   };
-  await env.PULSE_KV.put(key, JSON.stringify(manifest), { expirationTtl: CACHE_TTL_SECONDS });
+  // Repli sans cache (audit point 3) : si le cache KV a échoué, les lignes
+  // sont portées en mémoire par le manifeste de CETTE requête (jamais
+  // persistées : la prochaine requête rechargera depuis Google) et le
+  // manifeste n'est pas écrit en KV (il pointerait vers des paquets absents).
+  if (sink.cacheFailed) {
+    if (sink.memoryRows) manifest._memoryRows = sink.memoryRows;
+    return manifest;
+  }
+  try {
+    await env.PULSE_KV.put(key, JSON.stringify(manifest), { expirationTtl: CACHE_TTL_SECONDS });
+  } catch (e) {
+    // Écriture du manifeste en échec (quota) : les paquets, eux, sont en KV
+    // et lisibles pour cette requête — servir quand même, sans persister.
+    manifest.cacheFailed = true;
+  }
   return manifest;
+}
+
+// Toutes les lignes d'un manifeste : depuis la mémoire (repli sans cache)
+// ou depuis les paquets KV.
+async function allRowsFromManifest(env, key, manifest) {
+  if (manifest._memoryRows) return manifest._memoryRows;
+  const rows = [];
+  for (let c = 0; c < manifest.chunkCount; c++) {
+    const chunk = await readChunk(env, key, c);
+    if (chunk) rows.push(...chunk);
+  }
+  return rows;
 }
 
 // Portefeuille de l'utilisateur pour une marque : ensemble normalisé des noms
@@ -637,16 +711,13 @@ export async function getPortfolioRestaurants(env, me, brand, fetchImpl = fetch)
   const headersNorm = normRow(manifest.headers);
   let idxResto = findRestaurantCol(headersNorm);
   if (idxResto === -1) idxResto = 2; // repli : Ville | Segment | Restaurant
-  for (let c = 0; c < manifest.chunkCount; c++) {
-    const rows = await readChunk(env, key, c);
-    if (!rows) continue;
-    for (const row of rows) {
-      if (!row || idxResto >= row.length) continue;
-      const name = normalizeName(row[idxResto]);
-      if (!name || name === 'restaurant' || name === 'restaurant name') continue;
-      if (name === 'total' || name.startsWith('total ') || name.startsWith('sous-total')) continue;
-      set.add(name);
-    }
+  const allRows = await allRowsFromManifest(env, key, manifest);
+  for (const row of allRows) {
+    if (!row || idxResto >= row.length) continue;
+    const name = normalizeName(row[idxResto]);
+    if (!name || name === 'restaurant' || name === 'restaurant name') continue;
+    if (name === 'total' || name.startsWith('total ') || name.startsWith('sous-total')) continue;
+    set.add(name);
   }
   return set;
 }
@@ -659,14 +730,11 @@ async function getFilteredKoolOrderIds(env, me, fetchImpl) {
   const idxOrder = findOrderIdCol(headersNorm);
   const set = new Set();
   if (idxOrder === -1) return set;
-  for (let c = 0; c < manifest.chunkCount; c++) {
-    const rows = await readChunk(env, key, c);
-    if (!rows) continue;
-    for (const row of rows) {
-      if (!row || idxOrder >= row.length) continue;
-      const oid = normalizeName(row[idxOrder]);
-      if (oid) set.add(oid);
-    }
+  const allRows = await allRowsFromManifest(env, key, manifest);
+  for (const row of allRows) {
+    if (!row || idxOrder >= row.length) continue;
+    const oid = normalizeName(row[idxOrder]);
+    if (oid) set.add(oid);
   }
   return set;
 }
@@ -733,37 +801,54 @@ export async function getSheetsData(env, me, source, brand = 'yassir', opts = {}
   let pageRows = [];
   if (start < totalRows) {
     const end = Math.min(totalRows, start + pageSize);
-    const firstChunk = Math.floor(start / KV_CHUNK_ROWS);
-    const lastChunk = Math.floor((end - 1) / KV_CHUNK_ROWS);
-    let all = [];
-    let missing = false;
-    for (let c = firstChunk; c <= lastChunk; c++) {
-      const rows = await readChunk(env, key, c);
-      if (!rows) { missing = true; break; }
-      all = all.concat(rows);
-    }
-    if (missing) {
-      // Paquet expiré entre-temps : recharger puis relire la page.
-      manifest = await loadFromSheets(env, me, source, brand, fetchImpl);
-      cached = false;
-      all = [];
-      const end2 = Math.min(manifest.totalRows, start + pageSize);
-      const last2 = manifest.totalRows === 0 ? -1 : Math.floor((end2 - 1) / KV_CHUNK_ROWS);
-      for (let c = firstChunk; c <= last2; c++) {
+    // Repli sans cache (audit point 3) : le manifeste porte les lignes en
+    // mémoire — servir la page depuis là, sans lire le KV.
+    if (manifest._memoryRows) {
+      pageRows = manifest._memoryRows.slice(start, end);
+    } else {
+      const firstChunk = Math.floor(start / KV_CHUNK_ROWS);
+      const lastChunk = Math.floor((end - 1) / KV_CHUNK_ROWS);
+      let all = [];
+      let missing = false;
+      for (let c = firstChunk; c <= lastChunk; c++) {
         const rows = await readChunk(env, key, c);
-        if (rows) all = all.concat(rows);
+        if (!rows) { missing = true; break; }
+        all = all.concat(rows);
+      }
+      if (missing) {
+        // Paquet expiré entre-temps : recharger puis relire la page.
+        manifest = await loadFromSheets(env, me, source, brand, fetchImpl);
+        cached = false;
+        if (manifest._memoryRows) {
+          pageRows = manifest._memoryRows.slice(start, Math.min(manifest.totalRows, start + pageSize));
+          return {
+            source, brand, role: me.role, filtered, cached,
+            updatedAt: manifest.updatedAt, tabs: manifest.tabs, skippedTabs: manifest.skippedTabs,
+            partial: manifest.partial, page, pageSize,
+            totalRows: manifest.totalRows,
+            totalPages: manifest.totalRows === 0 ? 0 : Math.ceil(manifest.totalRows / pageSize),
+            rows: [manifest.headers, ...pageRows]
+          };
+        }
+        all = [];
+        const end2 = Math.min(manifest.totalRows, start + pageSize);
+        const last2 = manifest.totalRows === 0 ? -1 : Math.floor((end2 - 1) / KV_CHUNK_ROWS);
+        for (let c = firstChunk; c <= last2; c++) {
+          const rows = await readChunk(env, key, c);
+          if (rows) all = all.concat(rows);
+        }
+        pageRows = all.slice(start - firstChunk * KV_CHUNK_ROWS, start - firstChunk * KV_CHUNK_ROWS + pageSize);
+        return {
+          source, brand, role: me.role, filtered, cached,
+          updatedAt: manifest.updatedAt, tabs: manifest.tabs, skippedTabs: manifest.skippedTabs,
+          partial: manifest.partial, page, pageSize,
+          totalRows: manifest.totalRows,
+          totalPages: manifest.totalRows === 0 ? 0 : Math.ceil(manifest.totalRows / pageSize),
+          rows: [manifest.headers, ...pageRows]
+        };
       }
       pageRows = all.slice(start - firstChunk * KV_CHUNK_ROWS, start - firstChunk * KV_CHUNK_ROWS + pageSize);
-      return {
-        source, brand, role: me.role, filtered, cached,
-        updatedAt: manifest.updatedAt, tabs: manifest.tabs, skippedTabs: manifest.skippedTabs,
-        partial: manifest.partial, page, pageSize,
-        totalRows: manifest.totalRows,
-        totalPages: manifest.totalRows === 0 ? 0 : Math.ceil(manifest.totalRows / pageSize),
-        rows: [manifest.headers, ...pageRows]
-      };
     }
-    pageRows = all.slice(start - firstChunk * KV_CHUNK_ROWS, start - firstChunk * KV_CHUNK_ROWS + pageSize);
   }
   return {
     source, brand, role: me.role, filtered, cached,
