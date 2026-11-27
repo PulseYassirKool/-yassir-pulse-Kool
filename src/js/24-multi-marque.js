@@ -361,14 +361,23 @@
         }
         if (b.offreParticipationRules && b.offreParticipationRules.length > 0) {
           state.offreParticipationRules = b.offreParticipationRules;
+          state.offreRulesSource = 'feuille';
         } else if (brandKey === 'kool') {
           state.offreParticipationRules = loadKoolStoredOffreParticipation();
+          if (state.offreParticipationRules.length === 0) {
+            state.offreParticipationRules = getDefaultOffreParticipationRules();
+            state.offreRulesSource = 'secours';
+          } else {
+            state.offreRulesSource = 'feuille';
+          }
         } else {
           try {
             var rY = safeGet(STORAGE_KEYS.OFFRE_PARTICIPATION);
-            state.offreParticipationRules = rY ? JSON.parse(rY) : DEFAULT_OFFRE_PARTICIPATION_RULES.slice();
+            state.offreParticipationRules = rY ? JSON.parse(rY) : getDefaultOffreParticipationRules();
+            state.offreRulesSource = (rY && state.offreParticipationRules.length > 0) ? 'feuille' : 'secours';
           } catch (e) {
-            state.offreParticipationRules = DEFAULT_OFFRE_PARTICIPATION_RULES.slice();
+            state.offreParticipationRules = getDefaultOffreParticipationRules();
+            state.offreRulesSource = 'secours';
           }
         }
         // Budgets par marque : la carte de la marque active (Kool = lignes APP Kool

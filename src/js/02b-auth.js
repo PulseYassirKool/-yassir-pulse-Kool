@@ -67,6 +67,11 @@
       function applyBootstrap(boot) {
         Object.assign(LIVE_SHEETS_CONFIG, boot.config.live || {});
         Object.assign(KOOL_SHEETS_CONFIG, boot.config.kool || {});
+        // Règles de secours « Offre Participation » (audit 2026-11-27, item 5b) :
+        // servies par /api/bootstrap (clé KV `config`, champ `defaultOffreRules`).
+        if (Array.isArray(boot.config.defaultOffreRules)) {
+          window.__PULSE_DEFAULT_OFFRE_RULES__ = boot.config.defaultOffreRules;
+        }
         Object.assign(DEFAULT_COMMISSIONS_MAP, boot.defaults.commissions || {});
         Object.assign(DEFAULT_PORTFOLIOS_COMPACT, boot.defaults.portfolios || {});
         if (currentBrand === 'kool') {
@@ -74,7 +79,7 @@
           var kp = loadKoolStoredPortfolios();
           if (Object.keys(kp).length > 0) state.amPortfolios = kp;
           var ko = loadKoolStoredOffreParticipation();
-          if (ko.length > 0) state.offreParticipationRules = ko;
+          if (ko.length > 0) { state.offreParticipationRules = ko; state.offreRulesSource = 'feuille'; }
           state.budgetByAm = loadKoolStoredBudget().byAm || {};
           state.budgetGlobal = Object.values(state.budgetByAm).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
         } else {
@@ -83,6 +88,13 @@
           var yb = loadInitialBudget();
           state.budgetByAm = yb.byAm || {};
           state.budgetGlobal = Number(yb.global || 0) || Object.values(state.budgetByAm).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
+        }
+        // Les règles d'état ont été initialisées au chargement, avant le bootstrap :
+        // si elles sont vides, on applique les règles de secours du serveur.
+        if ((!state.offreParticipationRules || state.offreParticipationRules.length === 0)
+          && getDefaultOffreParticipationRules().length > 0) {
+          state.offreParticipationRules = getDefaultOffreParticipationRules();
+          state.offreRulesSource = 'secours';
         }
       }
 

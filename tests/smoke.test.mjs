@@ -184,7 +184,10 @@ const koolCsvItemsPart = toCsv([
   ['1001', '16/11/2026', 'Resto Alpha', 'Pizza', 'Pizza Margherita', 2, 12, 0, 12, 'Food'],
   ['1001', '16/11/2026', 'Resto Alpha', 'Boisson', 'Coca Cola', 1, 3, 0, 3, 'Food'],
   ['1001', '16/11/2026', 'Resto Alpha', 'Extra', 'Sauce Fromage', 1, 2, 0, 2, 'Extra'],
-  ['1002', '17/11/2026', 'Resto Alpha', 'Burger', 'Burger Classic', 1, 15, 12, 15, 'Food'],
+  // Le Burger est dans la catégorie « Super Promo » : c'est la correspondance EXACTE
+  // (audit 2026-11-27, item 5a) qui le rattache à la règle article « Super Promo » —
+  // l'ancien repli sur la première règle est supprimé.
+  ['1002', '17/11/2026', 'Resto Alpha', 'Super Promo', 'Burger Classic', 1, 15, 12, 15, 'Food'],
   ['1003', '17/11/2026', 'Resto Beta', 'Tacos', 'Tacos Poulet', 3, 9, 8, 9, 'Food']
 ]);
 const koolCsvOffrePart = toCsv([
@@ -477,6 +480,17 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '1.50 TND', 'Participation plateforme (article)');
   assert.ok(w.document.getElementById('partTableBody').textContent.includes('Resto Alpha'), 'Resto Alpha absent en vue article');
   assert.ok(!w.document.getElementById('partTableBody').textContent.includes('Resto Beta'), 'Resto Beta ne doit plus apparaître en vue article (remise sans règle)');
+
+  // Remises non attribuées (audit 2026-11-27, item 5a) : 1003 (Resto Beta, sans règle)
+  // a 3 Tacos remisés (9 → 8 × 3 = 3.00 TND) — visibles dans le bandeau, jamais
+  // rattachés à une règle, jamais dans les parts resto/plateforme.
+  const unattrBanner = w.document.getElementById('partUnattributedBanner');
+  assert.equal(unattrBanner.classList.contains('hidden'), false, 'bandeau « non attribué » masqué en vue article');
+  assert.ok(unattrBanner.textContent.includes('3.00 TND'), 'montant non attribué incorrect : ' + unattrBanner.textContent);
+  assert.ok(unattrBanner.textContent.includes('3 article'), 'nombre d’articles non attribués incorrect : ' + unattrBanner.textContent);
+  // En vue « Toute la carte », le bandeau est masqué (les non attribués ne sont suivis qu'en vue article).
+  w.yassirSetParticipationView('carte');
+  assert.equal(w.document.getElementById('partUnattributedBanner').classList.contains('hidden'), true, 'bandeau « non attribué » visible en vue carte');
 
   // Filtre de date : 16/11 uniquement → seule 1001 (carte : remise 0, plateforme min(2.55, 0) = 0, resto 0).
   w.yassirSetParticipationView('carte');
@@ -1995,5 +2009,94 @@ test('Item 4 : avertissement « modifications temporaires » visible pour le pro
   const w2 = boot();
   await login(w2, 'omar.beldi', 'Omar-Test-12345');
   assert.equal(w2.document.getElementById('commTempWarning').classList.contains('hidden'), true, 'avertissement visible pour un AM');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Item 5a (audit 2026-11-27) : correspondance EXACTE article ↔ règle ----
+test('Item 5a : association article-règle exacte, jamais par sous-chaîne, jamais de repli', () => {
+  const w = boot();
+  w.koolOrderItemsByOrderId = new Map([
+    ['cmd-1', [
+      { article: 'Pizza Margherita', category: 'Pizza', quantity: 1, unitPrice: 20, originalPrice: 20, discountPrice: 16 },
+      { article: 'Pizza Margherita XL', category: 'Pizza', quantity: 1, unitPrice: 25, originalPrice: 25, discountPrice: 20 },
+      { article: 'Tacos Poulet', category: 'Tacos', quantity: 2, unitPrice: 9, originalPrice: 9, discountPrice: 8 },
+      { article: 'Burger Classic', category: 'Super Promo', quantity: 1, unitPrice: 15, originalPrice: 15, discountPrice: 12 }
+    ]]
+  ]);
+  const regles = [
+    { restaurant: 'Resto Test', details: 'Pizza Margherita', tag: 'Discount', partPct: 10 },
+    { restaurant: 'Resto Test', details: 'Super Promo', tag: 'Pack', partPct: 0 }
+  ];
+  const res = w.yassirCalculerParticipationArticlesKool('CMD-1', regles);
+  // Pizza Margherita : règle exacte (plateforme 10 % × 20 = 2.00, resto 4.00 − 2.00 = 2.00).
+  // Burger Classic (catégorie Super Promo) : règle « Super Promo » à 0 % (resto 3.00).
+  assert.equal(res.matchedItemsCount, 2, 'articles rattachés : ' + JSON.stringify(res.breakdown));
+  assert.equal(res.costTnd, 5, 'part restaurant : ' + res.costTnd);
+  assert.equal(res.discountTotalTnd, 7, 'remise rattachée : ' + res.discountTotalTnd);
+  // « Pizza Margherita XL » n'est PAS « Pizza Margherita » (5.00) et « Tacos Poulet »
+  // n'a aucune règle (2.00) : tous deux « non attribués », jamais rattachés à une règle.
+  assert.equal(res.unattributedTnd, 7, 'montant non attribué : ' + res.unattributedTnd);
+  assert.equal(res.unattributedCount, 3, 'articles non attribués : ' + res.unattributedCount);
+  assert.equal(res.unattributedBreakdown.length, 2, 'détail non attribué incomplet');
+  // Sous-chaîne interdite : une règle « Pizza » ne doit PAS s'appliquer à « Pizza Margherita ».
+  const res2 = w.yassirCalculerParticipationArticlesKool('CMD-1', [{ restaurant: 'Resto Test', details: 'Pizza', tag: 'Discount', partPct: 50 }]);
+  assert.equal(res2.matchedItemsCount, 0, 'la règle « Pizza » a attrapé des articles par sous-chaîne');
+  assert.equal(res2.unattributedTnd, 14, 'tout doit être non attribué : ' + res2.unattributedTnd);
+  assert.equal(res2.unattributedCount, 5, 'tous les articles doivent être non attribués');
+  // Sans aucune règle : tout est non attribué (l'ancien repli sur articleRules[0] est supprimé).
+  const res3 = w.yassirCalculerParticipationArticlesKool('CMD-1', []);
+  assert.equal(res3.matchedItemsCount, 0, 'sans règle, rien ne doit être rattaché');
+  assert.equal(res3.unattributedTnd, 14, 'sans règle, tout est non attribué');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Item 5b (audit 2026-11-27) : règles de secours lues depuis /api/bootstrap ----
+test('Item 5b : règles de secours depuis la config KV (plus rien en dur) + bandeau d\u2019avertissement', async () => {
+  const prevConfig = store.get('config');
+  const reglesSecours = [{ area: 'Test', restaurant: 'resto secours', cPct: 100, tag: 'Discount', am: 'Test AM', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Secours Test' }];
+  try {
+    const cfg = JSON.parse(prevConfig);
+    cfg.defaultOffreRules = reglesSecours;
+    store.set('config', JSON.stringify(cfg));
+    const w = boot();
+    await login(w, 'proprio', 'Proprio-Test-123');
+    // Les règles de secours arrivent par le bootstrap, pas par le dépôt.
+    const lues = w.yassirGetDefaultOffreParticipationRules();
+    assert.equal(lues.length, 1, 'règles de secours non lues depuis le bootstrap');
+    assert.equal(lues[0].restaurant, 'resto secours', 'règle de secours incorrecte');
+    // Aucune règle en dur ne reste dans le code source ni dans le bundle construit.
+    const etatSrc = readFileSync('src/js/04-state.js', 'utf8');
+    assert.ok(!etatSrc.includes('route 66 menzah 6'), 'règle Black Friday encore en dur dans 04-state.js');
+    assert.ok(!etatSrc.includes('tacos chaneb nabeul'), 'règle Black Friday encore en dur dans 04-state.js');
+    assert.ok(!etatSrc.includes('DEFAULT_OFFRE_PARTICIPATION_RULES = ['), 'tableau de règles encore en dur dans 04-state.js');
+    assert.ok(!bundle.includes('route 66 menzah 6'), 'règle Black Friday encore dans le bundle');
+    // Le panneau Participation affiche l'avertissement « règles de secours ».
+    w.yassirSetParticipationView('article');
+    const fb = w.document.getElementById('partFallbackBanner');
+    assert.ok(fb, 'bandeau règles de secours absent');
+    assert.equal(fb.classList.contains('hidden'), false, 'bandeau règles de secours masqué alors que le repli est utilisé');
+    assert.ok(fb.textContent.includes('EXPIRÉES'), 'le bandeau ne dit pas que les règles sont expirées : ' + fb.textContent);
+    assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+  } finally {
+    store.set('config', prevConfig);
+  }
+});
+
+// ---- Item 5c (audit 2026-11-27) : purgerNombre, le dernier séparateur est décimal ----
+test('Item 5c : purgerNombre lit le dernier séparateur comme décimal', () => {
+  const w = boot();
+  const pn = w.yassirPurgerNombre;
+  assert.equal(pn('1,234.50'), 1234.5, 'format US 1,234.50');
+  assert.equal(pn('1.234,50'), 1234.5, 'format FR 1.234,50');
+  assert.equal(pn('1 234,50'), 1234.5, 'format FR avec espace 1 234,50');
+  assert.equal(pn('1 234 567,89'), 1234567.89, 'grands nombres avec espaces');
+  assert.equal(pn('42'), 42, 'entier simple');
+  assert.equal(pn('10.5'), 10.5, 'décimal simple point');
+  assert.equal(pn('10,5'), 10.5, 'décimal simple virgule');
+  assert.equal(pn('1,234'), 1.234, 'une seule virgule = décimale');
+  assert.equal(pn(123), 123, 'nombre déjà numérique');
+  assert.equal(pn(''), 0, 'chaîne vide');
+  assert.equal(pn(null), 0, 'null');
+  assert.equal(pn('abc'), 0, 'texte non numérique');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

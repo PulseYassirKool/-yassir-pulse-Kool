@@ -227,7 +227,7 @@
 
         var groupedMap = new Map();
         var deliveredCount = 0;
-        var totals = { totalOffres: 0, remiseTnd: 0, partRestoTnd: 0, partPlateformeTnd: 0 };
+        var totals = { totalOffres: 0, remiseTnd: 0, partRestoTnd: 0, partPlateformeTnd: 0, unattributedTnd: 0, unattributedCount: 0 };
 
         function getEntry(am, area, resto) {
           var key = am + '|||' + area + '|||' + resto;
@@ -275,6 +275,19 @@
               }
               // Sans règle « Toute la carte » : commande ignorée (remise non comptable).
             } else {
+              // Articles remisés sans règle correspondante = « non attribués »
+              // (audit 2026-11-27, item 5a) : comptés à part dans les totaux,
+              // jamais rattachés à une règle, jamais dans les parts resto/plateforme.
+              if (evK) {
+                totals.unattributedTnd += (evK.articleUnattributedTnd || 0);
+                totals.unattributedCount += (evK.articleUnattributedCount || 0);
+              } else if (dAmt > 0) {
+                // Aucune règle pour cette commande : on évalue les lignes sans
+                // règle pour mesurer les remises non attribuées.
+                var unattr = calculerParticipationArticlesCommandeKool(c[idxOrderId], []);
+                totals.unattributedTnd += (unattr.unattributedTnd || 0);
+                totals.unattributedCount += (unattr.unattributedCount || 0);
+              }
               if (evK && evK.isPromoArticle) {
                 // articlePartTnd = part restaurant (remise lignes − part plateforme,
                 // calculée sur le brut des lignes) ; la plateforme prend le reste.
@@ -337,6 +350,7 @@
         totals.remiseTnd = Number(totals.remiseTnd.toFixed(2));
         totals.partRestoTnd = Number(totals.partRestoTnd.toFixed(2));
         totals.partPlateformeTnd = Number(totals.partPlateformeTnd.toFixed(2));
+        totals.unattributedTnd = Number(totals.unattributedTnd.toFixed(2));
 
         // Note de couverture (même logique que le Top des ventes) : vue « Par article »
         // Kool sans aucune ligne alors que des commandes livrées existent sur la période.
@@ -442,6 +456,31 @@
             banner.classList.remove('hidden');
           } else {
             banner.classList.add('hidden');
+          }
+        }
+
+        // Bandeau « remises non attribuées » (audit 2026-11-27, item 5a) : visible
+        // en vue « Par article » Kool quand des remises n'ont aucune règle.
+        var unattrBanner = document.getElementById('partUnattributedBanner');
+        if (unattrBanner) {
+          var unattrTnd = Number(res.totals.unattributedTnd || 0);
+          if (isKool && res.view === 'article' && unattrTnd > 0) {
+            unattrBanner.textContent = 'Remises non attribuées : ' + unattrTnd.toFixed(2) + ' TND (' + Number(res.totals.unattributedCount || 0).toLocaleString('fr-FR') + ' article(s)) sans règle correspondante dans la feuille « Offre Participation » — elles ne sont comptées ni à la charge du restaurant, ni à celle de la plateforme. Ajoutez la règle dans la feuille puis refaites « Sync Kool ».';
+            unattrBanner.classList.remove('hidden');
+          } else {
+            unattrBanner.classList.add('hidden');
+          }
+        }
+
+        // Bandeau « règles de secours » (audit 2026-11-27, item 5b) : visible quand
+        // les règles en cours ne viennent pas de la feuille (repli Black Friday expiré).
+        var fallbackBanner = document.getElementById('partFallbackBanner');
+        if (fallbackBanner) {
+          if (state.offreRulesSource === 'secours') {
+            fallbackBanner.textContent = 'Règles de participation de secours utilisées (synchro de la feuille « Offre Participation » échouée ou jamais faite) : ce sont d’anciennes règles Black Friday, EXPIRÉES le 30 novembre 2026 — les montants peuvent être faux. Mettez les règles actuelles dans la feuille puis refaites la synchro.';
+            fallbackBanner.classList.remove('hidden');
+          } else {
+            fallbackBanner.classList.add('hidden');
           }
         }
 

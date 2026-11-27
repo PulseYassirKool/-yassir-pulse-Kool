@@ -109,41 +109,38 @@
         safeSet(STORAGE_KEYS.CRM_COMMENTS, JSON.stringify(state.crmComments));
       }
 
-      // Règles pré-chargées depuis la feuille "offre participation" (Black Friday / campagnes)
-      var DEFAULT_OFFRE_PARTICIPATION_RULES = [
-        { area: 'El Menzah', restaurant: 'route 66 menzah 6', cPct: 100, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Bardo', restaurant: 'route 66 bardo', cPct: 100, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Megrine', restaurant: 'route 66 megrine', cPct: 100, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Ezzahra Boumhal', restaurant: 'route 66 ezzahra', cPct: 100, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'La Marsa', restaurant: 'route 66 jardin de carthage', cPct: 100, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Ezzahra Boumhal', restaurant: 'route 66 ben arous', cPct: 100, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Mourouj', restaurant: 'tacos chaneb mourouj', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Megrine', restaurant: 'tacos chaneb megrine', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Bardo', restaurant: 'tacos chaneb bardo', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Centre ville', restaurant: 'tacos chaneb central park', cPct: 15, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'El Menzah', restaurant: 'tacos chaneb ennasr', cPct: 15, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'El Menzah', restaurant: 'tacos chaneb ariana', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Les Berges du Lac', restaurant: 'tacos chaneb aouina', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'La Marsa', restaurant: 'tacos chaneb marsa', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Nabeul', restaurant: 'tacos chaneb nabeul', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Ezzahra Boumhal', restaurant: 'tacos chaneb ezzahra', cPct: 20, tag: 'Discount', am: 'Aziza Souli', partPct: 10, startDate: '2026-11-16', endDate: '2026-11-30', periode: 'Black Friday' },
-        { area: 'Mourouj', restaurant: 'tacos chaneb mourouj', cPct: 20, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'Megrine', restaurant: 'tacos chaneb megrine', cPct: 20, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'Bardo', restaurant: 'tacos chaneb bardo', cPct: 20, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'Centre ville', restaurant: 'tacos chaneb central park', cPct: 15, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'El Menzah', restaurant: 'tacos chaneb ennasr', cPct: 15, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'El Menzah', restaurant: 'tacos chaneb ariana', cPct: 20, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'Les Berges du Lac', restaurant: 'tacos chaneb aouina', cPct: 20, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'La Marsa', restaurant: 'tacos chaneb marsa', cPct: 20, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' },
-        { area: 'Nabeul', restaurant: 'tacos chaneb nabeul', cPct: 20, tag: 'Pack', am: 'Aziza Souli', partPct: 0, startDate: '2026-11-01', endDate: '2026-11-15', periode: 'Black Friday' }
-      ];
+      // Règles de secours « Offre Participation » (audit 2026-11-27, item 5b) :
+      // elles ne sont PLUS dans le dépôt public — elles arrivent par /api/bootstrap
+      // (clé KV `config`, champ `defaultOffreRules`) et sont lues ici via
+      // window.__PULSE_DEFAULT_OFFRE_RULES__ (rempli dans applyBootstrap, 02b-auth.js).
+      // ATTENTION : ce sont d'anciennes règles Black Friday, EXPIRÉES le 30 novembre
+      // 2026 — elles ne servent que de repli quand la synchro de la feuille a échoué
+      // ou n'a jamais eu lieu ; l'utilisateur doit fournir les règles actuelles
+      // dans la feuille Google Sheets « Offre Participation ».
+      function getDefaultOffreParticipationRules() {
+        var rules = (typeof window !== 'undefined' && Array.isArray(window.__PULSE_DEFAULT_OFFRE_RULES__))
+          ? window.__PULSE_DEFAULT_OFFRE_RULES__
+          : [];
+        return rules.slice();
+      }
+      window.yassirGetDefaultOffreParticipationRules = getDefaultOffreParticipationRules;
 
       state.offreParticipationRules = (function () {
         try {
           var r = safeGet(STORAGE_KEYS.OFFRE_PARTICIPATION);
           if (r) { var p = JSON.parse(r); if (Array.isArray(p) && p.length > 0) return p; }
         } catch (e) {}
-        return DEFAULT_OFFRE_PARTICIPATION_RULES.slice();
+        return getDefaultOffreParticipationRules();
+      })();
+      // Origine des règles en cours : 'feuille' (synchro réussie, règles stockées
+      // localement) ou 'secours' (repli ci-dessus). Sert au bandeau d'avertissement
+      // du panneau Participation.
+      state.offreRulesSource = (function () {
+        try {
+          var r = safeGet(STORAGE_KEYS.OFFRE_PARTICIPATION);
+          if (r) { var p = JSON.parse(r); if (Array.isArray(p) && p.length > 0) return 'feuille'; }
+        } catch (e) {}
+        return 'secours';
       })();
       state.offrePartSheetId = safeGet(STORAGE_KEYS.OFFRE_PART_SHEET_ID) || '';
 
@@ -311,6 +308,7 @@
             var rules = parseOffreParticipationRows(rows, 'Yassir');
             if (rules.length > 0) {
               state.offreParticipationRules = rules;
+              state.offreRulesSource = 'feuille';
               saveOffreParticipationToStore();
             }
             if (icon) icon.classList.remove('fa-spin');
@@ -387,15 +385,18 @@
 
       // Calcul de participation d'offre sur les articles d'une commande Kool (détails Sheet 15D9KM6G...)
       function calculerParticipationArticlesCommandeKool(orderId, articleRules) {
-        if (!orderId || !window.koolOrderItemsByOrderId) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [] };
+        if (!orderId || !window.koolOrderItemsByOrderId) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [], unattributedTnd: 0, unattributedCount: 0, unattributedBreakdown: [] };
         var oidKey = String(orderId).trim().toLowerCase();
         var items = window.koolOrderItemsByOrderId.get(oidKey);
-        if (!items || items.length === 0) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [] };
+        if (!items || items.length === 0) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [], unattributedTnd: 0, unattributedCount: 0, unattributedBreakdown: [] };
 
         var costTnd = 0;
         var discountTotalTnd = 0;
         var matchedItemsCount = 0;
         var breakdown = [];
+        var unattributedTnd = 0;
+        var unattributedCount = 0;
+        var unattributedBreakdown = [];
 
         for (var i = 0; i < items.length; i++) {
           var it = items[i];
@@ -403,7 +404,7 @@
           if (origLineTotal <= 0) continue;
 
           var catNorm = normalizeText(it.category);
-          var artNorm = normalizeText(it.article);
+          var artNorm = normalizeNomArticle(it.article);
           var isDiscountedItem = (it.discountPrice > 0 && it.discountPrice < (it.originalPrice || it.unitPrice)) || catNorm.includes('super promo');
           // Remise réellement accordée sur la ligne : (prix original − prix remisé) × quantité.
           var effUnitPrice = (it.discountPrice > 0 && it.discountPrice < (it.originalPrice || it.unitPrice))
@@ -411,22 +412,38 @@
             : (it.unitPrice || it.originalPrice || 0);
           var lineDiscountTnd = Math.max(0, (origLineTotal - effUnitPrice * (it.quantity || 1)));
 
-          // Chercher une règle article correspondante (par nom d'article/détail, Super Promo, ou règle article générique du restaurant)
+          // Correspondance EXACTE (audit 2026-11-27, item 5a) : le nom de l'article
+          // normalisé doit être ÉGAL au libellé de la règle (détails + tag), jamais
+          // une sous-chaîne, et JAMAIS de repli sur la première règle. Un article
+          // remisé sans règle correspondante reste « non attribué » : compté à part
+          // (unattributedTnd / unattributedCount), jamais rattaché silencieusement
+          // à une autre règle.
           var appliedRule = null;
           for (var j = 0; j < articleRules.length; j++) {
             var rl = articleRules[j];
-            var detNorm = normalizeText((rl.details || '') + ' ' + (rl.tag || ''));
-            if (detNorm && artNorm && detNorm.includes(artNorm)) {
+            var detDetailsNorm = normalizeNomArticle(rl.details || '');
+            var detTagNorm = normalizeNomArticle(rl.tag || '');
+            if (artNorm && (artNorm === detDetailsNorm || artNorm === detTagNorm)) {
               appliedRule = rl;
               break;
             }
-            if (catNorm.includes('super promo') && (detNorm.includes('super promo') || detNorm.includes('pack') || detNorm.includes('article'))) {
+            if (normalizeNomArticle(catNorm) === 'super promo'
+              && (detDetailsNorm === 'super promo' || detTagNorm === 'super promo'
+                || detDetailsNorm === 'pack' || detTagNorm === 'pack')) {
               appliedRule = rl;
               break;
             }
           }
-          if (!appliedRule && isDiscountedItem && articleRules.length > 0) {
-            appliedRule = articleRules[0];
+          if (!appliedRule && isDiscountedItem && lineDiscountTnd > 0) {
+            unattributedTnd += lineDiscountTnd;
+            unattributedCount += (it.quantity || 1);
+            unattributedBreakdown.push({
+              article: it.article,
+              category: it.category,
+              quantity: it.quantity || 1,
+              originalTotal: origLineTotal,
+              discountTnd: Number(lineDiscountTnd.toFixed(3))
+            });
           }
 
           // Règle corrigée (2026-11-26) : partPct = points du taux de l'offre pris en
@@ -455,12 +472,24 @@
           costTnd: Number(costTnd.toFixed(3)),
           discountTotalTnd: Number(discountTotalTnd.toFixed(3)),
           matchedItemsCount: matchedItemsCount,
-          breakdown: breakdown
+          breakdown: breakdown,
+          unattributedTnd: Number(unattributedTnd.toFixed(3)),
+          unattributedCount: unattributedCount,
+          unattributedBreakdown: unattributedBreakdown
         };
+      }
+
+      // Normalisation stricte pour la comparaison exacte des noms d'articles
+      // (audit 2026-11-27, item 5a) : minuscules, accents retirés, espaces
+      // multiples réduits à un seul espace.
+      function normalizeNomArticle(s) {
+        return normalizeText(s).replace(/\s+/g, ' ').trim();
       }
 
       // Exposé pour la section Participation (vue « Par article » Kool) et les tests.
       window.yassirCalculerParticipationArticlesKool = calculerParticipationArticlesCommandeKool;
+      // Exposé pour les tests (audit 2026-11-27, item 5c).
+      window.yassirPurgerNombre = purgerNombre;
 
       // Évaluation ultra-rapide des offres & participation Kool (Toute la carte + Offres sur articles)
       function evaluerOffreKoolPourCommande(restoName, orderDayVal, orderIdVal) {
@@ -521,6 +550,8 @@
           articlePartTnd: articleEval.costTnd,
           articleDiscountTnd: articleEval.discountTotalTnd || 0,
           articleBreakdown: articleEval.breakdown,
+          articleUnattributedTnd: articleEval.unattributedTnd || 0,
+          articleUnattributedCount: articleEval.unattributedCount || 0,
           label: formaterLibelleOffreKool(best)
         };
         if (_koolRulesIndex.evalCache.size > 50000) _koolRulesIndex.evalCache.clear();
@@ -703,11 +734,25 @@
         return /delivered/i.test(String(statusVal || '').trim());
       }
 
+      // Lecture explicite selon le format (audit 2026-11-27, item 5c) : le séparateur
+      // décimal est le DERNIER séparateur de la chaîne — « 1,234.50 » → 1234.50,
+      // « 1.234,50 » → 1234.50, « 1 234,50 » → 1234.50 ; les autres séparateurs
+      // (milliers, espaces) sont supprimés. Nombres simples inchangés.
       function purgerNombre(val) {
         if (val === null || val === undefined || val === '') return 0;
         if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
-        var str = String(val).replace(/,/g, '.').replace(/\s+/g, '');
-        var parsed = parseFloat(str);
+        var str = String(val).replace(/\s+/g, '');
+        if (!str) return 0;
+        var lastComma = str.lastIndexOf(',');
+        var lastDot = str.lastIndexOf('.');
+        var decPos = Math.max(lastComma, lastDot);
+        if (decPos === -1) {
+          var entier = parseFloat(str.replace(/[^0-9\-+]/g, ''));
+          return Number.isFinite(entier) ? entier : 0;
+        }
+        var partieEntiere = str.slice(0, decPos).replace(/[^0-9\-+]/g, '');
+        var partieDecimale = str.slice(decPos + 1).replace(/[^0-9]/g, '');
+        var parsed = parseFloat(partieEntiere + '.' + partieDecimale);
         return Number.isFinite(parsed) ? parsed : 0;
       }
 
