@@ -232,6 +232,7 @@
         var commReadOnlyCardInfo = document.getElementById('commReadOnlyCardInfo');
         var ownerCommHeaderActions = document.getElementById('ownerCommHeaderActions');
         var formAddCommission = document.getElementById('formAddCommission');
+        var commTempWarning = document.getElementById('commTempWarning');
         var commReadOnlyBanner = document.getElementById('commReadOnlyBanner');
         var thCommActions = document.getElementById('thCommActions');
         var btnOpenCommTabLabel = document.getElementById('btnOpenCommTabLabel');
@@ -260,6 +261,7 @@
           commReadOnlyCardInfo.classList.add('hidden');
           ownerCommHeaderActions.classList.remove('hidden');
           formAddCommission.classList.remove('hidden');
+          if (commTempWarning) commTempWarning.classList.remove('hidden');
           commReadOnlyBanner.classList.add('hidden');
           thCommActions.classList.remove('hidden');
           btnOpenCommTabLabel.textContent = 'Voir / Éditer les taux de commission';
@@ -283,6 +285,7 @@
           commReadOnlyCardInfo.classList.remove('hidden');
           ownerCommHeaderActions.classList.add('hidden');
           formAddCommission.classList.add('hidden');
+          if (commTempWarning) commTempWarning.classList.add('hidden');
           commReadOnlyBanner.classList.remove('hidden');
           thCommActions.classList.add('hidden');
           btnOpenCommTabLabel.textContent = 'Consulter la grille des commissions';
@@ -305,6 +308,7 @@
           commReadOnlyCardInfo.classList.remove('hidden');
           ownerCommHeaderActions.classList.add('hidden');
           formAddCommission.classList.add('hidden');
+          if (commTempWarning) commTempWarning.classList.add('hidden');
           commReadOnlyBanner.classList.remove('hidden');
           thCommActions.classList.add('hidden');
           btnOpenCommTabLabel.textContent = 'Consulter la grille des commissions';
@@ -328,6 +332,7 @@
           commReadOnlyCardInfo.classList.remove('hidden');
           ownerCommHeaderActions.classList.add('hidden');
           formAddCommission.classList.add('hidden');
+          if (commTempWarning) commTempWarning.classList.add('hidden');
           commReadOnlyBanner.classList.remove('hidden');
           thCommActions.classList.add('hidden');
           btnOpenCommTabLabel.textContent = 'Consulter la grille des commissions';

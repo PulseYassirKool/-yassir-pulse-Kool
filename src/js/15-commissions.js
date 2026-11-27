@@ -76,11 +76,22 @@
         showToast('Liste des commissions personnalisées vidée.', 'info');
       };
 
+      // Relecture de la VRAIE feuille Google Sheets (audit item 4) : l'ancien
+      // code rechargeait l'instantané figé du KV (bootstrap), pas la feuille.
+      // En échec, la grille actuelle est conservée (jamais vidée).
       window.yassirSyncDefaultCommissions = function () {
-        if (!isOwnerAdmin()) return;
-        state.customCommissions = Object.assign({}, DEFAULT_COMMISSIONS_MAP);
-        saveCommissionsToStore();
-        executerTraitementMetier();
-        window.yassirRenderCommTable();
-        showToast('Grille Google Sheets restaurée (<strong>' + Object.keys(state.customCommissions).length + ' restaurants</strong>).', 'success');
+        if (!isOwnerAdmin()) return Promise.resolve(false);
+        var brand = (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? 'kool' : 'yassir';
+        return window.yassirLireCommissionsDepuisFeuille(brand).then(function (res) {
+          if (!res.ok || res.count === 0) {
+            showToast('Relecture de la feuille Google Sheets impossible : vos taux actuels sont conservés. Vérifiez le partage de la feuille.', 'error');
+            return false;
+          }
+          state.customCommissions = Object.assign({}, res.map);
+          saveCommissionsToStore();
+          executerTraitementMetier();
+          window.yassirRenderCommTable();
+          showToast('Grille relue depuis Google Sheets (<strong>' + res.count + ' restaurants</strong>).', 'success');
+          return true;
+        });
       };

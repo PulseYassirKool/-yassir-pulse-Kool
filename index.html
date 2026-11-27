@@ -284,6 +284,10 @@
       <form onsubmit="return window.yassirSubmitEditResto(event);" class="p-6 space-y-4">
         <input type="hidden" id="editRestoOriginalKey" />
 
+        <div class="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800">
+          <i class="fa-solid fa-triangle-exclamation mr-1"></i> Modification temporaire : enregistrée seulement dans ce navigateur, elle sera écrasée à la prochaine synchronisation.
+        </div>
+
         <div>
           <label for="editRestoName" class="block text-xs font-bold text-[#1A1A2E] mb-1">Nom du restaurant</label>
           <input id="editRestoName" type="text" required class="w-full px-4 py-2.5 text-sm bg-[#F8F9FC] border border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#6C2BD9]" />
@@ -2293,6 +2297,9 @@
 
           <!-- Zone d'administration réservée au PROPRIÉTAIRE ADMIN (Ajouter / Importer / Modifier / Supprimer) -->
           <div id="ownerPortfolioAdminSection" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-4 bg-[#F8F9FC] p-4 sm:p-5 rounded-2xl border border-purple-100">
+            <div class="lg:col-span-12 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800">
+              <i class="fa-solid fa-triangle-exclamation mr-1"></i> Modifications temporaires : un restaurant ajouté, modifié ou supprimé ici n'existe que dans ce navigateur. Il sera écrasé à la prochaine synchronisation. Pour un changement durable, modifiez la feuille Google Sheets des portefeuilles.
+            </div>
             <form id="formAddRestoAm" onsubmit="return window.yassirAddRestoToAm(event);" class="lg:col-span-7 space-y-3">
               <div class="flex items-center gap-2">
                 <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#FF2A6D] text-white">Action Propriétaire Admin</span>
@@ -2509,12 +2516,17 @@
             </div>
             <div id="ownerCommHeaderActions" class="hidden flex flex-wrap items-center gap-2 shrink-0">
               <button type="button" onclick="window.yassirSyncDefaultCommissions()" class="px-3.5 py-2 rounded-full text-xs font-bold bg-[#00BFA5] text-[#1A1A2E] hover:bg-teal-400 cursor-pointer">
-                <i class="fa-solid fa-rotate mr-1"></i> Restaurer grille Sheet
+                <i class="fa-solid fa-rotate mr-1"></i> Recharger depuis Google Sheets
               </button>
               <button id="btnClearCommissions" type="button" onclick="window.yassirClearCommissions()" class="px-3.5 py-2 rounded-full text-xs font-bold bg-white text-[#FF2A6D] border border-pink-200 hover:bg-pink-50 cursor-pointer">
                 <i class="fa-solid fa-trash-can mr-1"></i> Vider
               </button>
             </div>
+          </div>
+
+          <!-- Avertissement (audit item 4) : les modifications sont temporaires. -->
+          <div id="commTempWarning" class="hidden px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800">
+            <i class="fa-solid fa-triangle-exclamation mr-1"></i> Modifications temporaires : un taux ajouté, modifié ou supprimé ici n'existe que dans ce navigateur. Il sera écrasé à la prochaine synchronisation. Pour un changement durable, modifiez la feuille Google Sheets « Commissions ».
           </div>
 
           <!-- Formulaire ajout/modification réservé au Propriétaire Admin -->

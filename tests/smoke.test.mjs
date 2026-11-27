@@ -44,7 +44,7 @@ store.set('accounts', JSON.stringify([
   { username: 'proprio', hash: await hashPassword('Proprio-Test-123'), role: 'owner', displayName: 'Propriétaire Admin', amName: null, protected: true },
   { username: 'omar.beldi', hash: await hashPassword('Omar-Test-12345'), role: 'am', displayName: 'Omar Beldi', amName: 'Omar Beldi', protected: true }
 ]));
-store.set('config', JSON.stringify({ live: seed.live, kool: koolCfg }));
+store.set('config', JSON.stringify({ live: { ...seed.live, COMMISSIONS_SHEET_ID: 'COMM_TEST_ID_000000000001', COMMISSIONS_GID: '9', COMMISSIONS_TAB: 'Commissions' }, kool: koolCfg }));
 store.set('defaults', JSON.stringify({ commissions: seed.commissions, portfolios: seed.portfolios }));
 
 const html = readFileSync('index.html', 'utf8').replace(/<script type="module"[^>]*><\/script>/, '').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
@@ -1945,4 +1945,55 @@ test('Semaines : options générées en JavaScript, 2026 inchangées, 2027 prés
   assert.equal(values.length, 1 + nbSemainesISO(annee - 1) + nbSemainesISO(annee) + nbSemainesISO(annee + 1), 'nombre d\'options incorrect');
   assert.equal(values[1].split('|')[2], 'S01', 'première semaine incorrecte');
   assert.ok(values[values.length - 1].endsWith('|S' + String(nbSemainesISO(annee + 1)).padStart(2, '0')), 'dernière semaine incorrecte');
+});
+
+// ---- Item 4 (audit 2026-11-27) : bouton « Recharger depuis Google Sheets » ----
+test('Item 4 : le bouton relit la vraie feuille (pas l\u2019instantané KV), échec = grille conservée', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  w.yassirRenderCommTable(); // la table n'est rendue qu'à l'ouverture de l'onglet
+  const corps = () => w.document.getElementById('commTableBody').textContent;
+  // Marqueur dans la grille actuelle (instantané) : il doit disparaître après relecture.
+  // (Ne pas supposer le contenu de la grille initiale : il vient de private/seed.json en local, du repli simulé en CI.)
+  w.document.getElementById('inputNewRestName').value = 'marqueur test unique';
+  w.document.getElementById('inputNewRestRate').value = '42';
+  w.yassirAddCommission();
+  assert.ok(corps().includes('marqueur test unique'), 'marqueur non ajouté à la grille');
+  // La feuille simulée renvoie 2 taux, dont un nouveau restaurant.
+  const origFetch = w.fetch;
+  w.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('COMM_TEST_ID_000000000001')) {
+      return { ok: true, status: 200, text: async () => 'Restaurant,Commission,APP\nResto Test,23.5,Yassir\nResto Deux,10,Yassir\n' };
+    }
+    return origFetch(url, opts);
+  };
+  const ok = await w.yassirSyncDefaultCommissions();
+  assert.equal(ok, true, 'la relecture a échoué');
+  assert.ok(corps().includes('resto test'), 'le nouveau taux de la feuille n\u2019est pas dans la grille');
+  assert.ok(corps().includes('23.50'), 'le taux relu (23.50) est absent');
+  assert.ok(!corps().includes('marqueur test unique'), 'l\u2019ancienne grille (instantané KV) est toujours là');
+  assert.ok(w.document.body.innerHTML.includes('Recharger depuis Google Sheets'), 'libellé du bouton incorrect');
+  assert.ok(!w.document.body.innerHTML.includes('Restaurer grille Sheet'), 'ancien libellé trompeur toujours présent');
+  // Échec de lecture : la grille actuelle est conservée, jamais vidée.
+  w.fetch = async (url, opts) => origFetch(url, opts);
+  const ok2 = await w.yassirSyncDefaultCommissions();
+  assert.equal(ok2, false, 'la relecture en échec devrait renvoyer false');
+  assert.ok(corps().includes('resto test'), 'la grille a été vidée après un échec de lecture');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Item 4 : avertissement « modifications temporaires » visible pour le proprio, masqué pour les AM', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  const warn = w.document.getElementById('commTempWarning');
+  assert.ok(warn, 'bandeau d\u2019avertissement commissions absent');
+  assert.equal(warn.classList.contains('hidden'), false, 'avertissement masqué pour le proprio');
+  assert.ok(warn.textContent.includes('temporaires'), 'texte d\u2019avertissement commissions incorrect');
+  assert.ok(w.document.getElementById('ownerPortfolioAdminSection').textContent.includes('temporaires'), 'avertissement portefeuilles absent');
+  assert.ok(w.document.getElementById('editRestoModal').textContent.includes('temporaire'), 'avertissement modale édition absent');
+  const w2 = boot();
+  await login(w2, 'omar.beldi', 'Omar-Test-12345');
+  assert.equal(w2.document.getElementById('commTempWarning').classList.contains('hidden'), true, 'avertissement visible pour un AM');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

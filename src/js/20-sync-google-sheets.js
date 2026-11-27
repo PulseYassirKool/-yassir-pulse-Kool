@@ -457,6 +457,32 @@
       }
       window.yassirParseCommissionRows = parseCommissionRows;
 
+      // Lecture des commissions depuis la VRAIE feuille Google Sheets (audit
+      // item 4) : l'ancien « Restaurer grille Sheet » rechargeait l'instantané
+      // figé du KV (bootstrap), pas la feuille. Renvoie { ok, count, map } ;
+      // en échec, ok=false et la grille actuelle doit être conservée (jamais
+      // vidée par l'appelant).
+      function lireCommissionsDepuisFeuille(brand) {
+        var isKool = brand === 'kool';
+        var sheetId = isKool ? KOOL_SHEETS_CONFIG.COMMISSION_SHEET_ID : LIVE_SHEETS_CONFIG.COMMISSIONS_SHEET_ID;
+        var gid = isKool ? KOOL_SHEETS_CONFIG.COMMISSION_GID : LIVE_SHEETS_CONFIG.COMMISSIONS_GID;
+        var tab = isKool ? KOOL_SHEETS_CONFIG.COMMISSION_TAB : LIVE_SHEETS_CONFIG.COMMISSIONS_TAB;
+        var brandFilter = isKool ? 'Kool' : 'Yassir';
+        if (!sheetId) return Promise.resolve({ ok: false, count: 0, map: {} });
+        return fetchGoogleSheetByGidSmart(sheetId, gid, tab)
+          .catch(function () {
+            return fetchGoogleSheetTabSmart(sheetId, tab, ['Sheet1', 'Feuille 1'], gid);
+          })
+          .then(function (rows) {
+            if (!rows || rows.length < 2) throw new Error('Feuille Commissions vide');
+            var parsed = parseCommissionRows(rows, brandFilter);
+            if (parsed.count === 0) throw new Error('Aucune commission lue');
+            return { ok: true, count: parsed.count, map: parsed.map };
+          })
+          .catch(function () { return { ok: false, count: 0, map: {} }; });
+      }
+      window.yassirLireCommissionsDepuisFeuille = lireCommissionsDepuisFeuille;
+
       function fetchGoogleSheetByGidSmart(sheetId, gid, fallbackTab) {
         var exportCsvUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) +
                            '/export?format=csv&gid=' + encodeURIComponent(gid) + '&_t=' + Date.now();
@@ -1063,22 +1089,9 @@
             });
           });
 
-        // 2. Synchronisation stricte des Commissions Yassir depuis <sheet-id> (gid=1643627186)
-        var commPromise = fetchGoogleSheetByGidSmart(
-          LIVE_SHEETS_CONFIG.COMMISSIONS_SHEET_ID,
-          LIVE_SHEETS_CONFIG.COMMISSIONS_GID,
-          LIVE_SHEETS_CONFIG.COMMISSIONS_TAB
-        )
-          .catch(function () {
-            return fetchGoogleSheetTabSmart(
-              LIVE_SHEETS_CONFIG.COMMISSIONS_SHEET_ID,
-              LIVE_SHEETS_CONFIG.COMMISSIONS_TAB,
-              ['Sheet1', 'Feuille 1'],
-              LIVE_SHEETS_CONFIG.COMMISSIONS_GID
-            );
-          })
-          .then(function (rows) { return { rows: rows, ok: true }; })
-          .catch(function () { return { rows: [], ok: false }; });
+        // 2. Synchronisation stricte des Commissions Yassir depuis la feuille
+        // (même lecteur que le bouton « Recharger depuis Google Sheets »).
+        var commPromise = lireCommissionsDepuisFeuille('Yassir');
 
         return Promise.all([portfoliosPromise, commPromise]).then(function (results) {
           var pResult = results[0];
@@ -1096,16 +1109,13 @@
           }
 
           var updatedCommCount = 0;
-          if (commResult.ok && commResult.rows && commResult.rows.length > 1) {
-            var parsedComm = parseCommissionRows(commResult.rows, 'Yassir');
-            var freshComm = parsedComm.map;
-            updatedCommCount = parsedComm.count;
-            if (updatedCommCount > 0) {
-              safeSet(STORAGE_KEYS.COMMISSIONS, JSON.stringify(freshComm));
-              brandArchives.yassir.customCommissions = Object.assign({}, freshComm);
-              if (currentBrand === 'yassir') {
-                state.customCommissions = Object.assign({}, freshComm);
-              }
+          if (commResult.ok && commResult.count > 0) {
+            var freshComm = commResult.map;
+            updatedCommCount = commResult.count;
+            safeSet(STORAGE_KEYS.COMMISSIONS, JSON.stringify(freshComm));
+            brandArchives.yassir.customCommissions = Object.assign({}, freshComm);
+            if (currentBrand === 'yassir') {
+              state.customCommissions = Object.assign({}, freshComm);
             }
           }
 
