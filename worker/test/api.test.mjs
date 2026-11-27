@@ -204,6 +204,23 @@ test('limitation des connexions : 5 essais en parallèle ne contournent plus le 
   assert.equal((await callDo('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 429);
 });
 
+test("journal d'activité : un utilisateur ne peut pas envoyer plus de 50 événements par heure", async () => {
+  kvStore.delete('activity_log');
+  for (const k of [...kvStore.keys()]) if (k.startsWith('actrl:')) kvStore.delete(k);
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  for (let i = 0; i < 50; i++) {
+    assert.equal((await call('POST', '/api/activity', { type: 'export', detail: 'Export ' + i }, am)).status, 200, 'événement ' + (i + 1) + ' accepté');
+  }
+  assert.equal((await call('POST', '/api/activity', { type: 'export', detail: 'Export 51' }, am)).status, 429, '51e événement refusé');
+  // Le journal garde les 50 événements + la connexion : rien n'est effacé par le flood.
+  const list = JSON.parse(kvStore.get('activity_log'));
+  assert.equal(list.length, 51, 'le journal n\'a pas été inondé');
+  assert.ok(list.some((e) => e.type === 'login'), 'la connexion est toujours dans le journal');
+});
+
 test('changement de mot de passe par le proprio -> ancien jeton AM rejeté, nouveau mot de passe accepté', async () => {
   kvStore.set('accounts', JSON.stringify([
     { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },

@@ -67,6 +67,7 @@ const saveAccounts = (env, list) => env.PULSE_KV.put('accounts', JSON.stringify(
 // requête principale : appendActivity ne rejette jamais.
 const ACTIVITY_LOG_KEY = 'activity_log';
 const ACTIVITY_MAX = 500;
+const ACTIVITY_MAX_PER_HOUR = 50; // par utilisateur (audit item 7) : anti-flood du journal
 const ACTIVITY_TYPES = ['login', 'logout', 'login_fail', 'export', 'alerte'];
 async function appendActivity(env, entry) {
   try {
@@ -142,24 +143,26 @@ export class RateLimiter {
   }
 }
 
-// Enregistre une tentative de connexion et dit si elle est autorisée.
-// Avec l'objet durable, la tentative est comptée avant la vérification du
-// mot de passe (comme le compteur KV avant) — les essais en parallèle ne
-// peuvent plus passer entre la lecture et l'écriture.
-async function rlCheck(env, rlKey) {
-  if (!env.RATE_LIMITER) {
-    const fails = Number(await env.PULSE_KV.get(rlKey)) || 0;
-    return { allowed: fails < MAX_FAILS, useDo: false, fails };
+// Enregistre une tentative et dit si elle est autorisée (compteur <= max
+// dans la fenêtre). Avec l'objet durable, lecture + incrément atomiques ;
+// repli KV sinon (le compteur est alors incrémenté ici). Le limiteur ne
+// doit jamais empêcher une action légitime : en cas d'erreur, on laisse passer.
+async function rlCheck(env, rlKey, max = MAX_FAILS, windowMs = LOCK_SECONDS * 1000) {
+  if (env.RATE_LIMITER) {
+    try {
+      const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(rlKey));
+      const r = await stub.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({ key: rlKey, max, windowMs }) }));
+      const j = await r.json().catch(() => ({}));
+      return { allowed: j.allowed !== false, useDo: true };
+    } catch (e) { /* repli KV ci-dessous */ }
   }
   try {
-    const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(rlKey));
-    const r = await stub.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({ key: rlKey, max: MAX_FAILS, windowMs: LOCK_SECONDS * 1000 }) }));
-    const j = await r.json().catch(() => ({}));
-    return { allowed: j.allowed !== false, useDo: true, fails: 0 };
+    const count = Number(await env.PULSE_KV.get(rlKey)) || 0;
+    if (count >= max) return { allowed: false, useDo: false };
+    await env.PULSE_KV.put(rlKey, String(count + 1), { expirationTtl: Math.ceil(windowMs / 1000) });
+    return { allowed: true, useDo: false };
   } catch (e) {
-    // Le limiteur ne doit jamais empêcher une connexion légitime.
-    const fails = Number(await env.PULSE_KV.get(rlKey)) || 0;
-    return { allowed: fails < MAX_FAILS, useDo: false, fails };
+    return { allowed: true, useDo: false };
   }
 }
 async function rlReset(env, rlKey, useDo) {
@@ -215,7 +218,6 @@ export async function handle(request, env) {
     // Même coût de calcul que le compte existe ou non (évite de révéler quels identifiants existent).
     const result = account ? await verifyPassword(account, password, env) : (await pbkdf2(password, new Uint8Array(16)), { ok: false });
     if (!result.ok) {
-      if (!rl.useDo) await env.PULSE_KV.put(rlKey, String(rl.fails + 1), { expirationTtl: LOCK_SECONDS });
       // Tentative échouée sur un compte existant (hors propriétaire) : journalisée.
       // Jamais de mot de passe dans le journal, ni de journalisation si le compte n'existe pas.
       if (account && account.role !== 'owner') {
@@ -269,6 +271,11 @@ export async function handle(request, env) {
       const type = String(b.type || '');
       const detail = String(b.detail || '').slice(0, 200);
       if (!ACTIVITY_TYPES.includes(type) || !detail) return fail(400, 'Événement invalide.');
+      // Limite anti-flood (audit item 7) : 50 événements par heure et par
+      // utilisateur — un AM ne peut pas inonder le journal et effacer ses traces.
+      const bucket = Math.floor(Date.now() / 3600000);
+      const actrl = await rlCheck(env, `actrl:${me.username}:${bucket}`, ACTIVITY_MAX_PER_HOUR, 3600000);
+      if (!actrl.allowed) return fail(429, 'Trop d\'événements, réessayez plus tard.');
       await appendActivity(env, { ts: Date.now(), user: me.username, type, detail });
       return reply({ ok: true });
     }
