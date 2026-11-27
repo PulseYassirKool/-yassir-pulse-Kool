@@ -888,10 +888,22 @@ const notifHeader = new Array(33).fill('');
 notifHeader[0] = 'Annulé'; notifHeader[2] = 'Raison annulation'; notifHeader[3] = 'Date';
 notifHeader[4] = 'N° commande'; notifHeader[6] = 'Restaurant';
 notifHeader[9] = 'Montant HT'; notifHeader[10] = 'Frais livraison'; notifHeader[11] = 'Remise';
+// Dates décalées : ces données ont été écrites le 26/11/2026, avec une
+// dernière donnée le 22/11 (donc « 4 jours » d'ancienneté). Sans décalage,
+// l'alerte « données anciennes » affiche 5 jours le 27/11, 6 le 28/11…
+// et le test casse dès minuit. Le décalage garde la position relative
+// exacte (dernière donnée = aujourd'hui − 4 jours, fin d'offre =
+// aujourd'hui − 3 jours) ; toutes les dates du test sont décalées ensemble.
+const _notifDecalageJours = Math.max(0, Math.floor((Date.now() - new Date(2026, 10, 26).getTime()) / 86400000));
+const _notifDate = (s) => {
+  const [jj, mm, aaaa] = s.split('/').map(Number);
+  const d = new Date(aaaa, mm - 1, jj + _notifDecalageJours);
+  return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+};
 const notifDataRows = [notifHeader];
 {
   let oid = 5000;
-  const addDeliv = (date, resto, n) => { for (let i = 0; i < n; i++) notifDataRows.push(notifRow(date, String(++oid), resto, '20.00', '3', '0')); };
+  const addDeliv = (date, resto, n) => { for (let i = 0; i < n; i++) notifDataRows.push(notifRow(_notifDate(date), String(++oid), resto, '20.00', '3', '0')); };
   ['16/11/2026', '17/11/2026', '18/11/2026', '19/11/2026', '20/11/2026', '21/11/2026', '22/11/2026'].forEach((d) => addDeliv(d, 'Resto Alpha', 1));
   addDeliv('16/11/2026', 'Resto Beta', 1);
   addDeliv('17/11/2026', 'Resto Beta', 1);
@@ -899,11 +911,11 @@ const notifDataRows = [notifHeader];
   addDeliv('21/11/2026', 'Resto Gamma', 3);
   addDeliv('22/11/2026', 'Resto Gamma', 1);
   ['16/11/2026', '17/11/2026', '18/11/2026', '19/11/2026', '20/11/2026', '21/11/2026', '22/11/2026'].forEach((d) => addDeliv(d, 'Resto Delta', 1));
-  ['18/11/2026', '19/11/2026', '20/11/2026'].forEach((d) => notifDataRows.push(notifRow(d, String(++oid), 'Resto Delta', '20.00', '3', '0', 'oui', 'Client absent')));
+  ['18/11/2026', '19/11/2026', '20/11/2026'].forEach((d) => notifDataRows.push(notifRow(_notifDate(d), String(++oid), 'Resto Delta', '20.00', '3', '0', 'oui', 'Client absent')));
 }
 const notifCsvComm = toCsv([['Restaurant', 'Commission'], ['Resto Alpha', '20'], ['Resto Beta', '15'], ['Resto Gamma', '20'], ['Resto Delta', '20']]);
 const notifCsvPort = toCsv([['Restaurant', 'Ville', 'AM'], ['Resto Alpha', 'Tunis', 'Omar Beldi'], ['Resto Beta', 'Ariana', 'Nour Ali'], ['Resto Gamma', 'Tunis', 'Omar Beldi'], ['Resto Delta', 'Sfax', 'Omar Beldi']]);
-const notifCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], ['Resto Alpha', '10', 'Toute la carte', '01/11/2026 - 23/11/2026']]);
+const notifCsvOffre = toCsv([['Restaurant', 'Participation', 'Tag', 'Période'], ['Resto Alpha', '10', 'Toute la carte', _notifDate('01/11/2026') + ' - ' + _notifDate('23/11/2026')]]);
 
 test('Notifications Kool : Traité / Tout lu, regroupement, tri, clic, nouvelles alertes', async () => {
   const w = bootKool({ data: toCsv(notifDataRows), comm: notifCsvComm, port: notifCsvPort, offre: notifCsvOffre });
