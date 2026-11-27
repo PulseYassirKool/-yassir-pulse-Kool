@@ -2120,9 +2120,11 @@ test('Item 10a : fetchGoogleWorkbookXlsx mémorisé 60 s (un seul téléchargeme
   };
   const p1 = w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
   const p2 = w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
-  assert.equal(nbFetchXlsx, 1, 'deux appels parallèles = deux téléchargements');
   const wb1 = await p1;
   const wb2 = await p2;
+  // Le téléchargement a lieu après la promesse des libs (micro-tâche) : on compte
+  // une fois les deux promesses résolues.
+  assert.equal(nbFetchXlsx, 1, 'deux appels parallèles = deux téléchargements');
   assert.equal(wb1, wb2, 'les deux appels ne partagent pas la même promesse');
   await w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
   assert.equal(nbFetchXlsx, 1, 'appel dans les 60 s = nouveau téléchargement');
@@ -2165,5 +2167,20 @@ test('Item 10b/10c : à la connexion, seules les synchros de la marque active + 
   const lbl2 = w.document.getElementById('footerLastSyncLabel').textContent;
   assert.ok(lbl2.includes('Données synchronisées à'), 'succès complet non annoncé en Kool : ' + lbl2);
   assert.ok(lbl2.includes('2/2 sources OK'), 'compteur OK Kool incorrect : ' + lbl2);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Item 11a (audit 2026-11-27) : SheetJS + Chart.js chargés après la connexion ----
+test('Item 11a : chargement différé — la connexion fonctionne même si les libs lourdes sont absentes', async () => {
+  const w = boot();
+  // Simule une page de connexion sans SheetJS ni Chart.js (chargement différé).
+  delete w.XLSX;
+  delete w.Chart;
+  assert.equal(w.yassirChargerLibsLourdes && typeof w.yassirChargerLibsLourdes, 'function', 'chargeur différé absent');
+  const pretes = await w.yassirLibsLourdesPretes();
+  assert.equal(typeof pretes, 'boolean', 'le chargeur doit résoudre un booléen, jamais rejeter');
+  // La connexion fonctionne quand même.
+  await login(w, 'proprio', 'Proprio-Test-123');
+  assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false, 'l’app ne s’ouvre pas sans les libs');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

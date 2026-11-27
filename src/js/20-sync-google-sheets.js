@@ -821,7 +821,14 @@
           if (entree && (Date.now() - entree.savedAt) < XLSX_PROMISE_TTL_MS) return entree.promise;
         }
         var xlsxUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) + '/export?format=xlsx&_t=' + Date.now();
-        var promise = fetch(xlsxUrl, { cache: 'no-store' })
+        var libsPretes = (typeof window.yassirLibsLourdesPretes === 'function')
+          ? window.yassirLibsLourdesPretes()
+          : Promise.resolve(!!window.XLSX);
+        var promise = libsPretes
+          .then(function () {
+            if (!window.XLSX) throw new Error('SheetJS non chargé');
+            return fetch(xlsxUrl, { cache: 'no-store' });
+          })
           .then(function (resp) {
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             return resp.arrayBuffer();

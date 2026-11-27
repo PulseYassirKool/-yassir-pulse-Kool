@@ -99,6 +99,9 @@
       }
 
       function onAuthenticated(user, remember, fresh) {
+        // Chargement différé des bibliothèques lourdes (audit 2026-11-27, item 11a) :
+        // SheetJS + Chart.js ne sont téléchargés qu'après la connexion.
+        if (typeof window.yassirChargerLibsLourdes === 'function') window.yassirChargerLibsLourdes();
         return PulseAuth.call('GET', '/api/bootstrap').then(function (boot) {
           applyBootstrap(boot);
           activateSession(user, remember);
