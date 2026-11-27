@@ -26,8 +26,17 @@
         var allRows = null; // [en-têtes, ...lignes] — en-têtes de la 1re page
         var page = 0;
         function lirePage() {
+          // Correctif 2026-11-27 (sync partielle 4/6 + détails Kool à 0) :
+          // fresh=1 force le Worker à TOUT relire depuis Google Sheets et à
+          // réécrire tout le cache KV. Il ne doit être passé qu'à la 1re page :
+          // le passer à chaque page faisait recharger la source entière à
+          // chaque page (5× pour Novembre, 16× pour les 150 000 détails Kool),
+          // ce qui dépassait le plafond CPU / sous-requêtes du Worker gratuit
+          // et faisait échouer la lecture (erreur silencieuse → []).
+          // Les pages suivantes relisent le cache écrit par la page 0.
+          var freshParam = (page === 0) ? fresh : 0;
           return PulseAuth.call('GET', '/api/sheets/' + encodeURIComponent(source) +
-            '?brand=' + brand + '&page=' + page + '&pageSize=' + pageSize + '&fresh=' + fresh)
+            '?brand=' + brand + '&page=' + page + '&pageSize=' + pageSize + '&fresh=' + freshParam)
             .then(function (data) {
               var rows = (data && Array.isArray(data.rows)) ? data.rows : [];
               var totalPages = (data && typeof data.totalPages === 'number') ? data.totalPages : 0;
