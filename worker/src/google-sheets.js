@@ -133,3 +133,61 @@ export async function readSheetRange(env, spreadsheetId, range, fetchImpl = fetc
   const body = await res.json().catch(() => ({}));
   return { spreadsheetId, range, values: Array.isArray(body.values) ? body.values : [] };
 }
+
+// ---- G3 suite : métadonnées + lecture par morceaux (pour /api/sheets/*) ----
+// Liste des onglets d'un classeur : [{ id (gid), title }].
+// `fields` limite la réponse aux propriétés des onglets (pas de données).
+export async function getSpreadsheetSheets(env, spreadsheetId, fetchImpl = fetch) {
+  if (typeof spreadsheetId !== 'string' || !/^[A-Za-z0-9_-]{10,100}$/.test(spreadsheetId)) {
+    throw new SheetsError(400, 'Identifiant de classeur invalide.');
+  }
+  const token = await getAccessToken(env, fetchImpl);
+  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties`;
+  let res;
+  try {
+    res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    throw new SheetsError(502, 'Lecture de la feuille impossible.');
+  }
+  if (!res.ok) {
+    throw new SheetsError(502, 'Lecture de la feuille impossible.');
+  }
+  const body = await res.json().catch(() => ({}));
+  const sheets = Array.isArray(body.sheets) ? body.sheets : [];
+  return sheets
+    .map((s) => ({ id: s && s.properties ? s.properties.sheetId : null, title: s && s.properties ? s.properties.title : '' }))
+    .filter((s) => typeof s.title === 'string' && s.title !== '');
+}
+
+// Lecture d'un morceau de lignes d'un onglet : lignes [startRow, endRow]
+// (1-based, en-têtes comprises). Renvoie les lignes brutes (tableau de
+// tableaux, [] si la plage est vide). Un morceau plus court que demandé
+// signale la fin des données de l'onglet. Le titre est quoté façon A1
+// (les ' doublés), comme l'exige Sheets API v4.
+export function quoteSheetTitle(title) {
+  return `'${String(title).replace(/'/g, "''")}'`;
+}
+export async function readSheetRowsChunk(env, spreadsheetId, title, startRow, endRow, fetchImpl = fetch) {
+  if (typeof spreadsheetId !== 'string' || !/^[A-Za-z0-9_-]{10,100}$/.test(spreadsheetId)) {
+    throw new SheetsError(400, 'Identifiant de classeur invalide.');
+  }
+  if (typeof title !== 'string' || title.length < 1 || title.length > 200) {
+    throw new SheetsError(400, 'Onglet invalide.');
+  }
+  const start = Math.max(1, Math.floor(startRow) || 1);
+  const end = Math.max(start, Math.floor(endRow) || start);
+  const token = await getAccessToken(env, fetchImpl);
+  const range = `${quoteSheetTitle(title)}!A${start}:ZZ${end}`;
+  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+  let res;
+  try {
+    res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    throw new SheetsError(502, 'Lecture de la feuille impossible.');
+  }
+  if (!res.ok) {
+    throw new SheetsError(502, 'Lecture de la feuille impossible.');
+  }
+  const body = await res.json().catch(() => ({}));
+  return Array.isArray(body.values) ? body.values : [];
+}

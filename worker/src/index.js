@@ -4,6 +4,7 @@
 // Aucun secret ne vit dans le dépôt : env.JWT_SECRET, env.LEGACY_SALT, et le KV `PULSE_KV`.
 
 import { readSheetRange } from './google-sheets.js';
+import { getSheetsData, SHEET_SOURCES } from './sheets.js';
 
 const ROLES = ['owner', 'viewer_all', 'am', 'market_am'];
 const ITERATIONS = 100000; // plafond PBKDF2 sur Workers
@@ -371,6 +372,39 @@ export async function handle(request, env) {
       const result = await readSheetRange(env, spreadsheetId, range);
       const rows = result.values || [];
       return reply({ spreadsheetId, range, rowCount: rows.length, rows: rows.slice(0, 5) });
+    } catch (e) {
+      if (e && e.status === 400) return fail(400, e.message);
+      if (e && e.status === 500) return fail(500, 'Lecture Google Sheets non configurée.');
+      return fail(502, 'Lecture de la feuille impossible.');
+    }
+  }
+
+  // ---------- Lecture filtrée des feuilles côté serveur (G3, suite) ----------
+  // GET /api/sheets/:source?brand=yassir|kool&page=0&pageSize=5000&fresh=0|1
+  // Sources : portfolios, commissions, offres, budget, statuts, hist2025,
+  // data-oct, data-nov, data-kool, details-kool. Le Worker lit les IDs dans
+  // la KV `config` et ne les expose jamais. Filtrage par rôle/AM appliqué
+  // côté Worker (voir worker/src/sheets.js). /api/bootstrap n'est PAS
+  // restreint dans ce lot : le front actuel lit encore les feuilles
+  // directement et a besoin des IDs jusqu'à sa migration.
+  if (path.startsWith('/api/sheets/') && method === 'GET') {
+    let source;
+    try {
+      source = decodeURIComponent(path.slice('/api/sheets/'.length)).trim().toLowerCase();
+    } catch (e) {
+      return fail(400, 'Source invalide.');
+    }
+    if (!source || source.includes('/') || !SHEET_SOURCES.includes(source)) return fail(400, 'Source inconnue.');
+    const brand = (url.searchParams.get('brand') || 'yassir').trim().toLowerCase();
+    const page = Number(url.searchParams.get('page') || '0');
+    const pageSize = Number(url.searchParams.get('pageSize') || '5000');
+    const fresh = url.searchParams.get('fresh') === '1';
+    if (!Number.isInteger(page) || page < 0 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 10000) {
+      return fail(400, 'Pagination invalide.');
+    }
+    try {
+      const data = await getSheetsData(env, me, source, brand, { page, pageSize, fresh });
+      return reply(data);
     } catch (e) {
       if (e && e.status === 400) return fail(400, e.message);
       if (e && e.status === 500) return fail(500, 'Lecture Google Sheets non configurée.');
