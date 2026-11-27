@@ -422,6 +422,7 @@
         if (label) label.textContent = 'Sync YoY 2025...';
 
         function finirSucces() {
+          noterStatutSynchro('Données 2025 (YoY)', true);
           if (icon) icon.classList.remove('fa-spin');
           if (label) label.textContent = 'YoY 2025 OK';
           if (state.activeTab === 'synth_global') renderSynth2025Panel();
@@ -430,6 +431,7 @@
           }
         }
         function finirEchec() {
+          noterStatutSynchro('Données 2025 (YoY)', false);
           if (icon) icon.classList.remove('fa-spin');
           if (label) label.textContent = 'Sync YoY 2025';
         }

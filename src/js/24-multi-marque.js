@@ -956,6 +956,7 @@
           // Échec ou réussite de la synchro Kool : enregistré pour l'alerte
           // « Synchro en échec » (épinglée tant que la synchro ne réussit pas).
           var koolSyncOk = addedDataCount > 0 || commCount > 0 || portCount > 0 || koolOffreRules.length > 0;
+          noterStatutSynchro('Kool', koolSyncOk);
           if (typeof window.yassirEffacerEchecSynchro === 'function' && typeof window.yassirEnregistrerEchecSynchro === 'function') {
             if (koolSyncOk) window.yassirEffacerEchecSynchro('kool');
             else window.yassirEnregistrerEchecSynchro('kool', 'feuilles illisibles');
@@ -1031,6 +1032,45 @@
         });
       };
 
+      // Synchros lancées à la connexion (audit 2026-11-27, item 10b/10c) : UNIQUEMENT
+      // la marque active — en mode Yassir, la synchro Kool résolvait immédiatement
+      // (gaspillage) ; en mode Kool, les 6 synchros Yassir tournaient pour rien.
+      // Le Budget est partagé (filtre APP) : il est synchronisé dans les deux marques.
+      // Le pied de page affiche le statut par source (OK / échec) au lieu d'un
+      // succès inconditionnel ; une source en échec déclenche aussi un toast.
+      window.yassirSyncConnexion = function () {
+        var syncsConnexion = (typeof currentBrand !== 'undefined' && currentBrand === 'kool')
+          ? [
+            { nom: 'Kool', fn: window.yassirSyncKoolSheets },
+            { nom: 'Budget', fn: window.yassirSyncBudgetSheet }
+          ]
+          : [
+            { nom: 'Portefeuilles & Comm.', fn: window.yassirSyncAllFromGoogleSheets },
+            { nom: 'Octobre & Novembre', fn: window.yassirSyncHistoricalSheets },
+            { nom: 'Budget', fn: window.yassirSyncBudgetSheet },
+            { nom: 'Statut Active/Inactive', fn: window.yassirSyncRestoStatusSheet },
+            { nom: 'Participation Offres', fn: window.yassirSyncOffreParticipationSheet },
+            { nom: 'Données 2025 (YoY)', fn: window.yassirSync2025Sheet }
+          ];
+        return Promise.allSettled(syncsConnexion.map(function (s) {
+          try { return Promise.resolve(s.fn(false)); } catch (e) { return Promise.reject(e); }
+        })).then(function () {
+          var footLbl = document.getElementById('footerLastSyncLabel');
+          if (!footLbl) return;
+          var statuts = (typeof window.yassirStatutSynchroParSource === 'function') ? window.yassirStatutSynchroParSource() : {};
+          var noms = syncsConnexion.map(function (s) { return s.nom; });
+          var echecs = noms.filter(function (n) { return !statuts[n]; });
+          var okCount = noms.length - echecs.length;
+          var nowStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+          if (echecs.length === 0) {
+            footLbl.textContent = 'Données synchronisées à ' + nowStr + ' (' + okCount + '/' + noms.length + ' sources OK)';
+          } else {
+            footLbl.textContent = 'Sync partielle à ' + nowStr + ' : ' + okCount + '/' + noms.length + ' OK — en échec : ' + echecs.join(', ');
+            showToast('<strong>Synchronisation partielle :</strong> en échec : ' + escapeHtml(echecs.join(', ')) + '. Vérifiez le partage « Lecteur » de ces feuilles.', 'error');
+          }
+        });
+      };
+
       var _backgroundLoadStarted = false;
       function startBackgroundDataLoadAfterLogin() {
         if (_backgroundLoadStarted) return;
@@ -1080,22 +1120,8 @@
             }
           }).catch(function () {});
 
-          // Synchronisation parallèle en direct avec Google Sheets
-          Promise.allSettled([
-            Promise.resolve(window.yassirSyncAllFromGoogleSheets(false)),
-            Promise.resolve(window.yassirSyncHistoricalSheets(false)),
-            Promise.resolve(window.yassirSyncBudgetSheet(false)),
-            Promise.resolve(window.yassirSyncRestoStatusSheet(false)),
-            Promise.resolve(window.yassirSyncOffreParticipationSheet(false)),
-            Promise.resolve(window.yassirSync2025Sheet(false)),
-            Promise.resolve(window.yassirSyncKoolSheets(false))
-          ]).then(function () {
-            var footLbl = document.getElementById('footerLastSyncLabel');
-            if (footLbl) {
-              var nowStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-              footLbl.textContent = 'Données synchronisées à ' + nowStr;
-            }
-          });
+          // Synchronisation en direct avec Google Sheets (marque active seulement).
+          window.yassirSyncConnexion();
         }, 80);
       }
 

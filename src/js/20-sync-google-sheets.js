@@ -630,6 +630,7 @@
               );
             }
           }
+          noterStatutSynchro('Octobre & Novembre', loadedMonths.length > 0 && failedMonths.length === 0);
         });
       };
 
@@ -763,6 +764,7 @@
             }
 
             mettreAJourInterface();
+            noterStatutSynchro('Budget', true);
             if (manualTrigger) {
               showToast(
                 '<strong>Budgets AM synchronisés !</strong> (' + Object.keys(state.budgetByAm).length + ' AM configurés).',
@@ -771,6 +773,7 @@
             }
           })
           .catch(function (err) {
+            noterStatutSynchro('Budget', false);
             if (icon) icon.classList.remove('fa-spin');
             if (label) label.textContent = 'Sync Budget';
             if (manualTrigger) {
@@ -805,9 +808,20 @@
         return false;
       };
 
-      function fetchGoogleWorkbookXlsx(sheetId) {
+      // Mémoïsation des téléchargements XLSX (audit 2026-11-27, item 10a) : un seul
+      // téléchargement par classeur et par tranche de 60 s, même si plusieurs
+      // synchros le demandent en parallèle à la connexion. En cas d'échec, l'entrée
+      // est supprimée (la tentative suivante retélécharge). La synchro manuelle
+      // (forceFresh) contourne le cache pour obtenir des données fraîches.
+      var _xlsxPromiseCache = {};
+      var XLSX_PROMISE_TTL_MS = 60 * 1000;
+      function fetchGoogleWorkbookXlsx(sheetId, forceFresh) {
+        if (sheetId && !forceFresh) {
+          var entree = _xlsxPromiseCache[sheetId];
+          if (entree && (Date.now() - entree.savedAt) < XLSX_PROMISE_TTL_MS) return entree.promise;
+        }
         var xlsxUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) + '/export?format=xlsx&_t=' + Date.now();
-        return fetch(xlsxUrl, { cache: 'no-store' })
+        var promise = fetch(xlsxUrl, { cache: 'no-store' })
           .then(function (resp) {
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             return resp.arrayBuffer();
@@ -818,8 +832,25 @@
               throw new Error('Classeur vide');
             }
             return wb;
+          })
+          .catch(function (err) {
+            if (sheetId) delete _xlsxPromiseCache[sheetId];
+            throw err;
           });
+        if (sheetId) _xlsxPromiseCache[sheetId] = { promise: promise, savedAt: Date.now() };
+        return promise;
       }
+      window.yassirFetchGoogleWorkbookXlsx = fetchGoogleWorkbookXlsx;
+
+      // Statut de la dernière synchro par source (audit 2026-11-27, item 10c) :
+      // chaque synchro note ici son résultat (true = OK, false = échec) pour que
+      // le pied de page affiche un statut honnête au lieu d'un succès inconditionnel.
+      var _statutSynchroParSource = {};
+      function noterStatutSynchro(nom, ok) {
+        _statutSynchroParSource[nom] = !!ok;
+      }
+      window.yassirStatutSynchroParSource = function () { return Object.assign({}, _statutSynchroParSource); };
+      window.yassirNoterStatutSynchro = noterStatutSynchro;
 
       // ==================================================================
       // LECTURE MULTI-ONGLETS (data journalière par onglet, 2026-11-26)
@@ -892,7 +923,7 @@
             (Date.now() - (entree.savedAt || 0)) < ONGLETS_CACHE_TTL_MS) {
           return Promise.resolve({ wb: null, names: entree.names.slice(), sheetIds: entree.sheetIds || [] });
         }
-        return fetchGoogleWorkbookXlsx(sheetId)
+        return fetchGoogleWorkbookXlsx(sheetId, force)
           .then(function (wb) {
             var names = (wb && wb.SheetNames) || [];
             var sheetIds = [];
@@ -1118,6 +1149,8 @@
               state.customCommissions = Object.assign({}, freshComm);
             }
           }
+
+          noterStatutSynchro('Portefeuilles & Comm.', anyPortfolioSuccess || updatedCommCount > 0);
 
           if (icon) icon.classList.remove('fa-spin');
           if (label) {

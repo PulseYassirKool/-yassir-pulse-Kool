@@ -826,6 +826,7 @@
               var mm = String(now.getMinutes()).padStart(2, '0');
               label.textContent = (activeCount > 0 || inactiveCount > 0) ? ('Statuts OK (' + hh + ':' + mm + ')') : 'Sync Statut Active/Inactive';
             }
+            noterStatutSynchro('Statut Active/Inactive', activeCount > 0 || inactiveCount > 0);
 
             if (state.activeTab === 'restaurant_analysis') {
               window.yassirRenderRestaurantAnalysis();
@@ -847,6 +848,7 @@
             }
           })
           .catch(function () {
+            noterStatutSynchro('Statut Active/Inactive', false);
             if (icon) icon.classList.remove('fa-spin');
             if (label) label.textContent = 'Sync Statut Active/Inactive';
             if (manualTrigger) {

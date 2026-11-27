@@ -311,6 +311,7 @@
               state.offreRulesSource = 'feuille';
               saveOffreParticipationToStore();
             }
+            noterStatutSynchro('Participation Offres', rules.length > 0);
             if (icon) icon.classList.remove('fa-spin');
             if (label) label.textContent = rules.length > 0 ? ('Participation OK (' + rules.length + ')') : 'Sync Participation Offres';
             mettreAJourInterface();
@@ -319,6 +320,7 @@
             }
           })
           .catch(function () {
+            noterStatutSynchro('Participation Offres', false);
             if (icon) icon.classList.remove('fa-spin');
             if (label) label.textContent = 'Sync Participation Offres';
             if (manualTrigger) {

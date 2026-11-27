@@ -2100,3 +2100,70 @@ test('Item 5c : purgerNombre lit le dernier séparateur comme décimal', () => {
   assert.equal(pn('abc'), 0, 'texte non numérique');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
+
+// ---- Item 10a (audit 2026-11-27) : un seul téléchargement XLSX par classeur / 60 s ----
+test('Item 10a : fetchGoogleWorkbookXlsx mémorisé 60 s (un seul téléchargement par connexion)', async () => {
+  const w = boot();
+  let nbFetchXlsx = 0;
+  const origFetch = w.fetch;
+  w.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('format=xlsx')) {
+      nbFetchXlsx++;
+      const wb = w.XLSX.utils.book_new();
+      w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet([['A'], [1]]), 'Feuille');
+      const buf = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const ab = new Uint8Array(buf).buffer;
+      return { ok: true, status: 200, arrayBuffer: async () => ab.slice(0), text: async () => '', json: async () => ({}) };
+    }
+    return origFetch(url, opts);
+  };
+  const p1 = w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
+  const p2 = w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
+  assert.equal(nbFetchXlsx, 1, 'deux appels parallèles = deux téléchargements');
+  const wb1 = await p1;
+  const wb2 = await p2;
+  assert.equal(wb1, wb2, 'les deux appels ne partagent pas la même promesse');
+  await w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
+  assert.equal(nbFetchXlsx, 1, 'appel dans les 60 s = nouveau téléchargement');
+  await w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001', true);
+  assert.equal(nbFetchXlsx, 2, 'forceFresh doit retélécharger');
+  await w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0002');
+  assert.equal(nbFetchXlsx, 3, 'un autre classeur doit être téléchargé');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Item 10b/10c (audit 2026-11-27) : marque active seulement + statut par source ----
+test('Item 10b/10c : à la connexion, seules les synchros de la marque active + statut par source', async () => {
+  const w = boot();
+  const calls = [];
+  const stubOk = (name) => () => { calls.push(name); w.yassirNoterStatutSynchro(name, true); return Promise.resolve(); };
+  const stubKo = (name) => () => { calls.push(name); w.yassirNoterStatutSynchro(name, false); return Promise.resolve(); };
+  w.yassirSyncAllFromGoogleSheets = stubOk('Portefeuilles & Comm.');
+  w.yassirSyncHistoricalSheets = stubOk('Octobre & Novembre');
+  w.yassirSyncBudgetSheet = stubKo('Budget');
+  w.yassirSyncRestoStatusSheet = stubOk('Statut Active/Inactive');
+  w.yassirSyncOffreParticipationSheet = stubOk('Participation Offres');
+  w.yassirSync2025Sheet = stubOk('Données 2025 (YoY)');
+  w.yassirSyncKoolSheets = () => { calls.push('Kool'); return Promise.resolve(); };
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await wait(1200);
+  assert.deepEqual(calls, ['Portefeuilles & Comm.', 'Octobre & Novembre', 'Budget', 'Statut Active/Inactive', 'Participation Offres', 'Données 2025 (YoY)'], 'synchros lancées à la connexion (Yassir) : Kool ne doit pas tourner en mode Yassir');
+  const lbl = w.document.getElementById('footerLastSyncLabel').textContent;
+  assert.ok(lbl.includes('Sync partielle'), 'le pied de page annonce un succès alors que Budget est en échec : ' + lbl);
+  assert.ok(lbl.includes('5/6 OK'), 'compteur OK incorrect : ' + lbl);
+  assert.ok(lbl.includes('Budget'), 'la source en échec n’est pas nommée : ' + lbl);
+  assert.ok(!lbl.includes('Données synchronisées à'), 'ancien message de succès inconditionnel toujours présent : ' + lbl);
+  // Marque Kool : seules Kool + Budget sont lancées.
+  w.yassirSyncKoolSheets = stubOk('Kool');
+  w.yassirSyncBudgetSheet = stubOk('Budget');
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  calls.length = 0;
+  await w.yassirSyncConnexion();
+  assert.deepEqual(calls, ['Kool', 'Budget'], 'synchros lancées à la connexion (Kool) : les 6 synchros Yassir ne doivent pas tourner en mode Kool');
+  const lbl2 = w.document.getElementById('footerLastSyncLabel').textContent;
+  assert.ok(lbl2.includes('Données synchronisées à'), 'succès complet non annoncé en Kool : ' + lbl2);
+  assert.ok(lbl2.includes('2/2 sources OK'), 'compteur OK Kool incorrect : ' + lbl2);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
