@@ -114,6 +114,9 @@ export function findRestaurantCol(headersNorm) {
 function findAppCol(headersNorm) {
   return headersNorm.indexOf('app');
 }
+function findAmCol(headersNorm) {
+  return findCol(headersNorm, (h) => h === 'am' || h.includes('account manager') || h.includes('responsable'));
+}
 function findOrderIdCol(headersNorm) {
   return findCol(headersNorm, isOrderIdHeader);
 }
@@ -172,14 +175,15 @@ export function matchAmInText(text, amNames) {
   }
   return '';
 }
+// Correspondance AM stricte (correctif 2026-11-27, audit point 4) : nom
+// complet normalisé uniquement. L'ancien repli sur le PRÉNOM seul faisait
+// que deux AM de même prénom se voyaient mutuellement (et un prénom présent
+// dans un nom de restaurant pouvait mal attribuer un onglet ou une ligne).
 function amTabMatches(tabAm, meAm) {
   const a = normalizeName(tabAm);
   const b = normalizeName(meAm);
   if (!a || !b) return false;
-  if (a === b) return true;
-  const firstA = a.split(' ')[0];
-  const firstB = b.split(' ')[0];
-  return firstA.length >= 3 && firstA === firstB;
+  return a === b;
 }
 
 // ---------- Plan de lecture d'une source (IDs lus dans la KV `config`) ----------
@@ -355,6 +359,7 @@ async function loadTab(env, plan, tabTitle, ctx) {
         ctx.idxApp = idxApp;
         ctx.idxOrder = idxOrder;
         ctx.idxArticle = idxArticle;
+        ctx.idxAm = findAmCol(hNorm);
         if (ctx.source === 'data-kool' && idxResto === -1) ctx.idxResto = 6; // repli front : colonne G
         if (ctx.source === 'statuts' && idxResto === -1) ctx.idxResto = 1; // repli front : colonne B
         if (ctx.source === 'portfolios' && ctx.headersNorm[ctx.headersNorm.length - 1] !== 'am') {
@@ -422,11 +427,10 @@ function alignRow(row, colMap, width) {
 // Contexte partagé d'un chargement : filtres + émission des lignes.
 function makeLoadContext(env, me, source, brand, plan, sink, fetchImpl, portfolioSet, orderIdSet) {
   const filteredRole = me.role === 'am' || me.role === 'market_am';
-  const amNames = (plan.allAmNames || []).slice();
   const ctx = {
     source, fetchImpl, sink,
     headers: null, headersNorm: null, colMap: null,
-    idxResto: -1, idxApp: -1, idxOrder: -1, idxArticle: -1,
+    idxResto: -1, idxApp: -1, idxOrder: -1, idxArticle: -1, idxAm: -1,
     tabs: [], skippedTabs: [], partial: false,
     validator: plan.validator || null,
     findHeader: (probe) => {
@@ -454,10 +458,19 @@ function makeLoadContext(env, me, source, brand, plan, sink, fetchImpl, portfoli
       } else if (source === 'budget' && brand !== 'yassir') {
         return; // sans colonne APP, le Budget est Yassir (règle front)
       }
-      // Filtre Budget par AM (lignes « global » gardées pour tous).
+      // Filtre Budget par AM, FERMÉ (2026-11-27, audit point 4) : ne garder
+      // que les lignes explicitement « global » ou reconnues pour cet AM, sur
+      // l'identifiant exact (nom complet normalisé) lu dans la colonne AM —
+      // jamais sur le prénom seul, jamais sur tout le texte de la ligne
+      // (un nom de restaurant pouvait contenir un prénom et mal attribuer).
+      // Une ligne sans AM reconnu (faute de frappe, case vide) n'est envoyée
+      // à personne : avant, elle était traitée comme globale et envoyée à
+      // tous les AM.
       if (source === 'budget' && filteredRole) {
-        const matched = matchAmInText((row || []).map((c) => String(c === null || c === undefined ? '' : c)).join(' | '), amNames);
-        if (matched && !amTabMatches(matched, me.amName)) return;
+        const idxAm = ctx.idxAm;
+        const amCell = (idxAm !== -1 && idxAm < row.length) ? normalizeName(row[idxAm]) : '';
+        const isGlobalBudget = amCell === 'global' || amCell === 'total' || amCell === 'budget global' || amCell === 'total budget' || amCell.includes('budget global');
+        if (!isGlobalBudget && !amTabMatches(amCell, me.amName)) return;
       }
       // Filtre par restaurant (portefeuille de l'AM).
       if (filteredRole && portfolioSet && source !== 'portfolios' && source !== 'budget' && source !== 'details-kool' && source !== 'hist2025') {

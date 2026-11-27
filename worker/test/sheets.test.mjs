@@ -610,3 +610,33 @@ test('hist2025 : matrice 2025 — la ligne « Accepted by restaurant » n\'est p
     assert.deepEqual(h.json.rows[0], ['', 'W 07', 'W 08', 'W 09']);
   } finally { restoreFetch(originalFetch); }
 });
+
+
+test('budget fermé (audit point 4) : faute de frappe / case vide / prénom seul -> envoyée à personne', async () => {
+  const originalFetch = globalThis.fetch;
+  installMock();
+  try {
+    sheetsData[UNIQUE].Budget = [
+      ['AM', 'Budget', 'APP'],
+      ['Omar Beldi', '100000', 'Yassir'],
+      ['Omar Beldii', '99999', 'Yassir'], // faute de frappe : personne
+      ['', '88888', 'Yassir'], // case AM vide : personne
+      ['Omar', '77777', 'Yassir'], // prénom seul : personne (pas d'identifiant exact)
+      ['Eya Majdoub', '50000', 'Yassir'],
+      ['Global', '200000', 'Yassir']
+    ];
+    const owner = await login('proprio', 'Secret-Proprio-1');
+    const omar = await login('omar.beldi', 'Omar-Password-2');
+    const eya = await login('eya.majdoub', 'Eya-Password-2');
+    const bOmar = await call('GET', '/api/sheets/budget?brand=yassir', null, omar);
+    assert.equal(bOmar.json.totalRows, 2); // sa ligne + Global
+    assert.ok(!JSON.stringify(bOmar.json.rows).includes('99999'), 'faute de frappe visible par Omar !');
+    assert.ok(!JSON.stringify(bOmar.json.rows).includes('88888'), 'ligne sans AM visible par Omar !');
+    assert.ok(!JSON.stringify(bOmar.json.rows).includes('77777'), 'prénom seul visible par Omar !');
+    const bEya = await call('GET', '/api/sheets/budget?brand=yassir', null, eya);
+    assert.equal(bEya.json.totalRows, 2); // sa ligne + Global
+    assert.ok(!JSON.stringify(bEya.json.rows).includes('Omar Beldi'));
+    const bOwner = await call('GET', '/api/sheets/budget?brand=yassir', null, owner);
+    assert.equal(bOwner.json.totalRows, 6); // le proprio voit tout, faute de frappe comprise
+  } finally { restoreFetch(originalFetch); }
+});
