@@ -390,10 +390,16 @@
         icon.className = isPassword ? 'fa-solid fa-eye-slash text-sm' : 'fa-solid fa-eye text-sm';
       };
 
-      window.yassirLogout = function () {
+      window.yassirLogout = function (opts) {
         // Journaliser la déconnexion (AM uniquement) avant d'effacer la session.
         // Fire-and-forget : l'envoi ne bloque jamais la déconnexion.
         try { window.yassirJournaliser('logout', 'Déconnexion'); } catch (e) {}
+        // Déconnexion côté serveur (audit 2026-11-27, item 8) : le jeton est
+        // invalidé côté serveur (pwdVersion incrémenté) — seulement sur la
+        // déconnexion explicite (opts.server). Sur le chemin 401 (jeton déjà
+        // rejeté par l'API : mot de passe changé, compte supprimé), l'appel
+        // serait inutile : on ne déconnecte que localement.
+        if (opts && opts.server) { try { PulseAuth.logoutServer(); } catch (e) {} }
         currentUser = null;
         state.selectedAm = 'ALL';
         amTableZeroOrderFilter = 'all';

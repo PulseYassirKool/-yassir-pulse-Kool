@@ -61,7 +61,23 @@
             }).catch(function () {});
           } catch (e) { return Promise.resolve(); }
         }
-        return { adopt: adopt, store: store, clear: clear, call: call, log: logActivity };
+        // Déconnexion côté serveur (audit 2026-11-27, item 8) : invalide le
+        // jeton côté serveur (pwdVersion incrémenté par /api/logout).
+        // Fire-and-forget avec keepalive : l'envoi survit au rechargement
+        // de la page et ne bloque jamais la déconnexion. Ne pas utiliser
+        // call() ici : un 401 rappellerait yassirLogout en boucle.
+        function logoutServer() {
+          try {
+            if (!token) return;
+            fetch(API + '/api/logout', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+              keepalive: true,
+              cache: 'no-store'
+            }).catch(function () {});
+          } catch (e) {}
+        }
+        return { adopt: adopt, store: store, clear: clear, call: call, log: logActivity, logoutServer: logoutServer };
       })();
 
       function applyBootstrap(boot) {
@@ -251,7 +267,7 @@
 
           return '<tr class="hover:bg-[#F8F9FC]">' +
             '<td class="px-4 py-2.5 font-bold text-[#1A1A2E]">' + escapeHtml(acc.username) + '</td>' +
-            '<td class="px-4 py-2.5 font-mono text-slate-400"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-[10px] font-bold text-slate-600"><i class="fa-solid fa-shield-halved text-[#00BFA5]"></i>Chiffré SHA-256</span></td>' +
+            '<td class="px-4 py-2.5 font-mono text-slate-400"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-[10px] font-bold text-slate-600"><i class="fa-solid fa-shield-halved text-[#00BFA5]"></i>Chiffré PBKDF2</span></td>' +
             '<td class="px-4 py-2.5">' + badge + '</td>' +
             '<td class="px-4 py-2.5 text-right whitespace-nowrap">' +
               '<button type="button" onclick="window.yassirPrefillAccount(' + idx + ')" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#F3EBFF] hover:bg-purple-200 text-[#6C2BD9] transition cursor-pointer">Modifier</button>' +

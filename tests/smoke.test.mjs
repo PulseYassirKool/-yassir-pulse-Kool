@@ -124,7 +124,10 @@ test('propriétaire : liste des comptes via API, sans hash', async () => {
   const rows = w.document.querySelectorAll('#accountsTableBody tr');
   assert.ok(rows.length >= 2);
   assert.equal(w.document.getElementById('accessManagerModal').classList.contains('hidden'), false);
-  assert.equal(w.document.getElementById('accountsTableBody').innerHTML.includes('pbkdf2'), false);
+  assert.equal(w.document.getElementById('accountsTableBody').innerHTML.includes('pbkdf2$'), false, 'hash exposé dans la liste des comptes');
+  // Étiquette exacte (audit 2026-11-27, item 8) : PBKDF2, pas SHA-256.
+  assert.ok(w.document.getElementById('accountsTableBody').textContent.includes('PBKDF2'), 'étiquette PBKDF2 absente');
+  assert.ok(!w.document.getElementById('accountsTableBody').textContent.includes('SHA-256'), 'ancienne étiquette SHA-256 toujours présente');
 });
 
 // ---- Régression Kool : bascule de marque, moteur (ex-crash stat) et Top des ventes ----
@@ -1691,6 +1694,56 @@ test("journal d'activité : un AM est journalisé (export + déconnexion), le pr
   entries = JSON.parse(store.get('activity_log') || '[]');
   assert.equal(entries.length, before, 'le proprio ne doit rien ajouter au journal');
   assert.ok(!entries.some((e) => e.user === 'proprio'), 'aucune entrée proprio dans le journal');
+});
+
+// ---- Déconnexion côté serveur (audit 2026-11-27, item 8) ----
+test("déconnexion côté serveur : l'ancien jeton meurt, la reconnexion fonctionne", async () => {
+  const w = boot();
+  await login(w, 'omar.beldi', 'Omar-Test-12345');
+  const token = w.sessionStorage.getItem('pulse_token_v1');
+  assert.ok(token, 'jeton présent après connexion');
+  // Déconnexion explicite (bouton Déconnexion) : le jeton est invalidé côté serveur.
+  w.yassirLogout({ server: true });
+  await wait(600);
+  const me = await w.fetch('https://api.test/api/me', { headers: { Origin: 'http://localhost', Authorization: 'Bearer ' + token } });
+  assert.equal(me.status, 401, 'ancien jeton toujours accepté après déconnexion serveur');
+  // Le jeton est effacé du navigateur et la déconnexion est journalisée.
+  assert.equal(w.sessionStorage.getItem('pulse_token_v1'), null, 'jeton non effacé');
+  const entries = JSON.parse(store.get('activity_log') || '[]');
+  assert.ok(entries.some((e) => e.type === 'logout' && e.user === 'omar.beldi'), 'déconnexion AM absente du journal');
+  // Reconnexion possible avec le même mot de passe.
+  await login(w, 'omar.beldi', 'Omar-Test-12345');
+  assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false, 'reconnexion après déconnexion impossible');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test("déconnexion 401 (gardien de session) : locale seulement, le jeton reste valable côté serveur", async () => {
+  const w = boot();
+  await login(w, 'omar.beldi', 'Omar-Test-12345');
+  const token = w.sessionStorage.getItem('pulse_token_v1');
+  assert.ok(token, 'jeton présent après connexion');
+  // Chemin 401 : le jeton est déjà rejeté par l'API, /api/logout est inutile.
+  w.yassirLogout();
+  await wait(400);
+  const me = await w.fetch('https://api.test/api/me', { headers: { Origin: 'http://localhost', Authorization: 'Bearer ' + token } });
+  assert.equal(me.status, 200, 'la déconnexion locale ne doit pas invalider le jeton côté serveur');
+  assert.equal(w.sessionStorage.getItem('pulse_token_v1'), null, 'jeton non effacé');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test("déconnexion : l'échec de /api/logout ne bloque pas la déconnexion locale", async () => {
+  const w = boot();
+  await login(w, 'omar.beldi', 'Omar-Test-12345');
+  const origFetch = w.fetch;
+  w.fetch = async (url, opts = {}) => {
+    if (String(url).includes('/api/logout')) throw new Error('réseau coupé');
+    return origFetch(url, opts);
+  };
+  w.yassirLogout({ server: true });
+  await wait(400);
+  assert.equal(w.sessionStorage.getItem('pulse_token_v1'), null, 'jeton non effacé malgré l\'échec serveur');
+  assert.equal(w.document.getElementById('loginScreen').classList.contains('hidden'), false, 'écran de connexion non affiché');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
 test("journal d'activité : échec de connexion AM journalisé côté Worker", async () => {

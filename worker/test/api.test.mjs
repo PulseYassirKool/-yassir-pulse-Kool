@@ -240,3 +240,27 @@ test('changement de mot de passe par le proprio -> ancien jeton AM rejeté, nouv
   // Le jeton du propriétaire, lui, n'est pas touché (seul le compte modifié est déconnecté).
   assert.equal((await call('GET', '/api/me', null, owner)).status, 200);
 });
+
+// ---- Déconnexion côté serveur (audit 2026-11-27, item 8) ----
+test('déconnexion côté serveur : POST /api/logout invalide tous les jetons du compte, reconnexion possible', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  // Sans jeton -> 401.
+  assert.equal((await call('POST', '/api/logout')).status, 401);
+  // Deux jetons du même compte (ex. deux appareils, ou « se souvenir de moi »).
+  const am1 = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  const am2 = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2', remember: true })).json.token;
+  assert.equal((await call('GET', '/api/me', null, am1)).status, 200);
+  assert.equal((await call('GET', '/api/me', null, am2)).status, 200);
+  // Déconnexion avec le premier jeton : les deux meurent immédiatement.
+  assert.equal((await call('POST', '/api/logout', null, am1)).status, 200);
+  assert.equal((await call('GET', '/api/me', null, am1)).status, 401);
+  assert.equal((await call('GET', '/api/me', null, am2)).status, 401);
+  // Le jeton du propriétaire n'est pas touché ; la reconnexion AM fonctionne.
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  assert.equal((await call('GET', '/api/me', null, owner)).status, 200);
+  const amFresh = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  assert.equal((await call('GET', '/api/me', null, amFresh)).status, 200);
+});

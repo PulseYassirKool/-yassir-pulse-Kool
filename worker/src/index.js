@@ -257,6 +257,17 @@ export async function handle(request, env) {
 
   if (path === '/api/me' && method === 'GET') return reply({ user: publicUser(me) });
 
+  // Déconnexion côté serveur (audit 2026-11-27, item 8) : incrémenter
+  // pwdVersion invalide immédiatement TOUS les jetons du compte, y compris
+  // le jeton 7 jours « se souvenir de moi » — jusque-là, la déconnexion
+  // n'effaçait le jeton que du navigateur. Rôle indifférent ; la
+  // journalisation reste côté front (yassirJournaliser, avant l'appel).
+  if (path === '/api/logout' && method === 'POST') {
+    me.pwdVersion = (me.pwdVersion || 0) + 1;
+    await saveAccounts(env, accounts);
+    return reply({ ok: true });
+  }
+
   if (path === '/api/bootstrap' && method === 'GET') {
     const [config, defaults] = await Promise.all([env.PULSE_KV.get('config', 'json'), env.PULSE_KV.get('defaults', 'json')]);
     return reply({ config: config || { live: {}, kool: {} }, defaults: defaults || { commissions: {}, portfolios: {} } });
