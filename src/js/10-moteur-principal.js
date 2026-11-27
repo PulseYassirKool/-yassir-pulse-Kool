@@ -18,6 +18,13 @@
           state.foodRows = [];
           state.offresRows = [];
           state.statRows = [];
+          // Correctif 4 (2026-11-27, KPI figés) : comme le chemin normal et
+          // le repli « toute la période », on invalide le cache des stats —
+          // sinon mettreAJourInterface relit les stats mises en cache
+          // (le global) au lieu de recalculer sur des lignes vides.
+          state._calcRevision = (state._calcRevision || 0) + 1;
+          _amStatsCache.clear();
+          _notifCacheSig = '';
           mettreAJourInterface();
           return;
         }
@@ -45,6 +52,13 @@
           state.foodRows = [];
           state.offresRows = [];
           state.statRows = [];
+          // Correctif 4 (2026-11-27, KPI figés) : une période sans commande
+          // (ex. une semaine 2027 choisie par erreur) vidait les lignes mais
+          // laissait le cache des stats intact — les cartes affichaient
+          // l'ancien global au lieu de 0. On invalide comme partout ailleurs.
+          state._calcRevision = (state._calcRevision || 0) + 1;
+          _amStatsCache.clear();
+          _notifCacheSig = '';
           mettreAJourInterface();
           return;
         }

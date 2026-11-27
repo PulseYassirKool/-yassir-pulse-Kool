@@ -2475,6 +2475,89 @@ test('Kool : un choix manuel de semaine (W47) n\'est jamais écrasé par une syn
   assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
 });
 
+// Correctif 4 (diagnostic 2026-11-27, KPI figés) : les cartes affichaient
+// toujours le global — quand la période choisie ne contient aucune commande
+// (ex. une semaine 2027 choisie par erreur, le libellé n'affiche pas l'année),
+// le moteur sortait sans invalider le cache des stats.
+// Données : S43 (19/10) = 2 commandes, J = 150 ; S47 (16-22/11) = 4 commandes,
+// J = 375. Resto Alpha, commission 20 % → CA = 20 % × J (30 / 75 / 105 TND).
+const koolCsvDataKpi = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '19/10/2026', '3001', '', 'Resto Alpha', '', '', '100.00', '3', '0'],
+  ['', '', '', '19/10/2026', '3002', '', 'Resto Alpha', '', '', '50.00', '3', '0'],
+  ['', '', '', '16/11/2026', '3004', '', 'Resto Alpha', '', '', '200.00', '3', '0'],
+  ['', '', '', '16/11/2026', '3005', '', 'Resto Alpha', '', '', '100.00', '3', '0'],
+  ['', '', '', '22/11/2026', '3006', '', 'Resto Alpha', '', '', '50.00', '3', '0'],
+  ['', '', '', '22/11/2026', '3007', '', 'Resto Alpha', '', '', '25.00', '3', '0'],
+]);
+
+test('KPI : les cartes suivent la semaine choisie (S47 puis S43), jamais le global figé', async () => {
+  const w = bootKool({ data: koolCsvDataKpi });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  const kpi = (id) => w.document.getElementById(id).textContent;
+  // Toute la période : 6 commandes, CA 105,00 TND (20 % × 525).
+  assert.equal(kpi('kpiTotalOrders'), '6', 'total global');
+  assert.equal(kpi('kpiTotalCa'), '105,00 TND', 'CA global');
+  // S47 (16→22 nov.) : 4 commandes, CA 75,00 TND.
+  w.yassirOnWeekSelectChange('2026-11-16|2026-11-22|S47');
+  await wait(300);
+  assert.equal(kpi('kpiTotalOrders'), '4', 'total S47');
+  assert.equal(kpi('kpiFoodOrders'), '4', 'food S47');
+  assert.equal(kpi('kpiTotalCa'), '75,00 TND', 'CA S47');
+  // S43 (19→25 oct.) : 2 commandes, CA 30,00 TND.
+  w.yassirOnWeekSelectChange('2026-10-19|2026-10-25|S43');
+  await wait(300);
+  assert.equal(kpi('kpiTotalOrders'), '2', 'total S43');
+  assert.equal(kpi('kpiTotalCa'), '30,00 TND', 'CA S43');
+  // Semaine vide (S47 2027, choisie par erreur — le libellé n'affiche pas
+  // l'année) : plus aucun chiffre figé du global, la section se masque et
+  // les compteurs sont à 0.
+  w.yassirOnWeekSelectChange('2027-11-22|2027-11-28|S47');
+  await wait(300);
+  assert.ok(w.document.getElementById('kpiSection').classList.contains('hidden'), 'la section KPI doit se masquer sur une période vide');
+  assert.equal(kpi('kpiTotalOrders'), '0', 'total période vide (global figé !)');
+  assert.equal(kpi('kpiTotalCa'), '0,00 TND', 'CA période vide (global figé !)');
+  // Retour à toute la période : les totaux globaux reviennent.
+  w.yassirOnWeekSelectChange('');
+  await wait(300);
+  assert.equal(kpi('kpiTotalOrders'), '6', 'total global après retour');
+  assert.equal(kpi('kpiTotalCa'), '105,00 TND', 'CA global après retour');
+  assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
+});
+
+test('KPI : les cartes suivent un changement de date jour par jour et les préréglages', async () => {
+  const w = bootKool({ data: koolCsvDataKpi });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  const kpi = (id) => w.document.getElementById(id).textContent;
+  assert.equal(kpi('kpiTotalOrders'), '6', 'total global');
+  // Un seul jour (16/11) : 2 commandes, CA 60,00 TND (20 % × 300).
+  w.document.getElementById('filterDateStart').value = '2026-11-16';
+  w.document.getElementById('filterDateEnd').value = '2026-11-16';
+  w.yassirOnDateRangeChange();
+  await wait(300);
+  assert.equal(kpi('kpiTotalOrders'), '2', 'total 16/11');
+  assert.equal(kpi('kpiTotalCa'), '60,00 TND', 'CA 16/11');
+  // Préréglage 7 jours (depuis la date max 22/11 → 16→22/11) : 4 commandes, CA 75,00 TND.
+  w.yassirApplyDatePreset('LAST_7');
+  await wait(300);
+  assert.equal(kpi('kpiTotalOrders'), '4', 'total 7 derniers jours');
+  assert.equal(kpi('kpiTotalCa'), '75,00 TND', 'CA 7 derniers jours');
+  // Préréglage Tout : retour au global.
+  w.yassirApplyDatePreset('ALL');
+  await wait(300);
+  assert.equal(kpi('kpiTotalOrders'), '6', 'total global après Tout');
+  assert.equal(kpi('kpiTotalCa'), '105,00 TND', 'CA global après Tout');
+  assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
+});
+
 test('Item 4 : avertissement « modifications temporaires » visible pour le proprio, masqué pour les AM', async () => {
   const w = boot();
   await login(w, 'proprio', 'Proprio-Test-123');
