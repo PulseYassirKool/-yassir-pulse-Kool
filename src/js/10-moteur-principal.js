@@ -106,7 +106,15 @@
           } else if (/^delivery\s*amount([._\s]*\d+)?$/i.test(hc)) {
             delivAmtCandidates.push(ci);
             candidateColSet.add(ci);
-          } else if (/item|sub|total|amount|order/i.test(hc) && !/food|delivery|driver|payout|earning|commission|tax|discount|coupon|distance|time/i.test(hc)) {
+          } else if (/item|sub/i.test(hc) && !/food|delivery|driver|payout|earning|commission|tax|discount|coupon|distance|time/i.test(hc)) {
+            // Correctif 2026-11-27 (bug CA/GMV : la calibration choisissait
+            // « Primary Paid Amount » comme « item total ») : le repli ne doit
+            // porter que sur des colonnes qui parlent d'ARTICLES ou de
+            // SOUS-TOTAL (« item total charged », « subtotal », …). Les colonnes
+            // « Primary Paid Amount », « amount to restaurant », « Payable
+            // Amount », « order day », « order id » ne sont pas un total
+            // d'articles : les accepter faussait la base BRUT de la
+            // participation (part plateforme) et certains KPI.
             fallbackItemCandidates.push(ci);
             candidateColSet.add(ci);
           }
