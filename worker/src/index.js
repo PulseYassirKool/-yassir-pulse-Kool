@@ -229,14 +229,28 @@ export async function handle(request, env) {
     if (result.legacy) {
       const list = await listAccounts(env);
       const target = list.find((a) => a.username === account.username);
-      target.hash = await hashPassword(password);
-      await saveAccounts(env, list);
+      // G2 : ne migrer que si l'entrée est strictement inchangée depuis la
+      // vérification du mot de passe. Si le propriétaire a changé le mot de
+      // passe (ou supprimé le compte) entre-temps, on ne réécrit rien : sans
+      // cela, l'ancien mot de passe réapparaissait et la suppression pouvait
+      // être annulée. Le KV n'offre pas de CAS : une modification entre cette
+      // relecture et l'écriture reste théoriquement possible (fenêtre de
+      // quelques ms) — la migration ne porte que sur un hash, jamais sur un
+      // mot de passe en clair.
+      if (target && target.hash === account.hash) {
+        target.hash = await hashPassword(password);
+        await saveAccounts(env, list);
+      }
     }
     const now = Math.floor(Date.now() / 1000);
     const ttl = body.remember ? 7 * 24 * 3600 : 8 * 3600;
+    // G2 : le jeton porte la génération de révocation en vigueur (`rv`) :
+    // après une déconnexion, la génération augmente et les jetons émis avant
+    // sont rejetés (voir le contrôle dans les routes protégées).
+    const revGen = Number(await env.PULSE_KV.get(`rev:${account.username}`)) || 0;
     // pv = version du mot de passe : quand le propriétaire change le mot de passe
     // d'un compte, pv est incrémenté et tous les jetons émis avant sont rejetés.
-    const token = await sign({ sub: account.username, iat: now, exp: now + ttl, pv: account.pwdVersion || 0 }, env.JWT_SECRET);
+    const token = await sign({ sub: account.username, iat: now, exp: now + ttl, pv: account.pwdVersion || 0, rv: revGen }, env.JWT_SECRET);
     // Connexion réussie d'un non-propriétaire : journalisée côté serveur.
     if (account.role !== 'owner') {
       await appendActivity(env, { ts: Date.now(), user: account.username, type: 'login', detail: 'Connexion' });
@@ -254,17 +268,31 @@ export async function handle(request, env) {
   // Mot de passe changé depuis l'émission du jeton (par le propriétaire) :
   // la session meurt immédiatement (le front déconnecte sur ce 401).
   if ((claims.pv || 0) !== (me.pwdVersion || 0)) return fail(401, 'Session expirée.');
+  // Révocation à la déconnexion (G2, audit 2026-11-27) : chaque déconnexion
+  // incrémente un compteur `rev:<identifiant>` ; le jeton porte le compteur
+  // en vigueur à son émission (`rv`). Un jeton d'une génération antérieure
+  // est rejeté. Un compteur (et non un horodatage) : aucun problème de
+  // granularité quand déconnexion et reconnexion s'enchaînent dans la même
+  // seconde. La clé ne touche jamais au tableau des comptes, donc une
+  // déconnexion concurrente avec un changement de mot de passe ou une
+  // suppression ne peut plus annuler l'autre opération. Une clé par compte :
+  // pas d'accumulation à nettoyer.
+  const revGen = Number(await env.PULSE_KV.get(`rev:${me.username}`)) || 0;
+  if ((claims.rv || 0) !== revGen) return fail(401, 'Session expirée.');
 
   if (path === '/api/me' && method === 'GET') return reply({ user: publicUser(me) });
 
-  // Déconnexion côté serveur (audit 2026-11-27, item 8) : incrémenter
-  // pwdVersion invalide immédiatement TOUS les jetons du compte, y compris
-  // le jeton 7 jours « se souvenir de moi » — jusque-là, la déconnexion
-  // n'effaçait le jeton que du navigateur. Rôle indifférent ; la
-  // journalisation reste côté front (yassirJournaliser, avant l'appel).
+  // Déconnexion côté serveur (audit 2026-11-27, item 8 ; G2) : la déconnexion
+  // ne touche PLUS JAMAIS au tableau des comptes — elle incrémente seulement
+  // le compteur `rev:<identifiant>`. Tout jeton d'une génération antérieure
+  // est rejeté à chaque requête authentifiée (voir ci-dessus), y compris le
+  // jeton 7 jours « se souvenir de moi ». La déconnexion coupe toujours
+  // toutes les sessions du compte : comportement voulu pour l'instant.
+  // Rôle indifférent ; la journalisation reste côté front (yassirJournaliser,
+  // avant l'appel).
   if (path === '/api/logout' && method === 'POST') {
-    me.pwdVersion = (me.pwdVersion || 0) + 1;
-    await saveAccounts(env, accounts);
+    const cur = Number(await env.PULSE_KV.get(`rev:${me.username}`)) || 0;
+    await env.PULSE_KV.put(`rev:${me.username}`, String(cur + 1));
     return reply({ ok: true });
   }
 

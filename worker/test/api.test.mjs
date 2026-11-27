@@ -264,3 +264,106 @@ test('déconnexion côté serveur : POST /api/logout invalide tous les jetons du
   const amFresh = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
   assert.equal((await call('GET', '/api/me', null, amFresh)).status, 200);
 });
+
+// ---- G2 (audit 2026-11-27) : la déconnexion ne touche plus jamais `accounts` ----
+test('G2 : la déconnexion n\'écrit jamais dans accounts — seule une clé rev: est créée', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  kvStore.delete('rev:omar.beldi');
+  const before = kvStore.get('accounts');
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  assert.equal((await call('POST', '/api/logout', null, am)).status, 200);
+  assert.equal(kvStore.get('accounts'), before, 'accounts inchangé par la déconnexion');
+  assert.equal(kvStore.get('rev:omar.beldi'), '1', 'compteur rev:omar.beldi incrémenté à 1');
+  assert.equal((await call('GET', '/api/me', null, am)).status, 401, 'ancien jeton rejeté après déconnexion');
+  // Reconnexion immédiate (souvent dans la même seconde) : le nouveau jeton est valide.
+  const fresh = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  assert.equal((await call('GET', '/api/me', null, fresh)).status, 200, 'reconnexion immédiate possible');
+});
+
+test('G2 (a) : changement de mot de passe concurrent avec une déconnexion — le nouveau mot de passe gagne', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false },
+    { username: 'aziza.souli', hash: await hashPassword('Aziza-Password-2'), role: 'am', displayName: 'Aziza', amName: 'Aziza Souli', protected: false }
+  ]));
+  const tokenA = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  // A se déconnecte pendant que le proprio change le mot de passe de B.
+  const [logoutRes, putRes] = await Promise.all([
+    call('POST', '/api/logout', null, tokenA),
+    call('PUT', '/api/accounts/aziza.souli', { password: 'Nouveau-Password-9', role: 'am', amName: 'Aziza Souli', displayName: 'Aziza' }, owner)
+  ]);
+  assert.equal(logoutRes.status, 200);
+  assert.equal(putRes.status, 200);
+  // A est bien déconnecté.
+  assert.equal((await call('GET', '/api/me', null, tokenA)).status, 401);
+  // Le nouveau mot de passe de B marche, l'ancien est refusé (pas de retour en arrière).
+  assert.equal((await call('POST', '/api/login', { username: 'aziza.souli', password: 'Aziza-Password-2' })).status, 401);
+  const freshB = (await call('POST', '/api/login', { username: 'aziza.souli', password: 'Nouveau-Password-9' })).json.token;
+  assert.equal((await call('GET', '/api/me', null, freshB)).status, 200);
+  // Les deux comptes sont toujours là.
+  const list = (await call('GET', '/api/accounts', null, owner)).json.accounts;
+  assert.ok(list.some((a) => a.username === 'omar.beldi'));
+  assert.ok(list.some((a) => a.username === 'aziza.souli'));
+});
+
+test('G2 (d) : suppression concurrente avec une déconnexion — le compte reste supprimé', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const tokenB = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  // Le proprio supprime B pendant que B se déconnecte.
+  const [delRes, logoutRes] = await Promise.all([
+    call('DELETE', '/api/accounts/omar.beldi', null, owner),
+    call('POST', '/api/logout', null, tokenB)
+  ]);
+  assert.equal(delRes.status, 200, 'la suppression aboutit');
+  // La déconnexion répond 200 (avant la suppression) ou 401 (compte déjà parti) selon l'ordre.
+  assert.ok([200, 401].includes(logoutRes.status), 'déconnexion concurrente : 200 ou 401, jamais de résurrection');
+  const list = (await call('GET', '/api/accounts', null, owner)).json.accounts;
+  assert.ok(list.every((a) => a.username !== 'omar.beldi'), 'le compte reste supprimé');
+  assert.equal((await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 401);
+  assert.equal((await call('GET', '/api/me', null, tokenB)).status, 401);
+});
+
+test('G2 : migration d\'ancien hash — un changement de mot de passe concurrent n\'est pas écrasé', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await legacy('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  // On simule le changement concurrent du proprio : il a lieu entre la
+  // vérification du mot de passe (1re lecture de `accounts`) et la migration
+  // (2e lecture). Sans la garde, la migration réécrirait l'ancien mot de passe.
+  const origGet = kv.get;
+  let reads = 0;
+  kv.get = async (k, t) => {
+    if (k === 'accounts') {
+      reads++;
+      if (reads === 2) {
+        const list = JSON.parse(kvStore.get('accounts'));
+        const target = list.find((a) => a.username === 'omar.beldi');
+        target.hash = await hashPassword('Nouveau-Password-9');
+        target.pwdVersion = 1;
+        kvStore.set('accounts', JSON.stringify(list));
+      }
+    }
+    return origGet(k, t);
+  };
+  try {
+    // La connexion avec l'ancien mot de passe aboutit (il était valide au moment de la vérification).
+    const r = await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' });
+    assert.equal(r.status, 200);
+    // Mais le nouveau mot de passe du proprio n'a pas été écrasé par la migration.
+    assert.equal((await call('POST', '/api/login', { username: 'omar.beldi', password: 'Nouveau-Password-9' })).status, 200);
+    assert.equal((await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 401);
+    // Le jeton émis pendant la course meurt aussi (version du mot de passe changée).
+    assert.equal((await call('GET', '/api/me', null, r.json.token)).status, 401);
+  } finally {
+    kv.get = origGet;
+  }
+});
