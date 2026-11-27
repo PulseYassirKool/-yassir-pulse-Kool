@@ -3,6 +3,8 @@
 // et ne servir la configuration (IDs Google Sheets) et les données par défaut qu'aux utilisateurs connectés.
 // Aucun secret ne vit dans le dépôt : env.JWT_SECRET, env.LEGACY_SALT, et le KV `PULSE_KV`.
 
+import { readSheetRange } from './google-sheets.js';
+
 const ROLES = ['owner', 'viewer_all', 'am', 'market_am'];
 const ITERATIONS = 100000; // plafond PBKDF2 sur Workers
 const MAX_FAILS = 5;
@@ -355,6 +357,25 @@ export async function handle(request, env) {
   if (path === '/api/bootstrap' && method === 'GET') {
     const [config, defaults] = await Promise.all([env.PULSE_KV.get('config', 'json'), env.PULSE_KV.get('defaults', 'json')]);
     return reply({ config: config || { live: {}, kool: {} }, defaults: defaults || { commissions: {}, portfolios: {} } });
+  }
+
+  // ---------- Lecture Google Sheets côté serveur (G3, tranche 1) ----------
+  // Endpoint de test réservé au propriétaire : prouve que le Worker lit les
+  // feuilles via le compte de service. Lecture seule, 5 premières lignes.
+  // Ne renvoie jamais de secret ; les erreurs Google restent génériques.
+  if (path === '/api/admin/sheets-test' && method === 'GET') {
+    if (me.role !== 'owner') return fail(403, 'Accès réservé au propriétaire.');
+    const spreadsheetId = url.searchParams.get('spreadsheetId') || '';
+    const range = url.searchParams.get('range') || '';
+    try {
+      const result = await readSheetRange(env, spreadsheetId, range);
+      const rows = result.values || [];
+      return reply({ spreadsheetId, range, rowCount: rows.length, rows: rows.slice(0, 5) });
+    } catch (e) {
+      if (e && e.status === 400) return fail(400, e.message);
+      if (e && e.status === 500) return fail(500, 'Lecture Google Sheets non configurée.');
+      return fail(502, 'Lecture de la feuille impossible.');
+    }
   }
 
   // ---------- Journal d'activité (AM uniquement) ----------
