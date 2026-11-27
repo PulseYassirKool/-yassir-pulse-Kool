@@ -2528,6 +2528,42 @@ test('Item 5a : association article-règle exacte, jamais par sous-chaîne, jama
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// Correctif 3 (décision utilisateur 2026-11-27, assouplissement Pack/BOGOF) :
+// les libellés de règles sont des phrases, jamais égales au nom de l'article —
+// en octobre, 0 TND rattaché, 100 % « non attribué ». Pour une règle Pack/BOGOF,
+// l'article se rattache quand son nom normalisé est CONTENU dans le libellé.
+test('Pack/BOGOF : un article se rattache quand son nom est contenu dans le libellé de la règle', () => {
+  const w = boot();
+  w.koolOrderItemsByOrderId = new Map([
+    ['cmd-2', [
+      { article: 'Makloub viande hachée', category: 'Sandwich', quantity: 1, unitPrice: 20, originalPrice: 20, discountPrice: 10 },
+      { article: 'Pizza Margherita', category: 'Pizza', quantity: 1, unitPrice: 12, originalPrice: 12, discountPrice: 6 },
+      { article: 'Tacos Poulet', category: 'Tacos', quantity: 1, unitPrice: 9, originalPrice: 9, discountPrice: 8 }
+    ]]
+  ]);
+  const regles = [
+    { restaurant: 'Resto Test', details: '1 Makloub viande hachée achetée 20 dt = 1 makloub offerte', tag: 'Pack', partPct: 10 },
+    { restaurant: 'Resto Test', details: 'Offre BOGOF Pizza Margherita', tag: 'BOGOF', partPct: 10 },
+    { restaurant: 'Resto Test', details: 'Pack Burger Classic : 2 achetés = 1 offert', tag: 'Pack', partPct: 10 }
+  ];
+  const res = w.yassirCalculerParticipationArticlesKool('CMD-2', regles);
+  // Makloub : rattaché par le tag Pack + nom dans le libellé (remise 10, plateforme 10 % × 20 = 2, resto 8).
+  // Pizza Margherita : rattachée par le libellé BOGOF (remise 6, plateforme 10 % × 12 = 1,2, resto 4,8).
+  assert.equal(res.matchedItemsCount, 2, 'articles rattachés : ' + JSON.stringify(res.breakdown));
+  assert.equal(res.costTnd, 12.8, 'part restaurant : ' + res.costTnd);
+  assert.equal(res.discountTotalTnd, 16, 'remise rattachée : ' + res.discountTotalTnd);
+  // Tacos Poulet : aucun libellé ne contient son nom → « non attribué », jamais rattaché.
+  assert.equal(res.unattributedTnd, 1, 'montant non attribué : ' + res.unattributedTnd);
+  assert.equal(res.unattributedCount, 1, 'articles non attribués : ' + res.unattributedCount);
+  // Pas de repli sur la première règle : avec la seule règle « Pack Burger Classic »,
+  // aucun des trois articles ne doit être rattaché.
+  const res2 = w.yassirCalculerParticipationArticlesKool('CMD-2', [regles[2]]);
+  assert.equal(res2.matchedItemsCount, 0, 'la règle Pack Burger a attrapé des articles par repli');
+  assert.equal(res2.unattributedTnd, 17, 'tout doit être non attribué : ' + res2.unattributedTnd);
+  assert.equal(res2.unattributedCount, 3, 'tous les articles doivent être non attribués');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Item 5b (audit 2026-11-27) : règles de secours lues depuis /api/bootstrap ----
 test('Item 5b : règles de secours depuis la config KV (plus rien en dur) + bandeau d\u2019avertissement', async () => {
   const prevConfig = store.get('config');

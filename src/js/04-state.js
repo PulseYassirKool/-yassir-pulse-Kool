@@ -450,6 +450,28 @@
               break;
             }
           }
+          // Passe 2 — assouplissement Pack/BOGOF (décision utilisateur
+          // 2026-11-27) : les libellés de règles sont des phrases (« 1 Makloub
+          // viande hachée achetée 20 dt = 1 makloub offerte… ») jamais égales
+          // au nom de l'article — en octobre, 0 TND rattaché, 100 %
+          // « non attribué ». Pour une règle Pack/BOGOF, on rattache l'article
+          // quand son nom normalisé est CONTENU dans le libellé normalisé de
+          // la règle (détails ou tag). La passe 1 exacte reste la règle pour
+          // tout le reste ; jamais de repli sur la première règle : sans
+          // rattachement, l'article reste « non attribué ». La garde artNorm
+          // non vide est obligatoire (''.includes() est toujours vrai).
+          if (!appliedRule && artNorm) {
+            for (var j2 = 0; j2 < articleRules.length; j2++) {
+              var rl2 = articleRules[j2];
+              var det2 = normalizeNomArticle(rl2.details || '');
+              var tag2 = normalizeNomArticle(rl2.tag || '');
+              if ((det2.includes('pack') || det2.includes('bogof') || tag2.includes('pack') || tag2.includes('bogof'))
+                && (det2.includes(artNorm) || tag2.includes(artNorm))) {
+                appliedRule = rl2;
+                break;
+              }
+            }
+          }
           if (!appliedRule && isDiscountedItem && lineDiscountTnd > 0) {
             unattributedTnd += lineDiscountTnd;
             unattributedCount += (it.quantity || 1);
