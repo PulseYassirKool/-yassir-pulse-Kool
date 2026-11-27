@@ -119,8 +119,9 @@
         return ws;
       }
 
-      window.yassirExportStatExcel = function () {
+      window.yassirExportStatExcel = async function () {
         if (state.statRows.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var activeFilter = getEffectiveAmFilter();
         var wb = XLSX.utils.book_new();
         var dateStr = new Date().toISOString().slice(0, 10);
@@ -147,8 +148,9 @@
         }
       };
 
-      window.yassirExportExcelComplet = function () {
+      window.yassirExportExcelComplet = async function () {
         if (state.marketRows.length === 0 && state.foodRows.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var activeFilter = getEffectiveAmFilter();
         var suffix = activeFilter === 'ALL' ? 'Global' : activeFilter.replace(/\s+/g, '_');
 
@@ -204,9 +206,10 @@
         showToast('Classeur Excel complet exporté (<strong>' + escapeHtml(activeFilter === 'ALL' ? 'Vue Globale' : activeFilter) + '</strong>).', 'success');
       };
 
-      window.yassirExportOffresExcel = function () {
+      window.yassirExportOffresExcel = async function () {
         var list = filtrerParPolygoneSelectionne(filtrerParAmSelectionne(state.offresRows));
         if (list.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var activeFilter = getEffectiveAmFilter();
         var suffix = activeFilter === 'ALL' ? 'Global' : activeFilter.replace(/\s+/g, '_');
 
@@ -218,7 +221,8 @@
         showToast('Fichier <strong>YASSIR_Export_Offres_' + suffix + '_' + dateStr + '.xlsx</strong> téléchargé.', 'success');
       };
 
-      window.yassirExportActiveCsv = function () {
+      window.yassirExportActiveCsv = async function () {
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var aoa = null;
         var fileName = 'export.csv';
         var activeFilter = getEffectiveAmFilter();

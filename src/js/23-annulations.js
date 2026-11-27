@@ -34,6 +34,8 @@
       };
 
       window.yassirRenderCancellationsPanel = function () {
+        // I2 : graphique demandé avant l'arrivée de Chart.js — il sera redessiné quand les libs seront là.
+        if (!window.Chart) window.__yassirChartsManquants = true;
         var emptyEl = document.getElementById('cancEmptyState');
         var contentEl = document.getElementById('cancContentWrapper');
         var btnExport = document.getElementById('btnExportCancXlsx');
@@ -322,8 +324,9 @@
         }).join('');
       };
 
-      window.yassirExportCancellationsExcel = function () {
+      window.yassirExportCancellationsExcel = async function () {
         if (!currentFilteredCancRecords || currentFilteredCancRecords.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var wb = XLSX.utils.book_new();
 
         var typesAoa = [['Type Annulation', 'Nombre', '% Annulations', '% Total Reçues']].concat(

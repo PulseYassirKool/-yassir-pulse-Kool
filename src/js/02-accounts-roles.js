@@ -200,6 +200,10 @@
         }, 5000);
       }
 
+      // I2 : showToast vit dans la portée de l'application (IIFE) ; on
+      // l'expose pour globals.js (aide d'attente des bibliothèques lourdes).
+      window.yassirShowToast = showToast;
+
       function activateSession(account, remember) {
         currentUser = {
           username: account.username,

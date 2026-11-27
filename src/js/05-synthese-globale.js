@@ -762,6 +762,8 @@
       }
 
       function renderSynth2025Panel() {
+        // I2 : graphique demandé avant l'arrivée de Chart.js — il sera redessiné quand les libs seront là.
+        if (!window.Chart) window.__yassirChartsManquants = true;
         var yoyGrid = document.getElementById('synth2025YoyCardsGrid');
         var synth = calculerSyntheseGlobaleData();
         if (!synth || synth.empty) return;
@@ -1560,7 +1562,8 @@
         document.body.removeChild(link);
       }
 
-      window.yassirDownloadSingleSlidePng = function (which) {
+      window.yassirDownloadSingleSlidePng = async function (which) {
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var dateStr = new Date().toISOString().slice(0, 10);
         if (which === 'exec') {
           triggerCanvasPngDownload(renderExecSummarySlidePngCanvas(), 'YASSIR_Executive_Summary_' + dateStr + '.png');
@@ -1571,7 +1574,8 @@
         }
       };
 
-      window.yassirDownloadSlidesPng = function () {
+      window.yassirDownloadSlidesPng = async function () {
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var dateStr = new Date().toISOString().slice(0, 10);
         triggerCanvasPngDownload(renderExecSummarySlidePngCanvas(), 'YASSIR_Slide1_Executive_Summary_' + dateStr + '.png');
         setTimeout(function () {
@@ -1717,11 +1721,12 @@
         return ws;
       }
 
-      window.yassirExportSynthGlobalExcel = function () {
+      window.yassirExportSynthGlobalExcel = async function () {
         if (!canSeeGlobalSynth() || (!isMarketOnlyViewer() && getEffectiveAmFilter() !== 'ALL')) return;
         var isMktMode = isMarketOnlyViewer();
         var synthFood = calculerSyntheseGlobaleData();
         if (!synthFood || synthFood.empty) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
 
         var wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, buildSynthSheetFromData(synthFood), isMktMode ? 'Synthèse Market' : 'Synthèse Food');
@@ -1785,10 +1790,11 @@
         showToast('Fichier <strong>YASSIR_Synthese_Food_' + dateStr + '.xlsx</strong> téléchargé (commandes Food uniquement).', 'success');
       };
 
-      window.yassirExportSynthGlobalCsv = function () {
+      window.yassirExportSynthGlobalCsv = async function () {
         if (!canSeeGlobalSynth() || (!isMarketOnlyViewer() && getEffectiveAmFilter() !== 'ALL')) return;
         var synth = calculerSyntheseGlobaleData();
         if (!synth || synth.empty) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
 
         var aoa = [['Indicateur', 'Valeur']];
         synth.kpiRows.forEach(function (r) { aoa.push([r.label, r.value]); });

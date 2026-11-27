@@ -104,12 +104,13 @@
         return { entries: list, zeroCountForScope: zeroCountForScope };
       }
 
-      window.yassirExportAmPortfoliosExcel = function () {
+      window.yassirExportAmPortfoliosExcel = async function () {
         var res = getFilteredAmPortfolioEntries();
         if (!res.entries || res.entries.length === 0) {
           showToast('Aucun restaurant à exporter pour ce filtre.', 'info');
           return;
         }
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var activeFilter = getEffectiveAmFilter();
         var suffix = activeFilter === 'ALL' ? 'Global' : activeFilter.replace(/\s+/g, '_');
         var modeSuffix = (canSeeZeroOrdersStats() && amTableZeroOrderFilter === 'zero') ? '_0_Commande' : '';
@@ -301,12 +302,13 @@
         return { entries: list, zeroCountForScope: zeroCountForScope };
       }
 
-      window.yassirExportAmPortfoliosExcel = function () {
+      window.yassirExportAmPortfoliosExcel = async function () {
         var res = getFilteredAmPortfolioEntries();
         if (!res.entries || res.entries.length === 0) {
           showToast('Aucun restaurant à exporter pour ce filtre.', 'info');
           return;
         }
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var activeFilter = getEffectiveAmFilter();
         var suffix = activeFilter === 'ALL' ? 'Global' : activeFilter.replace(/\s+/g, '_');
         var modeSuffix = (canSeeZeroOrdersStats() && amTableZeroOrderFilter === 'zero') ? '_0_Commande' : '';
@@ -570,10 +572,11 @@
         showToast('Restaurant <strong>' + escapeHtml(info.displayName) + '</strong> retiré du portefeuille.', 'info');
       };
 
-      window.yassirOnAmFileChange = function (e) {
+      window.yassirOnAmFileChange = async function (e) {
         if (!isOwnerAdmin()) return;
         var file = e.target.files && e.target.files[0];
         if (!file) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var targetMode = document.getElementById('selectImportTargetAm').value;
 
         var reader = new FileReader();

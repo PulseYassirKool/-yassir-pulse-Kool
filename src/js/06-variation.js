@@ -25,8 +25,9 @@
         window.yassirRenderVariationTable();
       };
 
-      function chargerFichierPrecedent(file) {
+      async function chargerFichierPrecedent(file) {
         if (!file || !canSeeGlobalSynth()) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var reader = new FileReader();
         reader.onload = function (e) {
           try {
@@ -585,8 +586,9 @@
         }).join('');
       };
 
-      window.yassirExportVariationExcel = function () {
+      window.yassirExportVariationExcel = async function () {
         if (!canSeeGlobalSynth() || currentVariationRowsList.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var headers = [
           'Partenaires', 'City', 'Segment', 'Tier', 'Requested', 'Delivered',
           'Maximal Gap vs Now', 'Maximal Gap %', 'AVG/Day', 'GMV', 'Success Rate Net',

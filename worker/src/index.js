@@ -7,6 +7,9 @@ const ROLES = ['owner', 'viewer_all', 'am', 'market_am'];
 const ITERATIONS = 100000; // plafond PBKDF2 sur Workers
 const MAX_FAILS = 5;
 const LOCK_SECONDS = 900;
+const IP_MAX_FAILS = 50; // I1 : plafond par IP seule (tous identifiants confondus) —
+// plus élevé que le plafond par IP+identifiant pour ne pas bloquer tous les
+// AM derrière une même IP partagée après quelques échecs seulement.
 const enc = new TextEncoder();
 
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -109,6 +112,39 @@ export class RateLimiter {
     try {
       if (this.state && this.state.storage) await this.state.storage.put(key, entry);
     } catch (e) { /* mémoire seule */ }
+    // I1 : planifier le nettoyage des entrées expirées. On cale une alarme
+    // sur l'expiration de cette entrée, sauf si une alarme plus proche est
+    // déjà prévue (l'alarme nettoie ensuite toutes les entrées échues et
+    // replanifie la suivante). Sans cela, les entrées s'accumulent
+    // indéfiniment dans le stockage de l'objet durable.
+    try {
+      const st = this.state && this.state.storage;
+      if (st && typeof st.setAlarm === 'function') {
+        const cur = typeof st.getAlarm === 'function' ? await st.getAlarm().catch(() => null) : null;
+        if (cur === null || cur === undefined || entry.resetAt < cur) await st.setAlarm(entry.resetAt);
+      }
+    } catch (e) { /* alarme non critique : le nettoyage est du confort */ }
+  }
+  // I1 : alarme de nettoyage — supprime les entrées expirées (stockage +
+  // mémoire) et replanifie la prochaine échéance s'il en reste.
+  async alarm() {
+    if (!this.state || !this.state.storage) return;
+    const now = Date.now();
+    let next = null;
+    try {
+      const entries = await this.state.storage.list();
+      for (const [key, entry] of entries) {
+        if (!entry || typeof entry !== 'object' || now >= entry.resetAt) {
+          try { await this.state.storage.delete(key); } catch (e) {}
+          this.mem.delete(key);
+        } else if (next === null || entry.resetAt < next) {
+          next = entry.resetAt;
+        }
+      }
+    } catch (e) { return; }
+    if (next !== null && typeof this.state.storage.setAlarm === 'function') {
+      try { await this.state.storage.setAlarm(next); } catch (e) {}
+    }
   }
   async _clear(key) {
     this.mem.delete(key);
@@ -146,23 +182,26 @@ export class RateLimiter {
 // Enregistre une tentative et dit si elle est autorisée (compteur <= max
 // dans la fenêtre). Avec l'objet durable, lecture + incrément atomiques ;
 // repli KV sinon (le compteur est alors incrémenté ici). Le limiteur ne
-// doit jamais empêcher une action légitime : en cas d'erreur, on laisse passer.
+// doit jamais empêcher une action légitime : en cas d'erreur, on laisse passer
+// (ok: false signale que le limiteur était indisponible — /api/login refuse
+// alors avec 503 au lieu de laisser passer, I1 ; le journal garde le
+// laisser-passer, un journal ne doit jamais bloquer).
 async function rlCheck(env, rlKey, max = MAX_FAILS, windowMs = LOCK_SECONDS * 1000) {
   if (env.RATE_LIMITER) {
     try {
       const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(rlKey));
       const r = await stub.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({ key: rlKey, max, windowMs }) }));
       const j = await r.json().catch(() => ({}));
-      return { allowed: j.allowed !== false, useDo: true };
+      return { allowed: j.allowed !== false, useDo: true, ok: true };
     } catch (e) { /* repli KV ci-dessous */ }
   }
   try {
     const count = Number(await env.PULSE_KV.get(rlKey)) || 0;
-    if (count >= max) return { allowed: false, useDo: false };
+    if (count >= max) return { allowed: false, useDo: false, ok: true };
     await env.PULSE_KV.put(rlKey, String(count + 1), { expirationTtl: Math.ceil(windowMs / 1000) });
-    return { allowed: true, useDo: false };
+    return { allowed: true, useDo: false, ok: true };
   } catch (e) {
-    return { allowed: true, useDo: false };
+    return { allowed: true, useDo: false, ok: false };
   }
 }
 async function rlReset(env, rlKey, useDo) {
@@ -208,11 +247,27 @@ export async function handle(request, env) {
     const username = String(body.username || '').trim().toLowerCase();
     const password = String(body.password || '');
     if (!username || !password || password.length > 200) return fail(400, 'Identifiants requis.');
+    // I1 : valider le format de l'identifiant AVANT le limiteur — un format
+    // invalide est rejeté sans créer d'instance d'objet durable (sinon
+    // n'importe quelle chaîne pouvait épuiser le limiteur).
+    if (!/^[a-z0-9._-]{2,40}$/.test(username)) return fail(400, 'Identifiant invalide.');
 
     const ip = request.headers.get('CF-Connecting-IP') || 'local';
     const rlKey = `rl:${ip}:${username}`;
     const rl = await rlCheck(env, rlKey);
+    // I1 : limiteur indisponible (objet durable ET KV en erreur) — refuser
+    // avec 503 au lieu de laisser passer, pour /api/login uniquement.
+    if (!rl.ok) return fail(503, 'Vérification de sécurité indisponible, réessayez dans un instant.');
     if (!rl.allowed) return fail(429, 'Trop de tentatives.');
+    // I1 : compteur par IP seule, en plus du compteur par IP+identifiant —
+    // il bloque les essais répartis sur beaucoup d'identifiants depuis la
+    // même IP. Seuil plus élevé (50/15 min) pour ne pas bloquer tous les AM
+    // derrière une IP partagée. Réinitialisé par une connexion réussie,
+    // comme le compteur par IP+identifiant (sans cela, les connexions
+    // légitimes d'une IP partagée finiraient par atteindre le plafond).
+    const rlIp = await rlCheck(env, `rl:${ip}`, IP_MAX_FAILS, LOCK_SECONDS * 1000);
+    if (!rlIp.ok) return fail(503, 'Vérification de sécurité indisponible, réessayez dans un instant.');
+    if (!rlIp.allowed) return fail(429, 'Trop de tentatives.');
 
     const account = (await listAccounts(env)).find((a) => a.username.toLowerCase() === username);
     // Même coût de calcul que le compte existe ou non (évite de révéler quels identifiants existent).
@@ -226,6 +281,7 @@ export async function handle(request, env) {
       return fail(401, 'Identifiant ou mot de passe incorrect.');
     }
     await rlReset(env, rlKey, rl.useDo);
+    await rlReset(env, `rl:${ip}`, rlIp.useDo);
     if (result.legacy) {
       const list = await listAccounts(env);
       const target = list.find((a) => a.username === account.username);

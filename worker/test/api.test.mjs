@@ -367,3 +367,103 @@ test('G2 : migration d\'ancien hash — un changement de mot de passe concurrent
     kv.get = origGet;
   }
 });
+
+// ---- I1 (audit 2026-11-27) : le limiteur ne peut plus être épuisé puis contourné ----
+test("I1 : identifiant invalide -> 400 avant le limiteur (aucune instance d'objet durable créée)", async () => {
+  let doCalls = 0;
+  const envTracked = {
+    ...env,
+    RATE_LIMITER: {
+      idFromName: (n) => { doCalls++; return n; },
+      get: () => { doCalls++; return { fetch: async () => { doCalls++; return new Response(JSON.stringify({ allowed: true })); } }; }
+    }
+  };
+  const callTracked = (method, path, body, token) => handle(new Request('https://api.test' + path, {
+    method, body: body ? JSON.stringify(body) : undefined,
+    headers: { Origin: 'https://app.test', ...(token ? { Authorization: 'Bearer ' + token } : {}) }
+  }), envTracked).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+  assert.equal((await callTracked('POST', '/api/login', { username: 'a!b', password: 'x' })).status, 400);
+  assert.equal((await callTracked('POST', '/api/login', { username: 'a', password: 'x' })).status, 400);
+  assert.equal((await callTracked('POST', '/api/login', { username: 'a'.repeat(41), password: 'x' })).status, 400);
+  assert.equal((await callTracked('POST', '/api/login', { username: 'avec espace', password: 'x' })).status, 400);
+  assert.equal(doCalls, 0, 'le limiteur ne doit pas être appelé pour un identifiant invalide');
+  // Un identifiant au bon format mais inexistant passe le filtre et atteint le limiteur (401).
+  assert.equal((await callTracked('POST', '/api/login', { username: 'inconnu', password: 'x' })).status, 401);
+  assert.ok(doCalls > 0, 'le limiteur est consulté pour un identifiant au bon format');
+});
+
+test('I1 : 50 échecs depuis la même IP (identifiants différents) puis 429 via le compteur par IP', async () => {
+  const ip = '203.0.113.7';
+  const ip2 = '203.0.113.8';
+  kvStore.delete(`rl:${ip}`);
+  kvStore.delete(`rl:${ip2}`);
+  const callIp = (useIp) => (method, path, body, token) => handle(new Request('https://api.test' + path, {
+    method, body: body ? JSON.stringify(body) : undefined,
+    headers: { Origin: 'https://app.test', 'CF-Connecting-IP': useIp, ...(token ? { Authorization: 'Bearer ' + token } : {}) }
+  }), env).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+  const fromIp = callIp(ip);
+  // 50 échecs avec 50 identifiants différents : le compteur par IP+identifiant
+  // (5/15 min) ne bloque jamais (1 seul échec par identifiant) — seul le
+  // compteur par IP (50/15 min) compte.
+  for (let i = 0; i < 50; i++) {
+    assert.equal((await fromIp('POST', '/api/login', { username: 'user' + i, password: 'faux' })).status, 401, 'échec ' + (i + 1));
+  }
+  assert.equal((await fromIp('POST', '/api/login', { username: 'user50', password: 'faux' })).status, 429, '51e échec depuis la même IP : bloqué par le compteur par IP');
+  // Une autre IP n'est pas bloquée.
+  assert.equal((await callIp(ip2)('POST', '/api/login', { username: 'user50', password: 'faux' })).status, 401);
+  kvStore.delete(`rl:${ip}`);
+  kvStore.delete(`rl:${ip2}`);
+});
+
+test("I1 : l'objet durable nettoie ses entrées expirées via alarm()", async () => {
+  const alarmStore = new Map();
+  let scheduled = null;
+  const storage = {
+    get: async (k) => alarmStore.get(k) ?? null,
+    put: async (k, v) => void alarmStore.set(k, v),
+    delete: async (k) => void alarmStore.delete(k),
+    list: async () => new Map(alarmStore),
+    setAlarm: async (t) => { scheduled = t; },
+    getAlarm: async () => scheduled
+  };
+  const rl = new RateLimiter({ storage });
+  const check = (key) => rl.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({ key, max: 5, windowMs: 900000 }) })).then((r) => r.json());
+  // Une entrée vivante : une alarme est planifiée sur son expiration.
+  assert.equal((await check('rl:1.2.3.4:omar.beldi')).allowed, true);
+  assert.ok(scheduled !== null, 'une alarme est planifiée après un comptage');
+  // Une entrée expirée + une vivante : l'alarme supprime l'expirée, garde la vivante.
+  alarmStore.set('rl:9.9.9.9:vieux', { count: 5, resetAt: Date.now() - 1000 });
+  rl.mem.set('rl:9.9.9.9:vieux', { count: 5, resetAt: Date.now() - 1000 });
+  await rl.alarm();
+  assert.equal(alarmStore.has('rl:9.9.9.9:vieux'), false, 'entrée expirée supprimée du stockage');
+  assert.equal(rl.mem.has('rl:9.9.9.9:vieux'), false, 'entrée expirée supprimée de la mémoire');
+  assert.equal(alarmStore.has('rl:1.2.3.4:omar.beldi'), true, 'entrée vivante conservée');
+  assert.ok(scheduled !== null && scheduled > Date.now(), 'alarme replanifiée sur la prochaine échéance');
+});
+
+test('I1 : limiteur indisponible -> 503 sur /api/login, laisser-passer conservé pour /api/activity', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  // Limiteur en panne : l'objet durable lève une exception ET le KV refuse
+  // les lectures des compteurs (les autres clés KV fonctionnent).
+  const kvLimiterDown = {
+    get: async (k, t) => {
+      if (String(k).startsWith('rl:') || String(k).startsWith('actrl:')) throw new Error('limiteur indisponible');
+      return kv.get(k, t);
+    },
+    put: kv.put,
+    delete: kv.delete
+  };
+  const envDown = { ...env, PULSE_KV: kvLimiterDown, RATE_LIMITER: { idFromName: () => { throw new Error('DO indisponible'); }, get: () => { throw new Error('DO indisponible'); } } };
+  const callDown = (method, path, body, token) => handle(new Request('https://api.test' + path, {
+    method, body: body ? JSON.stringify(body) : undefined,
+    headers: { Origin: 'https://app.test', ...(token ? { Authorization: 'Bearer ' + token } : {}) }
+  }), envDown).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+  assert.equal((await callDown('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 503);
+  // Le journal ne doit jamais bloquer : l'envoi passe malgré le limiteur en panne.
+  kvStore.delete('activity_log');
+  assert.equal((await callDown('POST', '/api/activity', { type: 'export', detail: 'Export Excel : Test.xlsx' }, am)).status, 200);
+});

@@ -755,12 +755,13 @@
         });
       };
 
-      window.yassirExportNotificationsExcel = function () {
+      window.yassirExportNotificationsExcel = async function () {
         var list = getNotificationsVisiblesFiltrees();
         if (!list || list.length === 0) {
           showToast('Aucune alerte à exporter.', 'info');
           return;
         }
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var aoa = [['Type Alerte', 'Portefeuille AM', 'Restaurant', "Détail de l'alerte"]];
         list.forEach(function (a) {
           var plainMsg = a.message.replace(/<[^>]+>/g, '');

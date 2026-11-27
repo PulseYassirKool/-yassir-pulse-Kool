@@ -240,10 +240,11 @@
       }
       window.yassirParseOffreParticipationRows = parseOffreParticipationRows;
 
-      window.yassirOnOffrePartFileChange = function (e) {
+      window.yassirOnOffrePartFileChange = async function (e) {
         if (!isOwnerAdmin()) return;
         var file = e.target.files && e.target.files[0];
         if (!file) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var reader = new FileReader();
         reader.onload = function (ev) {
           try {

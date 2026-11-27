@@ -184,6 +184,15 @@
         }
       });
 
+      // I2 : appelé par globals.js quand SheetJS + Chart.js viennent d'arriver.
+      // Les panneaux déjà affichés sans leurs graphiques (Chart absent au rendu)
+      // sont redessinés ; sans panneau concerné, on ne fait rien.
+      window.yassirRedessinerGraphiquesApresLibs = function () {
+        var wrap = document.getElementById('appWrapper');
+        if (!wrap || wrap.classList.contains('hidden')) return;
+        mettreAJourInterface();
+      };
+
       function mettreAJourInterface() {
         renderAmFilterPills();
         renderPolygonFilter();

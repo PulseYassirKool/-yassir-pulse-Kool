@@ -169,13 +169,14 @@
         }
       };
 
-      window.yassirExportRestoOrdersListExcel = function () {
+      window.yassirExportRestoOrdersListExcel = async function () {
         var filterInput = document.getElementById('searchRestoSelectInput');
         var list = getFilteredRestoOrdersList(filterInput ? filterInput.value : '');
         if (list.length === 0) {
           showToast('Aucun restaurant à exporter dans la liste.', 'info');
           return;
         }
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var activeFilter = getEffectiveAmFilter();
         var suffix = activeFilter === 'ALL' ? 'Global' : activeFilter.replace(/\s+/g, '_');
         var aoa = [['Restaurant', 'Portefeuille AM', 'Ville / Zone', 'Commandes Reçues', 'Commandes Livrées', 'GMV Livrées (TND)']];
@@ -276,6 +277,8 @@
       }
 
       function renderRestoAnalyticsPanel() {
+        // I2 : graphique demandé avant l'arrivée de Chart.js — il sera redessiné quand les libs seront là.
+        if (!window.Chart) window.__yassirChartsManquants = true;
         var filterInput = document.getElementById('searchRestoSelectInput');
         window.yassirFilterRestoDropdown(filterInput ? filterInput.value : '');
 
@@ -722,8 +725,9 @@
         modal.classList.remove('hidden');
       };
 
-      window.yassirExportSelectedRestoItemsCsv = function () {
+      window.yassirExportSelectedRestoItemsCsv = async function () {
         if (!selectedAnalyticsRestoKey || currentRestoTopItemsList.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var totalQtyAll = currentRestoTopItemsList.reduce(function (acc, it) { return acc + it.qty; }, 0);
         var aoa = [['Rang', 'Restaurant', 'Type', 'Catégorie', 'Article', 'Quantité vendue', 'CA (TND)', 'Qté en promo', 'Part (%)']];
         currentRestoTopItemsList.forEach(function (it, idx) {

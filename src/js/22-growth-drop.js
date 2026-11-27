@@ -241,8 +241,9 @@
         }).join('');
       };
 
-      window.yassirExportGlobalAnalysisExcel = function () {
+      window.yassirExportGlobalAnalysisExcel = async function () {
         if (!currentGlobalAnalysisRows || currentGlobalAnalysisRows.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var aoa = [[
           'Week n°', 'Reçu', 'Livré', 'GMV', 'CA', 'AOV',
           'V.Reçu', 'V.Livré', 'V.GMV', 'V.CA', 'V.AOV', '% Global Livré'
@@ -857,8 +858,9 @@
           });
       };
 
-      window.yassirExportRestaurantAnalysisExcel = function () {
+      window.yassirExportRestaurantAnalysisExcel = async function () {
         if (currentGrowthRows.length === 0 && currentDropRows.length === 0 && currentZeroOrdersWeekRows.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var headers = [
           'Area', 'Restaurant', 'Requested', 'Delivered', 'AVG Last 4 Week',
           'Succes Rate', 'Taux Acceptation', 'WoW Delivered', 'Promo Restaurant',

@@ -165,6 +165,8 @@
       var koolClientsChartInst = null;
 
       function renderKoolClientsPanel() {
+        // I2 : graphique demandé avant l'arrivée de Chart.js — il sera redessiné quand les libs seront là.
+        if (!window.Chart) window.__yassirChartsManquants = true;
         var res = calculerClientsKool();
 
         var kpiN = document.getElementById('koolCliKpiNouveaux');
@@ -270,7 +272,8 @@
 
       // Télécharger le graphique Clients Kool en image PNG (même mécanisme que
       // les slides : lien de téléchargement temporaire sur l'image du graphique).
-      window.yassirDownloadKoolClientsChart = function () {
+      window.yassirDownloadKoolClientsChart = async function () {
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var dateStr = new Date().toISOString().slice(0, 10);
         var img = null;
         try {
@@ -318,7 +321,8 @@
         });
         return wb;
       };
-      window.yassirDownloadKoolClientsTop10 = function () {
+      window.yassirDownloadKoolClientsTop10 = async function () {
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var wb = window.yassirConstruireClasseurTop10Kool();
         if (!wb) {
           showToast('Export Excel <strong>non disponible</strong> pour le moment.', 'warning');

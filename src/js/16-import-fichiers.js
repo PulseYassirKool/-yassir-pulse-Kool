@@ -67,9 +67,10 @@
         });
       }
 
-      function chargerPlusieursFichiersPrincipaux(filesList) {
+      async function chargerPlusieursFichiersPrincipaux(filesList) {
         var files = Array.from(filesList || []);
         if (files.length === 0) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
 
         showToast('Chargement et fusion de <strong>' + files.length + ' fichier(s)</strong> en cours...', 'info');
 
@@ -124,8 +125,9 @@
         if (file) chargerPlusieursFichiersPrincipaux([file]);
       }
 
-      function chargerFichierCommissions(file) {
+      async function chargerFichierCommissions(file) {
         if (!file || !isOwnerAdmin()) return;
+        if (!(await window.yassirAttendreLibsLourdes())) return;
         var reader = new FileReader();
         reader.onload = function (e) {
           try {

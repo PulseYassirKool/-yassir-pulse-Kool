@@ -2165,6 +2165,92 @@ test("G1 : onchange motif/CRM piégés — data-key + getAttribute, rien ne s'ex
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- I2 (audit 2026-11-27) : exports/imports en attente des bibliothèques lourdes ----
+test('I2 : export Excel avec bibliothèques pas encore chargées — attend puis fonctionne', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  const xlsxMod = w.XLSX;
+  const chartMod = w.Chart;
+  assert.ok(xlsxMod && chartMod, 'libs lourdes chargées après connexion');
+  const dataAoa = [TARGET_HEADERS_TEST.slice(),
+    yassirRow('09/11/2026', 'YAF-5001', 'Resto Test I2', 100, 0, '', ''),
+    yassirRow('10/11/2026', 'YAF-5002', 'Resto Test I2', 120, 0, '', '')
+  ];
+  const wb0 = xlsxMod.utils.book_new();
+  xlsxMod.utils.book_append_sheet(wb0, xlsxMod.utils.aoa_to_sheet(dataAoa), 'Data exp');
+  const buf0 = xlsxMod.write(wb0, { bookType: 'xlsx', type: 'array' });
+  const dataFile = new w.File([buf0], 'data-exp.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
+  await wait(1200);
+
+  // Simuler un bloc lent (réseau mobile) : les libs sont retirées, le
+  // chargement simulé les remet après 50 ms. L'export doit attendre.
+  // (Le module XLSX est en lecture seule : on l'enveloppe pour espionner
+  // writeFile au lieu de le modifier.)
+  const ecrits = [];
+  const wrapperXlsx = Object.assign(Object.create(null), xlsxMod, { writeFile: (wb, name) => { ecrits.push(name); } });
+  delete w.XLSX;
+  delete w.Chart;
+  w.yassirLibsLourdesPretes = () => new Promise((res) => setTimeout(() => {
+    w.XLSX = wrapperXlsx;
+    w.Chart = chartMod;
+    res(true);
+  }, 50));
+  await w.yassirExportExcelComplet();
+  assert.equal(ecrits.length, 1, 'export non effectué après attente des libs');
+  assert.ok(ecrits[0].startsWith('YASSIR_VF_Data_Offres_Global_'), 'nom de fichier inattendu : ' + ecrits[0]);
+  assert.ok(w.document.getElementById('toastContainer').textContent.includes('Chargement des bibliothèques'), 'message « Chargement… » absent');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('I2 : import de fichier avec bibliothèques pas encore chargées — attend puis fonctionne', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  const xlsxMod = w.XLSX;
+  const chartMod = w.Chart;
+  const dataAoa = [TARGET_HEADERS_TEST.slice(),
+    yassirRow('09/11/2026', 'YAF-5101', 'Resto Test I2 import', 100, 0, '', '')
+  ];
+  const wb0 = xlsxMod.utils.book_new();
+  xlsxMod.utils.book_append_sheet(wb0, xlsxMod.utils.aoa_to_sheet(dataAoa), 'Data exp');
+  const buf0 = xlsxMod.write(wb0, { bookType: 'xlsx', type: 'array' });
+  const dataFile = new w.File([buf0], 'data-exp.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  delete w.XLSX;
+  delete w.Chart;
+  w.yassirLibsLourdesPretes = () => new Promise((res) => setTimeout(() => {
+    w.XLSX = xlsxMod;
+    w.Chart = chartMod;
+    res(true);
+  }, 50));
+  w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
+  await wait(1200);
+  assert.ok(w.document.getElementById('mainFileName').textContent.includes('fichier(s) enregistré(s)'), 'import non effectué après attente des libs : ' + w.document.getElementById('mainFileName').textContent);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('I2 : échec de chargement du bloc — message d\'erreur clair, pas d\'échec silencieux', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  const xlsxMod = w.XLSX;
+  const dataAoa = [TARGET_HEADERS_TEST.slice(),
+    yassirRow('09/11/2026', 'YAF-5201', 'Resto Test I2 echec', 100, 0, '', '')
+  ];
+  const wb0 = xlsxMod.utils.book_new();
+  xlsxMod.utils.book_append_sheet(wb0, xlsxMod.utils.aoa_to_sheet(dataAoa), 'Data exp');
+  const buf0 = xlsxMod.write(wb0, { bookType: 'xlsx', type: 'array' });
+  const dataFile = new w.File([buf0], 'data-exp.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
+  await wait(1200);
+
+  delete w.XLSX;
+  delete w.Chart;
+  w.yassirLibsLourdesPretes = () => Promise.resolve(false);
+  await w.yassirExportExcelComplet();
+  assert.ok(w.document.getElementById('toastContainer').textContent.includes('Impossible de charger les bibliothèques'), 'message d\'erreur clair absent');
+  assert.ok(!w.document.getElementById('toastContainer').textContent.includes('Classeur Excel complet exporté'), 'export effectué malgré l\'échec de chargement');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Semaines (audit 2026-11-27, item 6) : générées en JavaScript ----
 test('Semaines : options générées en JavaScript, 2026 inchangées, 2027 présentes', () => {
   const w = boot();
