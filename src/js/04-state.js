@@ -772,8 +772,20 @@
       function purgerNombre(val) {
         if (val === null || val === undefined || val === '') return 0;
         if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+        // Un objet Date (ancien import XLSX avec cellDates:true) n'est jamais
+        // un montant : il venait d'une cellule date dans une colonne montant.
+        if (val instanceof Date) return 0;
         var str = String(val).replace(/\s+/g, '');
         if (!str) return 0;
+        // Garde anti-date (2026-11-27, bug CA/GMV : CA semaine 48 à
+        // −76 618 611,24 TND) : les colonnes montant de Data Yassir contiennent
+        // des cellules date (format « d.m »). Une chaîne qui ressemble à une
+        // date COMPLÈTE ne doit jamais être sommée comme un montant :
+        // « 31.05.2026 » valait 3 105,20 et « 2026-11-26 » valait 2 026.
+        // « 31.5 » (jour.mois sans année) reste ambigu et n'est pas rejeté :
+        // c'est aussi un montant plausible, et le Worker le renvoie tel quel.
+        if (/^\d{4}[-/](0?[1-9]|1[0-2])[-/]([0-2]?[0-9]|3[01])/.test(str) ||
+            /^([0-2]?[0-9]|3[01])[./](0?[1-9]|1[0-2])[./]\d{2,4}/.test(str)) return 0;
         var lastComma = str.lastIndexOf(',');
         var lastDot = str.lastIndexOf('.');
         var decPos = Math.max(lastComma, lastDot);

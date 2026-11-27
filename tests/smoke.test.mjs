@@ -3146,3 +3146,24 @@ test('Item 11a : chargement différé — la connexion fonctionne même si les l
   assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false, 'l’app ne s’ouvre pas sans les libs');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
+
+
+test('Garde anti-date (2026-11-27, bug CA/GMV) : purgerNombre rejette les dates complètes', () => {
+  const w = boot();
+  const pn = w.yassirPurgerNombre;
+  // Les colonnes montant de Data Yassir contiennent des cellules date
+  // (format « d.m ») : une date complète ne doit jamais être sommée comme
+  // un montant (« 31.05.2026 » valait 3 105,20 ; « 2026-11-26 » valait 2 026 ;
+  // CA semaine 48 à −76 618 611,24 TND).
+  assert.equal(pn('31.05.2026'), 0, 'date jj.mm.aaaa');
+  assert.equal(pn('31/05/2026'), 0, 'date jj/mm/aaaa');
+  assert.equal(pn('2026-11-26'), 0, 'date ISO aaaa-mm-jj');
+  assert.equal(pn('2026-11-26 / 00:36:36'), 0, 'horodatage');
+  assert.equal(pn(new w.Date(2026, 4, 31)), 0, 'objet Date (ancien import XLSX cellDates:true)');
+  // « 31.5 » (jour.mois sans année) reste ambigu : c'est aussi un montant.
+  assert.equal(pn('31.5'), 31.5, 'jour.mois sans année : montant conservé');
+  // Les montants normaux ne sont pas affectés.
+  assert.equal(pn('1.234,50'), 1234.5, 'format FR intact');
+  assert.equal(pn('1234.57'), 1234.57, 'décimal simple intact');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
