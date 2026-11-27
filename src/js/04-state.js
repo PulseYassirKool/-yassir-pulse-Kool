@@ -296,30 +296,23 @@
 
       window.yassirSyncOffreParticipationSheet = function (manualTrigger) {
         if (manualTrigger && !isOwnerAdmin() && !canViewAllPortfolios()) return;
-        var sheetId = state.offrePartSheetId || LIVE_SHEETS_CONFIG.OFFRE_PARTICIPATION_SHEET_ID;
-        var gid = LIVE_SHEETS_CONFIG.OFFRE_PARTICIPATION_GID || '0';
-        if (!sheetId) return;
+        // Offre Participation via le Worker (G3 suite) : source 'offres' —
+        // le Worker lit l'onglet, filtre par marque (colonne APP) et par
+        // rôle/AM ; le parseur refiltre par marque comme avant. La marque
+        // lue est la marque active (règles Yassir en mode Yassir, Kool en
+        // mode Kool). L'ancien choix d'un classeur par URL
+        // (state.offrePartSheetId) ne change plus la source : le Worker ne
+        // lit que les classeurs de sa configuration.
+        var brandOffres = (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? 'kool' : 'yassir';
+        var brandLabelOffres = brandOffres === 'kool' ? 'Kool' : 'Yassir';
         var icon = document.getElementById('iconSyncOffrePart');
         var label = document.getElementById('labelSyncOffrePart');
         if (icon) icon.classList.add('fa-spin');
         if (label) label.textContent = 'Sync Participation...';
 
-        return fetchGoogleWorkbookXlsx(sheetId)
-          .then(function (wb) {
-            // Le classeur fusionné a 14 onglets : SheetNames[0] serait 'Omar Beldi'
-            // (portefeuilles) et produirait des règles aberrantes. On cherche
-            // l'onglet Offre Participation par son nom, comme l'import de fichier.
-            var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('participation') || normalizeText(n).includes('offre'); });
-            if (!sName) throw new Error('Onglet Offre Participation introuvable');
-            var rows = XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            if (!rows || rows.length < 2) throw new Error('Feuille vide');
-            return rows;
-          })
-          .catch(function () {
-            return fetchGoogleSheetByGidSmart(sheetId, gid, 'Feuille 1');
-          })
+        return yassirLireFeuilleViaApi('offres', { brand: brandOffres, fresh: !!(manualTrigger && isOwnerAdmin()) })
           .then(function (rows) {
-            var rules = parseOffreParticipationRows(rows, 'Yassir');
+            var rules = parseOffreParticipationRows(rows, brandLabelOffres);
             if (rules.length > 0) {
               state.offreParticipationRules = rules;
               state.offreRulesSource = 'feuille';
@@ -338,7 +331,7 @@
             if (icon) icon.classList.remove('fa-spin');
             if (label) label.textContent = 'Sync Participation Offres';
             if (manualTrigger) {
-              showToast('Impossible de synchroniser la feuille Google Sheets (vérifiez le partage public en lecture).', 'error');
+              showToast('Impossible de synchroniser la feuille Offre Participation via le serveur. Réessayez plus tard.', 'error');
             }
           });
       };

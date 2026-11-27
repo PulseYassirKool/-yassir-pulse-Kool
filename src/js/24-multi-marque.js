@@ -788,60 +788,39 @@
           showToast('Synchronisation complète <strong>Kool</strong> (Data Octobre & Novembre, Commissions, Portefeuilles & Offre Participation)...', 'info');
         }
 
-        // 1. Data Kool (onglet principal gid=0 + onglets journaliers
-        //    supplémentaires éventuels, lus et fusionnés).
-        var pData = yassirLireClasseurToutesFeuilles(KOOL_SHEETS_CONFIG.DATA_SHEET_ID, KOOL_SHEETS_CONFIG.DATA_GID, yassirValiderEnTetesDataKool, { force: !!manualTrigger })
+        // Lectures via le Worker (G3 suite) : chaque source est lue par
+        // /api/sheets/:source, déjà filtrée par marque et par rôle/AM, tous
+        // onglets fusionnés et dédupliqués côté serveur. fresh=1 seulement
+        // pour la synchro manuelle du proprio (la synchro automatique ne
+        // passe jamais fresh=1).
+        var freshKool = !!(manualTrigger && isOwnerAdmin());
+
+        // 1. Data Kool (tous les onglets, fusionnés côté Worker).
+        var pData = yassirLireFeuilleViaApi('data-kool', { brand: 'kool', fresh: freshKool })
           .catch(function () { return []; });
 
-        // 2. Commission Kool (onglet « Commissions » du classeur fusionné, gid=9)
-        var pComm = fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.COMMISSION_SHEET_ID, KOOL_SHEETS_CONFIG.COMMISSION_GID, KOOL_SHEETS_CONFIG.COMMISSION_TAB)
-          .catch(function () {
-            return fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.COMMISSION_SHEET_ID).then(function (wb) {
-              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('commission'); }) || wb.SheetNames[0];
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
+        // 2. Commission Kool (onglet « Commissions », filtre APP = Kool).
+        var pComm = yassirLireFeuilleViaApi('commissions', { brand: 'kool', fresh: freshKool })
+          .catch(function () { return []; });
+
+        // 3. Portefeuille Kool (un onglet par AM, filtre APP = Kool ; sans Eya).
+        var pPortfolios = yassirLireFeuilleViaApi('portfolios', { brand: 'kool', fresh: freshKool })
+          .then(function (rows) {
+            var tmpMap = {};
+            extraireRestaurantsDepuisLignesSheet(rows, '', tmpMap, 'Kool');
+            Object.keys(tmpMap).forEach(function (k) {
+              if (tmpMap[k].am === 'Eya Majdoub') delete tmpMap[k];
             });
+            return tmpMap;
           })
+          .catch(function () { return {}; });
+
+        // 4. Offre participation Kool (onglet « Offre Participation »).
+        var pOffrePart = yassirLireFeuilleViaApi('offres', { brand: 'kool', fresh: freshKool })
           .catch(function () { return []; });
 
-        // 3. Portefeuille Kool (classeur fusionné : un onglet par AM, filtre APP = Kool)
-        var pPortfolios = fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID)
-          .then(function (wb) {
-            var res = extrairePortefeuillesDepuisClasseur(wb.SheetNames, function (sName) {
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            }, 'Kool', 'Eya Majdoub');
-            if (Object.keys(res.map).length === 0) throw new Error('Portefeuille Kool vide via xlsx');
-            return res.map;
-          })
-          .catch(function () {
-            // Repli dégradé (export xlsx bloqué) : un seul onglet par gid.
-            // PORTFOLIOS_GID = '1' = onglet Omar Beldi du classeur fusionné : on
-            // le lit avec son AM en défaut, sinon l'extracteur ne trouverait
-            // aucune colonne AM dans l'onglet et ne renverrait rien.
-            return fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID, KOOL_SHEETS_CONFIG.PORTFOLIOS_GID, '')
-              .then(function (rows) {
-                var tmpMap = {};
-                extraireRestaurantsDepuisLignesSheet(rows, 'Omar Beldi', tmpMap, 'Kool');
-                Object.keys(tmpMap).forEach(function (k) {
-                  if (tmpMap[k].am === 'Eya Majdoub') delete tmpMap[k];
-                });
-                return tmpMap;
-              })
-              .catch(function () { return {}; });
-          });
-
-        // 4. Offre participation Kool (onglet « Offre Participation » du classeur fusionné, gid=10)
-        var pOffrePart = fetchGoogleSheetByGidSmart(KOOL_SHEETS_CONFIG.OFFRE_PARTICIPATION_SHEET_ID, KOOL_SHEETS_CONFIG.OFFRE_PARTICIPATION_GID, '')
-          .catch(function () {
-            return fetchGoogleWorkbookXlsx(KOOL_SHEETS_CONFIG.OFFRE_PARTICIPATION_SHEET_ID).then(function (wb) {
-              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('participation') || normalizeText(n).includes('offre'); }) || wb.SheetNames[0];
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            });
-          })
-          .catch(function () { return []; });
-
-        // 5. Détails des commandes Kool (Articles, Catégories, Quantités, Prix) :
-        //    onglet principal + onglets journaliers supplémentaires éventuels.
-        var pOrderItems = yassirLireClasseurToutesFeuilles(KOOL_SHEETS_CONFIG.ORDER_ITEMS_SHEET_ID, KOOL_SHEETS_CONFIG.ORDER_ITEMS_GID, yassirValiderEnTetesDetailsKool, { force: !!manualTrigger })
+        // 5. Détails des commandes Kool (Articles, Catégories, Quantités, Prix).
+        var pOrderItems = yassirLireFeuilleViaApi('details-kool', { brand: 'kool', fresh: freshKool })
           .catch(function () { return []; });
 
         // 6. Données 2025 Kool (onglet « 2025 Kool » du classeur fusionné, gid=14) :
@@ -997,7 +976,7 @@
               );
             } else {
               showToast(
-                'Impossible de lire les feuilles Google Sheets Kool. Vérifiez que chaque lien est partagé en <strong>« Tous les utilisateurs disposant du lien : Lecteur »</strong>.',
+                'Impossible de lire les feuilles Kool via le serveur. Réessayez plus tard.',
                 'error'
               );
             }
@@ -1089,7 +1068,7 @@
             footLbl.textContent = 'Données synchronisées à ' + nowStr + ' (' + okCount + '/' + noms.length + ' sources OK)';
           } else {
             footLbl.textContent = 'Sync partielle à ' + nowStr + ' : ' + okCount + '/' + noms.length + ' OK — en échec : ' + echecs.join(', ');
-            showToast('<strong>Synchronisation partielle :</strong> en échec : ' + escapeHtml(echecs.join(', ')) + '. Vérifiez le partage « Lecteur » de ces feuilles.', 'error');
+            showToast('<strong>Synchronisation partielle :</strong> en échec : ' + escapeHtml(echecs.join(', ')) + '. Réessayez plus tard.', 'error');
           }
         });
       };

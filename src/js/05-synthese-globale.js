@@ -363,10 +363,9 @@
 
       // Validation d'une matrice 2025 : au moins 3 colonnes « semaine » dans
       // les 8 premières lignes (même détection que extract2025MetricsByWeekMap).
-      // Protège contre une mauvaise feuille renvoyée par Google malgré le gid
-      // (gviz renvoie parfois le 1er onglet) : sans elle, des lignes de
-      // portefeuilles seraient stockées comme « données 2025 » et la comparaison
-      // YoY resterait vide sans aucun message d'erreur.
+      // Protège contre une mauvaise feuille renvoyée par le serveur : sans elle,
+      // des lignes de portefeuilles seraient stockées comme « données 2025 »
+      // et la comparaison YoY resterait vide sans aucun message d'erreur.
       var WEEK_HEADER_RE_2025 = /^(?:w|week|semaine)\s*0*(\d{1,2})(?:\s*[-_]\s*\d{2,4})?$/i;
       function yassirValiderLignes2025(rows) {
         if (!Array.isArray(rows) || rows.length < 2) return false;
@@ -413,9 +412,7 @@
       window.yassirStockerLignes2025Yassir = stockerLignes2025Yassir;
 
       window.yassirSync2025Sheet = function (manualTrigger) {
-        var sheetId = LIVE_SHEETS_CONFIG.HISTORICAL_2025_SHEET_ID;
-        var gid = LIVE_SHEETS_CONFIG.HISTORICAL_2025_GID || '0';
-        if (!sheetId) return Promise.resolve();
+        if (manualTrigger && !isOwnerAdmin() && !canViewAllPortfolios()) return Promise.resolve();
         var icon = document.getElementById('iconSync2025');
         var label = document.getElementById('labelSync2025');
         if (icon) icon.classList.add('fa-spin');
@@ -436,32 +433,18 @@
           if (label) label.textContent = 'Sync YoY 2025';
         }
 
-        // Lecture par gid, puis replis par nom d'onglet (JSONP puis XLSX) :
-        // Google renvoie parfois le 1er onglet malgré le gid, donc chaque
-        // lecture est validée avant stockage.
-        return fetchGoogleSheetByGidSmart(sheetId, gid, '')
-          .catch(function () { return null; })
+        // Données 2025 Yassir via le Worker (G3 suite) : source 'hist2025',
+        // marque yassir. Les lignes sont validées avant stockage comme avant
+        // (stockerLignes2025Yassir refuse une mauvaise feuille).
+        return yassirLireFeuilleViaApi('hist2025', { brand: 'yassir', fresh: !!(manualTrigger && isOwnerAdmin()) })
           .then(function (rows) {
-            if (rows && stockerLignes2025Yassir(rows) > 0) { finirSucces(); return; }
-            return fetchGoogleSheetJsonp(sheetId, '2025 Yassir', false)
-              .catch(function () { return null; })
-              .then(function (rowsByName) {
-                if (rowsByName && stockerLignes2025Yassir(rowsByName) > 0) { finirSucces(); return; }
-                return fetchGoogleWorkbookXlsx(sheetId).then(function (wb) {
-                  // Le classeur fusionné a 14 onglets : SheetNames[0] serait 'Omar Beldi'
-                  // (portefeuilles). On cherche l'onglet 2025 Yassir par son nom.
-                  var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('2025') && normalizeText(n).includes('yassir'); });
-                  if (!sName) throw new Error('Onglet 2025 Yassir introuvable');
-                  return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-                }).then(function (rowsXlsx) {
-                  if (stockerLignes2025Yassir(rowsXlsx) > 0) finirSucces(); else finirEchec();
-                });
-              });
+            if (rows && stockerLignes2025Yassir(rows) > 0) finirSucces();
+            else finirEchec();
           })
           .catch(function () {
             finirEchec();
             if (manualTrigger) {
-              showToast('Impossible de lire la feuille 2025 (vérifiez le partage public en lecture).', 'error');
+              showToast('Impossible de lire la feuille 2025 via le serveur. Réessayez plus tard.', 'error');
             }
           });
       };
@@ -471,20 +454,10 @@
       // synchro Kool (automatique + manuelle). Ne rejette jamais : un échec 2025
       // ne doit pas faire échouer la synchro Kool. Résout avec le nombre de lignes.
       window.yassirSync2025KoolSheet = function (manualTrigger) {
-        var sheetId = KOOL_SHEETS_CONFIG.HISTORICAL_2025_SHEET_ID;
-        var gid = KOOL_SHEETS_CONFIG.HISTORICAL_2025_GID || '0';
-        if (!sheetId) return Promise.resolve(0);
-        return fetchGoogleSheetByGidSmart(sheetId, gid, '')
-          .catch(function () {
-            return fetchGoogleWorkbookXlsx(sheetId).then(function (wb) {
-              // Repli : chercher l'onglet « 2025 Kool » par son nom — surtout pas
-              // un autre onglet 2025 (les valeurs Yassir ne doivent pas passer
-              // pour des valeurs Kool).
-              var sName = wb.SheetNames.find(function (n) { return normalizeText(n).includes('2025') && normalizeText(n).includes('kool'); });
-              if (!sName) throw new Error('Onglet 2025 Kool introuvable');
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            });
-          })
+        if (manualTrigger && !isOwnerAdmin() && !canViewAllPortfolios()) return Promise.resolve(0);
+        // Données 2025 Kool via le Worker (G3 suite) : source 'hist2025',
+        // marque kool (onglet « 2025 Kool » — jamais les valeurs Yassir).
+        return yassirLireFeuilleViaApi('hist2025', { brand: 'kool', fresh: !!(manualTrigger && isOwnerAdmin()) })
           .then(function (rows) {
             var count = stockerLignes2025Kool(rows);
             if (count > 0) {
@@ -492,26 +465,12 @@
               if (manualTrigger) {
                 showToast('<strong>Données 2025 Kool synchronisées</strong> pour les semaines YoY.', 'success');
               }
-              return count;
             }
-            // Lignes invalides (Google a renvoyé une autre feuille malgré le gid) :
-            // repli par NOM d'onglet, qui lui est fiable (gviz sheet=).
-            return fetchGoogleSheetJsonp(sheetId, '2025 Kool', false)
-              .then(function (rowsByName) {
-                var count2 = stockerLignes2025Kool(rowsByName);
-                if (count2 > 0) {
-                  if (state.activeTab === 'synth_global' && typeof currentBrand !== 'undefined' && currentBrand === 'kool') renderSynth2025Panel();
-                  if (manualTrigger) {
-                    showToast('<strong>Données 2025 Kool synchronisées</strong> pour les semaines YoY.', 'success');
-                  }
-                }
-                return count2;
-              })
-              .catch(function () { return 0; });
+            return count;
           })
           .catch(function () {
             if (manualTrigger) {
-              showToast('Impossible de lire la feuille 2025 Kool (vérifiez le partage public en lecture).', 'error');
+              showToast('Impossible de lire la feuille 2025 Kool via le serveur. Réessayez plus tard.', 'error');
             }
             return 0;
           });

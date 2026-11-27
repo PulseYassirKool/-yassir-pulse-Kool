@@ -3,191 +3,48 @@
          ======================================================================== */
       var LIVE_SHEETS_CONFIG = {"PORTFOLIOS_SHEET_ID": "", "PORTFOLIOS_MASTER_GIDS": [], "PORTFOLIOS_TABS": [], "COMMISSIONS_SHEET_ID": "", "COMMISSIONS_TAB": "", "COMMISSIONS_GID": "", "BUDGET_SHEET_ID": "", "BUDGET_GID": "", "BUDGET_TAB": "", "RESTO_STATUS_SHEET_ID": "", "RESTO_STATUS_GID": "", "OFFRE_PARTICIPATION_SHEET_ID": "", "OFFRE_PARTICIPATION_GID": "", "HISTORICAL_2025_SHEET_ID": "", "HISTORICAL_2025_GID": "", "HISTORICAL_MONTHS": []}; // rempli après connexion (GET /api/bootstrap)
 
-      function parseCsvLineSimple(line, sep) {
-        var result = [];
-        var cur = '';
-        var inQuotes = false;
-        for (var i = 0; i < line.length; i++) {
-          var ch = line[i];
-          if (ch === '"') {
-            if (inQuotes && line[i + 1] === '"') {
-              cur += '"';
-              i++;
-            } else {
-              inQuotes = !inQuotes;
-            }
-          } else if (ch === sep && !inQuotes) {
-            result.push(cur);
-            cur = '';
-          } else {
-            cur += ch;
-          }
-        }
-        result.push(cur);
-        return result;
-      }
-
-      function parseCsvTextToRows(csvText) {
-        var clean = String(csvText || '').replace(/^\uFEFF/, '');
-        if (!clean.trim()) return [];
-        var firstNl = clean.indexOf('\n');
-        var headerLine = firstNl !== -1 ? clean.slice(0, firstNl) : clean;
-        var sep = (headerLine.split(';').length > headerLine.split(',').length) ? ';' : ',';
-
-        var rows = [];
-        var curRow = [];
-        var cur = '';
-        var inQuotes = false;
-        for (var i = 0; i < clean.length; i++) {
-          var ch = clean[i];
-          if (ch === '"') {
-            if (inQuotes && clean[i + 1] === '"') {
-              cur += '"';
-              i++;
-            } else {
-              inQuotes = !inQuotes;
-            }
-          } else if (ch === sep && !inQuotes) {
-            curRow.push(cur);
-            cur = '';
-          } else if ((ch === '\n' || (ch === '\r' && clean[i + 1] === '\n')) && !inQuotes) {
-            if (ch === '\r') i++;
-            curRow.push(cur);
-            if (curRow.some(function (c) { return String(c).trim() !== ''; })) {
-              rows.push(curRow);
-            }
-            curRow = [];
-            cur = '';
-          } else if (ch !== '\r' || inQuotes) {
-            cur += ch;
-          }
-        }
-        curRow.push(cur);
-        if (curRow.some(function (c) { return String(c).trim() !== ''; })) {
-          rows.push(curRow);
-        }
-        return rows;
-      }
-
-      // Méthode JSONP officielle Google Visualization (contourne 100% des blocages CORS dans Google Sites / GitHub Pages)
-      function fetchGoogleSheetJsonp(sheetId, sheetNameOrGid, isGid) {
-        return new Promise(function (resolve, reject) {
-          var cbName = 'yassirGvizCb_' + Math.random().toString(36).slice(2) + '_' + Date.now();
-          var script = document.createElement('script');
-          var timer = setTimeout(function () {
-            cleanup();
-            reject(new Error('Timeout JSONP'));
-          }, 25000);
-
-          function cleanup() {
-            clearTimeout(timer);
-            if (script.parentNode) script.parentNode.removeChild(script);
-            try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
-          }
-
-          window[cbName] = function (response) {
-            cleanup();
-            if (!response || response.status === 'error' || !response.table) {
-              reject(new Error('Erreur réponse Google Sheets'));
-              return;
-            }
-            var rows = [];
-            if (response.table.cols) {
-              var headerRow = response.table.cols.map(function (c) { return c && c.label ? String(c.label).trim() : ''; });
-              if (headerRow.some(function (h) { return h !== ''; })) {
-                rows.push(headerRow);
+      // ==================================================================
+      // LECTURE DES FEUILLES VIA LE WORKER (G3 suite) — plus aucune lecture
+      // directe de Google Sheets depuis le front (ni CSV/gviz, ni JSONP, ni
+      // téléchargement XLSX du classeur). Le Worker lit les feuilles avec le
+      // compte de service, filtre par rôle/AM et renvoie les lignes paginées :
+      //   GET /api/sheets/:source?brand=yassir|kool&page=0&pageSize=5000&fresh=0|1
+      // Réponse : { rows: [ligne d'en-têtes, ...lignes de la page], totalPages, ... }.
+      // Les lignes sont déjà alignées sur l'ordre des en-têtes par le Worker,
+      // et les onglets valides sont déjà fusionnés (dédupliqués par N° commande).
+      // Retourne [en-têtes, ...toutes les lignes] comme les anciens lecteurs.
+      // opts : { brand: 'yassir'|'kool', fresh: bool, pageSize } — fresh=1
+      // seulement pour la synchro manuelle du proprio (le serveur l'ignore
+      // pour les autres rôles) ; la synchro automatique ne passe jamais fresh=1.
+      // ==================================================================
+      var SHEETS_PAGE_SIZE = 10000; // maximum accepté par /api/sheets/:source
+      function yassirLireFeuilleViaApi(source, opts) {
+        var o = opts || {};
+        var brand = o.brand === 'kool' ? 'kool' : 'yassir';
+        var fresh = o.fresh ? 1 : 0;
+        var pageSize = o.pageSize || SHEETS_PAGE_SIZE;
+        var allRows = null; // [en-têtes, ...lignes] — en-têtes de la 1re page
+        var page = 0;
+        function lirePage() {
+          return PulseAuth.call('GET', '/api/sheets/' + encodeURIComponent(source) +
+            '?brand=' + brand + '&page=' + page + '&pageSize=' + pageSize + '&fresh=' + fresh)
+            .then(function (data) {
+              var rows = (data && Array.isArray(data.rows)) ? data.rows : [];
+              var totalPages = (data && typeof data.totalPages === 'number') ? data.totalPages : 0;
+              if (allRows === null) {
+                allRows = rows.slice();
+              } else if (rows.length > 0) {
+                // Chaque page répète la ligne d'en-têtes : on ne la garde qu'une fois.
+                allRows = allRows.concat(rows.slice(1));
               }
-            }
-            if (response.table.rows) {
-              response.table.rows.forEach(function (r) {
-                if (!r || !r.c) return;
-                rows.push(r.c.map(function (cell) {
-                  if (!cell) return '';
-                  if (cell.v === null || cell.v === undefined) {
-                    return (cell.f !== null && cell.f !== undefined) ? String(cell.f).trim() : '';
-                  }
-                  var v = cell.v;
-                  if (typeof v === 'string' && v.indexOf('Date(') === 0) {
-                    var dm = v.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/);
-                    if (dm) {
-                      var yy = parseInt(dm[1], 10);
-                      var mm = parseInt(dm[2], 10) + 1;
-                      var dd = parseInt(dm[3], 10);
-                      var hh = dm[4] !== undefined ? parseInt(dm[4], 10) : 0;
-                      var mi = dm[5] !== undefined ? parseInt(dm[5], 10) : 0;
-                      var ss = dm[6] !== undefined ? parseInt(dm[6], 10) : 0;
-                      if (yy <= 1900) {
-                        return String(hh).padStart(2, '0') + ':' + String(mi).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
-                      }
-                      var isoD = yy + '-' + String(mm).padStart(2, '0') + '-' + String(dd).padStart(2, '0');
-                      if (hh !== 0 || mi !== 0 || ss !== 0) {
-                        return isoD + ' ' + String(hh).padStart(2, '0') + ':' + String(mi).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
-                      }
-                      return isoD;
-                    }
-                  }
-                  return String(v);
-                }));
-              });
-            }
-            resolve(rows);
-          };
-
-          var param = isGid
-            ? ('gid=' + encodeURIComponent(sheetNameOrGid))
-            : ('sheet=' + encodeURIComponent(sheetNameOrGid));
-
-          script.src = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) +
-                       '/gviz/tq?' + param + '&tqx=out:json;responseHandler:' + cbName + '&_t=' + Date.now();
-          script.onerror = function () {
-            cleanup();
-            reject(new Error('Erreur chargement script Google Sheets'));
-          };
-          document.head.appendChild(script);
-        });
-      }
-
-      function fetchGoogleSheetTabSmart(sheetId, primaryTab, altTabs, gid) {
-        var candidates = [];
-        if (primaryTab) candidates.push({ val: primaryTab, isGid: false });
-        if (altTabs && altTabs.length > 0) {
-          altTabs.forEach(function (at) {
-            if (at && at !== primaryTab) candidates.push({ val: at, isGid: false });
-          });
-        }
-        if (gid) candidates.push({ val: gid, isGid: true });
-
-        function tryFetchCandidate(c) {
-          var param = c.isGid ? ('gid=' + encodeURIComponent(c.val)) : ('sheet=' + encodeURIComponent(c.val));
-          var csvUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) +
-                       '/gviz/tq?tqx=out:csv&' + param + '&_t=' + Date.now();
-
-          return fetch(csvUrl, { cache: 'no-store' })
-            .then(function (resp) {
-              if (!resp.ok) throw new Error('HTTP ' + resp.status);
-              return resp.text();
-            })
-            .then(function (txt) {
-              if (txt.trim().toLowerCase().startsWith('<!doctype html') || txt.trim().toLowerCase().startsWith('<html')) {
-                throw new Error('HTML login page');
-              }
-              var rows = parseCsvTextToRows(txt);
-              if (!rows || rows.length === 0) throw new Error('Empty CSV');
-              return rows;
-            })
-            .catch(function () {
-              return fetchGoogleSheetJsonp(sheetId, c.val, c.isGid);
+              page += 1;
+              if (page < totalPages) return lirePage();
+              return allRows || [];
             });
         }
-
-        var chain = Promise.reject(new Error('init'));
-        candidates.forEach(function (cand) {
-          chain = chain.catch(function () {
-            return tryFetchCandidate(cand);
-          });
-        });
-        return chain;
+        return lirePage();
       }
+      window.yassirLireFeuilleViaApi = yassirLireFeuilleViaApi;
 
       function isKnownSegmentLabel(val) {
         var n = normalizeText(val);
@@ -390,40 +247,6 @@
       }
       window.yassirExtraireRestaurantsDepuisLignesSheet = extraireRestaurantsDepuisLignesSheet;
 
-      // Lecture des onglets portefeuilles d'un classeur complet (.xlsx) : seuls les
-      // onglets dont le nom correspond à un AM sont lus. Les autres onglets du classeur
-      // fusionné (Budget, Commissions, Offre Participation, Statuts, 2025...) sont
-      // ignorés — sinon l'onglet Budget injecterait des restaurants bidons nommés
-      // 'Yassir' / 'Kool' (son nom d'AM en colonne A + la marque en dernière colonne).
-      // brandFilter : 'Yassir' / 'Kool' (filtre colonne APP) ; exclureAm : AM à exclure
-      // (Kool : 'Eya Majdoub', qui n'a pas de portefeuille Kool).
-      function extrairePortefeuillesDepuisClasseur(sheetNames, lireLignes, brandFilter, exclureAm) {
-        var extractedMap = {};
-        var details = [];
-        sheetNames.forEach(function (sName) {
-          var amFromSheet = matchAgentFromText(sName);
-          if (!amFromSheet) return;
-          if (exclureAm && amFromSheet === exclureAm) return;
-          var rows = lireLignes(sName);
-          if (!rows || rows.length === 0) return;
-          var tempMap = {};
-          var added = extraireRestaurantsDepuisLignesSheet(rows, amFromSheet, tempMap, brandFilter);
-          if (added > 0) {
-            var keptForSheet = 0;
-            Object.keys(tempMap).forEach(function (k) {
-              if (exclureAm && tempMap[k].am === exclureAm) return;
-              if (!Object.prototype.hasOwnProperty.call(extractedMap, k)) {
-                extractedMap[k] = tempMap[k];
-                keptForSheet++;
-              }
-            });
-            details.push((amFromSheet || sName) + ' (' + keptForSheet + ')');
-          }
-        });
-        return { map: extractedMap, details: details };
-      }
-      window.yassirExtrairePortefeuillesDepuisClasseur = extrairePortefeuillesDepuisClasseur;
-
       // Lecture d'une feuille Commissions : colonnes détectées par en-tête
       // (restaurant + taux) ; la colonne APP (Yassir / Kool) filtre par marque
       // quand elle est présente. Sans en-tête, lecture positionnelle (col 0 = nom,
@@ -462,17 +285,16 @@
       // figé du KV (bootstrap), pas la feuille. Renvoie { ok, count, map } ;
       // en échec, ok=false et la grille actuelle doit être conservée (jamais
       // vidée par l'appelant).
-      function lireCommissionsDepuisFeuille(brand) {
+      // Lecture des commissions via le Worker (G3 suite) : GET
+      // /api/sheets/commissions — le Worker filtre déjà par marque et par
+      // rôle/AM. Renvoie { ok, count, map } ; en échec, ok=false et la grille
+      // actuelle doit être conservée (jamais vidée par l'appelant).
+      // fresh : true pour une relecture manuelle (bouton « Recharger »,
+      // proprio uniquement — le serveur ignore fresh pour les autres rôles).
+      function lireCommissionsDepuisFeuille(brand, fresh) {
         var isKool = brand === 'kool';
-        var sheetId = isKool ? KOOL_SHEETS_CONFIG.COMMISSION_SHEET_ID : LIVE_SHEETS_CONFIG.COMMISSIONS_SHEET_ID;
-        var gid = isKool ? KOOL_SHEETS_CONFIG.COMMISSION_GID : LIVE_SHEETS_CONFIG.COMMISSIONS_GID;
-        var tab = isKool ? KOOL_SHEETS_CONFIG.COMMISSION_TAB : LIVE_SHEETS_CONFIG.COMMISSIONS_TAB;
         var brandFilter = isKool ? 'Kool' : 'Yassir';
-        if (!sheetId) return Promise.resolve({ ok: false, count: 0, map: {} });
-        return fetchGoogleSheetByGidSmart(sheetId, gid, tab)
-          .catch(function () {
-            return fetchGoogleSheetTabSmart(sheetId, tab, ['Sheet1', 'Feuille 1'], gid);
-          })
+        return yassirLireFeuilleViaApi('commissions', { brand: isKool ? 'kool' : 'yassir', fresh: !!fresh })
           .then(function (rows) {
             if (!rows || rows.length < 2) throw new Error('Feuille Commissions vide');
             var parsed = parseCommissionRows(rows, brandFilter);
@@ -482,43 +304,6 @@
           .catch(function () { return { ok: false, count: 0, map: {} }; });
       }
       window.yassirLireCommissionsDepuisFeuille = lireCommissionsDepuisFeuille;
-
-      function fetchGoogleSheetByGidSmart(sheetId, gid, fallbackTab) {
-        var exportCsvUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) +
-                           '/export?format=csv&gid=' + encodeURIComponent(gid) + '&_t=' + Date.now();
-        var gvizCsvUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) +
-                         '/gviz/tq?tqx=out:csv&gid=' + encodeURIComponent(gid) + '&_t=' + Date.now();
-
-        function tryFetchCsv(url) {
-          return fetch(url, { cache: 'no-store' })
-            .then(function (resp) {
-              if (!resp.ok) throw new Error('HTTP ' + resp.status);
-              return resp.text();
-            })
-            .then(function (txt) {
-              if (txt.trim().toLowerCase().startsWith('<!doctype html') || txt.trim().toLowerCase().startsWith('<html')) {
-                throw new Error('HTML login page');
-              }
-              var rows = parseCsvTextToRows(txt);
-              if (!rows || rows.length < 2) throw new Error('Empty CSV');
-              return rows;
-            });
-        }
-
-        return tryFetchCsv(exportCsvUrl)
-          .catch(function () {
-            return tryFetchCsv(gvizCsvUrl);
-          })
-          .catch(function () {
-            return fetchGoogleSheetJsonp(sheetId, gid, true);
-          })
-          .catch(function () {
-            if (fallbackTab) {
-              return fetchGoogleSheetJsonp(sheetId, fallbackTab, false);
-            }
-            throw new Error('All gid fallbacks failed');
-          });
-      }
 
       window.yassirSyncHistoricalSheets = function (manualTrigger) {
         if (manualTrigger && !isOwnerAdmin() && !canViewAllPortfolios()) return;
@@ -537,17 +322,23 @@
           showToast('Synchronisation des mois <strong>Octobre & Novembre</strong> depuis Google Sheets...', 'info');
         }
 
-        var promises = LIVE_SHEETS_CONFIG.HISTORICAL_MONTHS.map(function (mCfg) {
-          // Onglet principal du mois + onglets journaliers supplémentaires
-          // éventuels du même classeur, fusionnés dans les données du mois
-          // (un seul index __fileSourceIdx par mois : les libellés, la purge
-          // et les compteurs restent ceux d'aujourd'hui).
-          return yassirLireClasseurToutesFeuilles(mCfg.sheetId, mCfg.gid, yassirValiderEnTetesDataYassir, { fallbackTab: mCfg.tab, force: !!manualTrigger })
+        // Data Yassir octobre + novembre via le Worker (G3 suite) :
+        // sources data-oct / data-nov — le Worker lit déjà tous les onglets
+        // valides du classeur et déduplique par N° commande. Les libellés
+        // restent ceux de la configuration (ex. « Octobre (Google Sheets) »),
+        // un seul index __fileSourceIdx par mois.
+        var moisConfig = LIVE_SHEETS_CONFIG.HISTORICAL_MONTHS || [];
+        var mois = [
+          { source: 'data-oct', label: (moisConfig[0] && moisConfig[0].label) || 'Octobre (Google Sheets)' },
+          { source: 'data-nov', label: (moisConfig[1] && moisConfig[1].label) || 'Novembre (Google Sheets)' }
+        ];
+        var promises = mois.map(function (m) {
+          return yassirLireFeuilleViaApi(m.source, { brand: 'yassir', fresh: !!(manualTrigger && isOwnerAdmin()) })
             .then(function (rows) {
-              return { label: mCfg.label, rows: rows, ok: true };
+              return { label: m.label, rows: rows, ok: true };
             })
             .catch(function (err) {
-              return { label: mCfg.label, rows: [], ok: false, error: err && err.message ? err.message : 'Erreur' };
+              return { label: m.label, rows: [], ok: false, error: err && err.message ? err.message : 'Erreur' };
             });
         });
 
@@ -620,7 +411,7 @@
                         '• Mois chargés : <strong>' + escapeHtml(loadedMonths.join(', ')) + '</strong>.<br/>' +
                         '• Base totale : <strong>' + totalRowsInBase.toLocaleString('fr-FR') + '</strong> commandes.';
               if (failedMonths.length > 0) {
-                msg += '<br/><span class="text-[#FF2A6D]">Non accessibles (vérifier partage « Lecteur ») : ' + escapeHtml(failedMonths.join(', ')) + '</span>';
+                msg += '<br/><span class="text-[#FF2A6D]">Non accessibles pour le moment : ' + escapeHtml(failedMonths.join(', ')) + '</span>';
               }
               showToast(msg, 'success');
             }
@@ -628,7 +419,7 @@
             if (label) label.textContent = 'Sync Mai–Nov';
             if (manualTrigger) {
               showToast(
-                'Impossible de lire les 6 feuilles Google Sheets. Vérifiez que chaque feuille (Mai, Juin, Juillet, Août, Septembre, Octobre, Novembre) est partagée en <strong>« Tous les utilisateurs disposant du lien : Lecteur »</strong>.',
+                'Impossible de lire l’historique Octobre & Novembre via le serveur. Réessayez plus tard.',
                 'error'
               );
             }
@@ -730,18 +521,20 @@
         if (icon) icon.classList.add('fa-spin');
         if (label) label.textContent = 'Sync Budget...';
 
-        return fetchGoogleSheetByGidSmart(
-          LIVE_SHEETS_CONFIG.BUDGET_SHEET_ID,
-          LIVE_SHEETS_CONFIG.BUDGET_GID,
-          LIVE_SHEETS_CONFIG.BUDGET_TAB
-        )
-          .catch(function () {
-            return fetchGoogleSheetJsonp(LIVE_SHEETS_CONFIG.BUDGET_SHEET_ID, 'Sheet1', false);
-          })
-          .catch(function () {
-            return fetchGoogleSheetJsonp(LIVE_SHEETS_CONFIG.BUDGET_SHEET_ID, 'Feuille 1', false);
-          })
-          .then(function (rows) {
+        // Budget via le Worker (G3 suite) : la feuille est partagée entre les
+        // deux marques (colonne APP) — on lit les deux marques et on fusionne
+        // les lignes (mêmes en-têtes). Une marque en échec ne casse pas l'autre.
+        var freshBudget = !!(manualTrigger && isOwnerAdmin());
+        var budgetYassir = yassirLireFeuilleViaApi('budget', { brand: 'yassir', fresh: freshBudget }).catch(function () { return []; });
+        var budgetKool = yassirLireFeuilleViaApi('budget', { brand: 'kool', fresh: freshBudget }).catch(function () { return []; });
+        return Promise.all([budgetYassir, budgetKool])
+          .then(function (pages) {
+            var rows = [];
+            pages.forEach(function (r) {
+              if (!r || r.length === 0) return;
+              if (rows.length === 0) rows = r.slice();
+              else rows = rows.concat(r.slice(1)); // en-têtes répétés
+            });
             if (!rows || rows.length === 0) throw new Error('Feuille Budget vide');
             var split = parseBudgetRowsParMarque(rows);
             if (Object.keys(split.yassir).length === 0 && Object.keys(split.kool).length === 0) {
@@ -781,7 +574,7 @@
             if (label) label.textContent = 'Sync Budget';
             if (manualTrigger) {
               showToast(
-                '<strong>Budget non accessible par Google Sheets :</strong> ouvrez votre feuille Google Sheets <em>Budget</em>, cliquez sur <strong>Partager</strong> en haut à droite et réglez l\'accès général sur <strong>« Tous les utilisateurs disposant du lien : Lecteur »</strong> (ou saisissez les budgets manuellement ci-dessous).',
+                '<strong>Budget non accessible pour le moment :</strong> la lecture via le serveur a échoué (ou saisissez les budgets manuellement ci-dessous).',
                 'error'
               );
             }
@@ -811,47 +604,6 @@
         return false;
       };
 
-      // Mémoïsation des téléchargements XLSX (audit 2026-11-27, item 10a) : un seul
-      // téléchargement par classeur et par tranche de 60 s, même si plusieurs
-      // synchros le demandent en parallèle à la connexion. En cas d'échec, l'entrée
-      // est supprimée (la tentative suivante retélécharge). La synchro manuelle
-      // (forceFresh) contourne le cache pour obtenir des données fraîches.
-      var _xlsxPromiseCache = {};
-      var XLSX_PROMISE_TTL_MS = 60 * 1000;
-      function fetchGoogleWorkbookXlsx(sheetId, forceFresh) {
-        if (sheetId && !forceFresh) {
-          var entree = _xlsxPromiseCache[sheetId];
-          if (entree && (Date.now() - entree.savedAt) < XLSX_PROMISE_TTL_MS) return entree.promise;
-        }
-        var xlsxUrl = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) + '/export?format=xlsx&_t=' + Date.now();
-        var libsPretes = (typeof window.yassirLibsLourdesPretes === 'function')
-          ? window.yassirLibsLourdesPretes()
-          : Promise.resolve(!!window.XLSX);
-        var promise = libsPretes
-          .then(function () {
-            if (!window.XLSX) throw new Error('SheetJS non chargé');
-            return fetch(xlsxUrl, { cache: 'no-store' });
-          })
-          .then(function (resp) {
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            return resp.arrayBuffer();
-          })
-          .then(function (buf) {
-            var wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
-            if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) {
-              throw new Error('Classeur vide');
-            }
-            return wb;
-          })
-          .catch(function (err) {
-            if (sheetId) delete _xlsxPromiseCache[sheetId];
-            throw err;
-          });
-        if (sheetId) _xlsxPromiseCache[sheetId] = { promise: promise, savedAt: Date.now() };
-        return promise;
-      }
-      window.yassirFetchGoogleWorkbookXlsx = fetchGoogleWorkbookXlsx;
-
       // Statut de la dernière synchro par source (audit 2026-11-27, item 10c) :
       // chaque synchro note ici son résultat (true = OK, false = échec) pour que
       // le pied de page affiche un statut honnête au lieu d'un succès inconditionnel.
@@ -861,208 +613,6 @@
       }
       window.yassirStatutSynchroParSource = function () { return Object.assign({}, _statutSynchroParSource); };
       window.yassirNoterStatutSynchro = noterStatutSynchro;
-
-      // ==================================================================
-      // LECTURE MULTI-ONGLETS (data journalière par onglet, 2026-11-26)
-      // ==================================================================
-      // Inventaire des onglets par classeur, mis en cache 6 h : évite de
-      // retélécharger le classeur à chaque synchro quand il n'a qu'un seul
-      // onglet. La synchro manuelle force la redécouverte (l'utilisateur
-      // vient d'ajouter un onglet).
-      var ONGLETS_CACHE_KEY = 'yassir_pulse_classeur_onglets_v1';
-      var ONGLETS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-
-      function lireCacheOnglets() {
-        try {
-          var parsed = JSON.parse(safeGet(ONGLETS_CACHE_KEY) || '{}');
-          return (parsed && typeof parsed === 'object') ? parsed : {};
-        } catch (e) { return {}; }
-      }
-      function ecrireCacheOnglets(cache) {
-        try { safeSet(ONGLETS_CACHE_KEY, JSON.stringify(cache || {})); } catch (e) {}
-      }
-      window.yassirViderCacheOngletsClasseur = function () { ecrireCacheOnglets({}); };
-
-      // Normalisation d'un en-tête pour la comparaison entre onglets.
-      function normaliserEnTeteMultiOnglets(h) {
-        return normalizeText(h === null || h === undefined ? '' : String(h)).replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
-      }
-
-      // Ligne d'en-tête réelle d'un onglet : première ligne parmi les 5
-      // premières avec au moins 4 cellules non vides (même règle que
-      // normaliserLignesDataKool), sinon la ligne 0.
-      function trouverLigneEnTeteMultiOnglets(rows) {
-        if (!rows || rows.length === 0) return 0;
-        for (var r = 0; r < Math.min(5, rows.length); r++) {
-          var nonEmpty = (rows[r] || []).filter(function (c) { return String(c || '').trim() !== ''; }).length;
-          if (nonEmpty >= 4) return r;
-        }
-        return 0;
-      }
-
-      // Validateurs d'en-têtes par type de feuille : un onglet dont les
-      // en-têtes ne correspondent pas est ignoré silencieusement (jamais de
-      // plantage de la synchro).
-      function yassirValiderEnTetesDataKool(headersNorm) {
-        var aDate = headersNorm.indexOf('date') !== -1;
-        var aCmd = headersNorm.some(function (h) { return /^(n[°o]?\s*commande|order\s*id|numero\s*commande)$/.test(h); });
-        return aDate && aCmd;
-      }
-      function yassirValiderEnTetesDetailsKool(headersNorm) {
-        var aCmd = headersNorm.some(function (h) { return /^(order\s*id|n[°o]?\s*commande|numero\s*commande)$/.test(h); });
-        var aArt = headersNorm.some(function (h) { return h === 'article' || h.indexOf('article') !== -1 || h.indexOf('item') !== -1; });
-        return aCmd && aArt;
-      }
-      function yassirValiderEnTetesDataYassir(headersNorm) {
-        var aOid = headersNorm.indexOf('order id') !== -1;
-        var aDay = headersNorm.indexOf('order day') !== -1 || headersNorm.indexOf('delivered day') !== -1;
-        return aOid && aDay;
-      }
-      window.yassirValiderEnTetesDataKool = yassirValiderEnTetesDataKool;
-      window.yassirValiderEnTetesDetailsKool = yassirValiderEnTetesDetailsKool;
-      window.yassirValiderEnTetesDataYassir = yassirValiderEnTetesDataYassir;
-
-      // Découvre les onglets d'un classeur : inventaire en cache (TTL 6 h),
-      // sinon UN SEUL téléchargement XLSX. Retourne { wb, names, sheetIds }
-      // (wb null quand l'inventaire en cache suffit ou que le téléchargement
-      // a échoué).
-      function decouvrirOngletsClasseur(sheetId, force) {
-        var cache = lireCacheOnglets();
-        var entree = cache[sheetId];
-        if (!force && entree && entree.names && entree.names.length <= 1 &&
-            (Date.now() - (entree.savedAt || 0)) < ONGLETS_CACHE_TTL_MS) {
-          return Promise.resolve({ wb: null, names: entree.names.slice(), sheetIds: entree.sheetIds || [] });
-        }
-        return fetchGoogleWorkbookXlsx(sheetId, force)
-          .then(function (wb) {
-            var names = (wb && wb.SheetNames) || [];
-            var sheetIds = [];
-            try {
-              var ws = (wb.Workbook && wb.Workbook.Sheets) || [];
-              sheetIds = ws.map(function (s) {
-                if (!s) return '';
-                var sid = (s.sheetId !== undefined) ? s.sheetId : s.sheetid;
-                return (sid === undefined || sid === null) ? '' : String(sid);
-              });
-            } catch (e) { sheetIds = []; }
-            cache[sheetId] = { names: names.slice(), sheetIds: sheetIds, savedAt: Date.now() };
-            ecrireCacheOnglets(cache);
-            return { wb: wb, names: names, sheetIds: sheetIds };
-          })
-          .catch(function () { return { wb: null, names: [], sheetIds: [] }; });
-      }
-
-      // Identifie l'onglet principal dans le classeur XLSX, pour ne pas le
-      // fusionner deux fois : 1) par sheetId (l'export Google utilise le gid
-      // comme sheetId), 2) repli : mêmes en-têtes normalisés ET même nombre de
-      // lignes que la lecture par gid. Retourne l'index, ou -1 si introuvable
-      // (la fusion est alors abandonnée : on garde l'onglet principal seul).
-      function trouverOngletPrincipal(wb, names, mainGid, mainRows) {
-        var sheets = [];
-        try { sheets = (wb.Workbook && wb.Workbook.Sheets) || []; } catch (e) { sheets = []; }
-        for (var i = 0; i < names.length; i++) {
-          for (var j = 0; j < sheets.length; j++) {
-            if (sheets[j] && sheets[j].name === names[i]) {
-              var sid = (sheets[j].sheetId !== undefined) ? sheets[j].sheetId : sheets[j].sheetid;
-              if (sid !== undefined && sid !== null && String(sid) === String(mainGid)) return i;
-              break;
-            }
-          }
-        }
-        var mainHdr = (mainRows[0] || []).map(normaliserEnTeteMultiOnglets).join('|');
-        for (var k = 0; k < names.length; k++) {
-          try {
-            var tabRows = XLSX.utils.sheet_to_json(wb.Sheets[names[k]], { header: 1, defval: '' });
-            if (!tabRows || tabRows.length === 0) continue;
-            var hdrIdx = trouverLigneEnTeteMultiOnglets(tabRows);
-            var tabHdr = (tabRows[hdrIdx] || []).map(normaliserEnTeteMultiOnglets).join('|');
-            if (tabHdr === mainHdr && tabRows.length === mainRows.length) return k;
-          } catch (e) { /* ignore */ }
-        }
-        return -1;
-      }
-
-      // Lit TOUS les onglets d'un classeur de données et retourne les lignes
-      // fusionnées (en-tête de l'onglet principal + lignes de tous les onglets).
-      // Stratégie :
-      //  1) voie rapide inchangée : l'onglet principal par gid (CSV export
-      //     -> gviz -> JSONP) ;
-      //  2) UN SEUL téléchargement XLSX du classeur pour découvrir les onglets
-      //     supplémentaires et lire leurs lignes (inventaire mis en cache 6 h :
-      //     un classeur à un seul onglet ne retélécharge rien entre deux
-      //     découvertes) ;
-      //  3) chaque onglet supplémentaire est validé par ses en-têtes puis ses
-      //     lignes sont réalignées sur l'ordre des colonnes de l'onglet
-      //     principal, par nom d'en-tête (chaque onglet mappe ses colonnes par
-      //     ses propres en-têtes).
-      // Un onglet vide, invalide ou illisible est ignoré silencieusement ; un
-      // échec (XLSX illisible, etc.) ne remplace jamais les lignes de
-      // l'onglet principal ; la fonction ne rejette jamais.
-      // NOTE : il n'existe pas d'endpoint public léger pour lister les onglets
-      // d'un classeur (gviz ne renvoie que le 1er onglet) — le téléchargement
-      // XLSX est le seul moyen fiable de les découvrir. Pour un classeur à un
-      // seul onglet, le résultat est identique à aujourd'hui (mêmes lignes,
-      // mêmes compteurs).
-      // opts : { fallbackTab, force } (force = redécouverte immédiate, synchro manuelle).
-      function yassirLireClasseurToutesFeuilles(sheetId, mainGid, validerEnTetes, opts) {
-        if (!sheetId) return Promise.resolve([]);
-        var options = opts || {};
-        var mainRows = [];
-        return fetchGoogleSheetByGidSmart(sheetId, mainGid, options.fallbackTab || '')
-          .catch(function () { return []; })
-          .then(function (rows) {
-            if (rows && rows.length > 1) mainRows = rows;
-            // Lecture par gid en échec : le XLSX sert aussi de repli (comme
-            // aujourd'hui) — on force la découverte dans ce cas.
-            return decouvrirOngletsClasseur(sheetId, !!options.force || mainRows.length < 2);
-          })
-          .then(function (decouverte) {
-            var wb = decouverte && decouverte.wb;
-            var names = (decouverte && decouverte.names) || [];
-            if (!wb) return mainRows;
-            if (names.length === 0) return mainRows;
-            if (mainRows.length < 2) {
-              // Repli historique : l'onglet principal est le 1er onglet.
-              mainRows = XLSX.utils.sheet_to_json(wb.Sheets[names[0]], { header: 1, defval: '' });
-              if (!mainRows || mainRows.length < 2) return [];
-            }
-            if (names.length <= 1) return mainRows;
-            var idxPrincipal = trouverOngletPrincipal(wb, names, mainGid, mainRows);
-            if (idxPrincipal === -1) return mainRows;
-            var mainHeadersNorm = (mainRows[0] || []).map(normaliserEnTeteMultiOnglets);
-            var merged = mainRows.slice();
-            for (var n = 0; n < names.length; n++) {
-              if (n === idxPrincipal) continue;
-              try {
-                var tabRows = XLSX.utils.sheet_to_json(wb.Sheets[names[n]], { header: 1, defval: '' });
-                if (!tabRows || tabRows.length < 2) continue;
-                var hdrIdx = trouverLigneEnTeteMultiOnglets(tabRows);
-                var tabHeadersNorm = (tabRows[hdrIdx] || []).map(normaliserEnTeteMultiOnglets);
-                if (typeof validerEnTetes === 'function' && !validerEnTetes(tabHeadersNorm)) continue;
-                var used = {};
-                var colMap = mainHeadersNorm.map(function (mh, ci) {
-                  if (!mh) return -1; // colonne sans en-tête : ignorée (aucun lecteur ne l'utilise)
-                  for (var i = 0; i < tabHeadersNorm.length; i++) {
-                    if (tabHeadersNorm[i] === mh && !used[i]) { used[i] = true; return i; }
-                  }
-                  return -1;
-                });
-                for (var r = hdrIdx + 1; r < tabRows.length; r++) {
-                  var sRow = tabRows[r];
-                  if (!sRow || sRow.every(function (c) { return c === null || c === undefined || String(c).trim() === ''; })) continue;
-                  var aligned = new Array(mainRows[0].length).fill('');
-                  for (var c = 0; c < colMap.length; c++) {
-                    if (colMap[c] !== -1 && colMap[c] < sRow.length) aligned[c] = sRow[colMap[c]];
-                  }
-                  merged.push(aligned);
-                }
-              } catch (e) { /* onglet illisible : ignoré silencieusement */ }
-            }
-            return merged;
-          })
-          .catch(function () { return mainRows || []; });
-      }
-      window.yassirLireClasseurToutesFeuilles = yassirLireClasseurToutesFeuilles;
 
       window.yassirSyncAllFromGoogleSheets = function (manualTrigger) {
         if (manualTrigger && !isOwnerAdmin() && !canViewAllPortfolios()) return;
@@ -1075,64 +625,33 @@
         if (icon) icon.classList.add('fa-spin');
         if (label) label.textContent = 'Synchronisation...';
 
-        // 1. Télécharger le classeur complet (.xlsx) pour lire EXCLUSIVEMENT la liste exacte donnée dans Google Sheets
-        var portfoliosPromise = fetchGoogleWorkbookXlsx(LIVE_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID)
-          .then(function (wb) {
-            var res = extrairePortefeuillesDepuisClasseur(wb.SheetNames, function (sName) {
-              return XLSX.utils.sheet_to_json(wb.Sheets[sName], { header: 1, defval: '' });
-            }, 'Yassir', null);
-            if (Object.keys(res.map).length === 0) {
-              throw new Error('Aucun restaurant extrait depuis le classeur xlsx');
+        // 1. Portefeuilles Yassir via le Worker (G3 suite) : source
+        // 'portfolios' — le Worker lit déjà tous les onglets AM du classeur
+        // fusionné, filtre par marque (colonne APP) et par rôle/AM, et ajoute
+        // la colonne AM. L'extracteur ne fait plus que transformer les lignes
+        // en carte { restaurant -> { am, ville, segment } }.
+        var portfoliosPromise = yassirLireFeuilleViaApi('portfolios', { brand: 'yassir', fresh: !!(manualTrigger && isOwnerAdmin()) })
+          .then(function (rows) {
+            var map = {};
+            var added = extraireRestaurantsDepuisLignesSheet(rows, '', map, 'Yassir');
+            if (added === 0 || Object.keys(map).length === 0) {
+              throw new Error('Aucun restaurant extrait depuis la feuille Portefeuilles');
             }
-            return { ok: true, map: res.map, details: res.details };
+            var detailsByAm = {};
+            Object.keys(map).forEach(function (k) {
+              var a = map[k].am || '';
+              detailsByAm[a] = (detailsByAm[a] || 0) + 1;
+            });
+            var details = Object.keys(detailsByAm).map(function (a) { return a + ' (' + detailsByAm[a] + ')'; });
+            return { ok: true, map: map, details: details };
           })
           .catch(function () {
-            // Fallback JSONP/CSV si export?format=xlsx est bloqué par CORS.
-            // (L'ancien onglet maître gid 495278602 n'existe plus dans le classeur
-            // fusionné : le repli lit désormais chaque onglet AM par son gid.)
-            var tabPromises = LIVE_SHEETS_CONFIG.PORTFOLIOS_TABS.map(function (entry) {
-              return fetchGoogleSheetTabSmart(LIVE_SHEETS_CONFIG.PORTFOLIOS_SHEET_ID, entry.tab, entry.altTabs, entry.gid)
-                .then(function (rows) { return { am: entry.am, rows: rows, ok: true }; })
-                .catch(function () { return { am: entry.am, rows: [], ok: false }; });
-            });
-
-            return Promise.all(tabPromises).then(function (tResList) {
-              var extractedMap = {};
-              var details = [];
-              var seenSignatures = new Set();
-
-              tResList.forEach(function (res) {
-                if (!res.ok || !res.rows || res.rows.length === 0) return;
-                var dataRowsForSig = res.rows.slice(1, 7).map(function (r) { return (r || []).join('|').trim(); }).join('||');
-                var sig = dataRowsForSig || JSON.stringify(res.rows.slice(0, 6));
-                if (seenSignatures.has(sig)) return;
-                seenSignatures.add(sig);
-
-                var tmpAm = {};
-                var addAm = extraireRestaurantsDepuisLignesSheet(res.rows, res.am, tmpAm, 'Yassir');
-                if (addAm > 0) {
-                  var keptAm = 0;
-                  Object.keys(tmpAm).forEach(function (k) {
-                    if (!Object.prototype.hasOwnProperty.call(extractedMap, k)) {
-                      extractedMap[k] = tmpAm[k];
-                      keptAm++;
-                    }
-                  });
-                  details.push(res.am + ' (' + keptAm + ')');
-                }
-              });
-
-              return {
-                ok: Object.keys(extractedMap).length > 0,
-                map: extractedMap,
-                details: details
-              };
-            });
+            return { ok: false, map: {}, details: [] };
           });
 
         // 2. Synchronisation stricte des Commissions Yassir depuis la feuille
         // (même lecteur que le bouton « Recharger depuis Google Sheets »).
-        var commPromise = lireCommissionsDepuisFeuille('Yassir');
+        var commPromise = lireCommissionsDepuisFeuille('Yassir', !!(manualTrigger && isOwnerAdmin()));
 
         return Promise.all([portfoliosPromise, commPromise]).then(function (results) {
           var pResult = results[0];
@@ -1186,7 +705,7 @@
               );
             } else {
               showToast(
-                'Accès bloqué par Google Sheets : ouvrez la feuille Google Sheets, cliquez sur <strong>Partager</strong> en haut à droite et réglez l\'accès général sur <strong>« Tous les utilisateurs disposant du lien : Lecteur »</strong>.',
+                'Accès aux feuilles impossible pour le moment (lecture via le serveur en échec). Réessayez plus tard.',
                 'error'
               );
             }

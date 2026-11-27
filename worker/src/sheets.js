@@ -353,8 +353,11 @@ async function loadTab(env, plan, tabTitle, ctx) {
       }
       // Aligner ce morceau : colonnes par nom d'en-tête.
       const tabHNorm = hNorm;
-      const colMap = headersNorm.map((mh) => {
-        if (!mh) return -1;
+      const colMap = headersNorm.map((mh, c) => {
+        // En-tête vide (ex. coin de la matrice 2025) : la colonne existe
+        // quand même — repli positionnel, sinon les libellés de lignes
+        // (« Requested », …) que le front lit en colonne 0 sont perdus.
+        if (!mh) return c < tabHNorm.length ? c : -1;
         for (let i = 0; i < tabHNorm.length; i++) {
           if (tabHNorm[i] === mh) return i;
         }
@@ -374,8 +377,9 @@ async function loadTab(env, plan, tabTitle, ctx) {
     // Mémoriser l'alignement de cet onglet pour les morceaux suivants.
     if (!ctx.colMap) {
       const tabHNorm = normRow((chunk[headerRowIdx] || []).map((c) => (c === null || c === undefined ? '' : String(c))));
-      ctx.colMap = headersNorm.map((mh) => {
-        if (!mh) return -1;
+      ctx.colMap = headersNorm.map((mh, c) => {
+        // En-tête vide : repli positionnel (voir ci-dessus).
+        if (!mh) return c < tabHNorm.length ? c : -1;
         for (let i = 0; i < tabHNorm.length; i++) {
           if (tabHNorm[i] === mh) return i;
         }

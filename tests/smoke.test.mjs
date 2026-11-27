@@ -3,20 +3,48 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { generateKeyPairSync } from 'node:crypto';
 import { handle, hashPassword } from '../worker/src/index.js';
+import { clearGoogleTokenCache } from '../worker/src/google-sheets.js';
 
 const seed = existsSync('private/seed.json') ? JSON.parse(readFileSync('private/seed.json', 'utf8')) : { live: { PORTFOLIOS_SHEET_ID: 'SHEET_TEST_ID_000000000000000000000000000' }, kool: {}, commissions: { 'test resto': 20 }, portfolios: {} };
-// IDs Kool simulés : le test ne doit pas dépendre de private/seed.json (gitignoré, absent en CI).
-// Sans eux, la config Kool du bootstrap est vide et le mock ne répond à aucune feuille.
-const koolTestIds = {
-  DATA_SHEET_ID: 'KOOL_DATA_TEST_ID_000000000001', ORDER_ITEMS_SHEET_ID: 'KOOL_ITEMS_TEST_ID_000000000002',
-  COMMISSION_SHEET_ID: 'KOOL_COMM_TEST_ID_000000000003', PORTFOLIOS_SHEET_ID: 'KOOL_PORT_TEST_ID_000000000004',
-  OFFRE_PARTICIPATION_SHEET_ID: 'KOOL_OFFRE_TEST_ID_000000000005',
-  BUDGET_SHEET_ID: 'KOOL_BUDGET_TEST_ID_000000000007', HISTORICAL_2025_SHEET_ID: 'KOOL_2025_TEST_ID_000000000006',
-  DATA_GID: '0', ORDER_ITEMS_GID: '0', COMMISSION_GID: '0', PORTFOLIOS_GID: '0', OFFRE_PARTICIPATION_GID: '0',
-  BUDGET_GID: '11', HISTORICAL_2025_GID: '14',
+// Identifiants de classeurs simulés (format valide, jamais les vrais IDs) :
+// le front ne les connaît plus (il appelle /api/sheets/:source), mais le
+// Worker les lit dans la KV `config` — la config de test est donc complète
+// et ne dépend plus de private/seed.json (absent en CI).
+const UNIQUE = 'UNIQUE00000000000000000000000001';
+const OCT = 'OCT000000000000000000000000000001';
+const NOV = 'NOV000000000000000000000000000001';
+const DATA_KOOL = 'KOOL0000000000000000000000000001';
+const DETAILS = 'DET000000000000000000000000000001';
+const koolCfg = {
+  DATA_SHEET_ID: DATA_KOOL, DATA_GID: '0',
+  COMMISSION_SHEET_ID: UNIQUE, COMMISSION_TAB: 'Commissions', COMMISSION_ALT_TABS: ['Commissions'], COMMISSION_GID: '9',
+  PORTFOLIOS_SHEET_ID: UNIQUE, PORTFOLIOS_GID: '1',
+  OFFRE_PARTICIPATION_SHEET_ID: UNIQUE, OFFRE_PARTICIPATION_GID: '10',
+  ORDER_ITEMS_SHEET_ID: DETAILS, ORDER_ITEMS_GID: '0',
+  BUDGET_SHEET_ID: UNIQUE, BUDGET_GID: '11',
+  HISTORICAL_2025_SHEET_ID: UNIQUE, HISTORICAL_2025_GID: '14'
 };
-const koolCfg = { ...koolTestIds, ...(seed.kool || {}) };
+const testConfigBase = {
+  live: {
+    PORTFOLIOS_SHEET_ID: UNIQUE,
+    PORTFOLIOS_TABS: [
+      { tab: 'Omar Beldi', altTabs: [], gid: '1', am: 'Omar Beldi' },
+      { tab: 'Nour Ali', altTabs: [], gid: '2', am: 'Nour Ali' }
+    ],
+    COMMISSIONS_SHEET_ID: UNIQUE, COMMISSIONS_TAB: 'Commissions', COMMISSIONS_GID: '9',
+    BUDGET_SHEET_ID: UNIQUE, BUDGET_GID: '11', BUDGET_TAB: 'Budget',
+    RESTO_STATUS_SHEET_ID: UNIQUE, RESTO_STATUS_GID: '12',
+    OFFRE_PARTICIPATION_SHEET_ID: UNIQUE, OFFRE_PARTICIPATION_GID: '10',
+    HISTORICAL_2025_SHEET_ID: UNIQUE, HISTORICAL_2025_GID: '13',
+    HISTORICAL_MONTHS: [
+      { label: 'Octobre (Google Sheets)', sheetId: OCT, gid: '0', tab: 'Data exp' },
+      { label: 'Novembre (Google Sheets)', sheetId: NOV, gid: '0', tab: 'Data exp' }
+    ]
+  },
+  kool: koolCfg
+};
 // En-têtes cibles (111 colonnes) lus depuis le code source : le test Yassir
 // construit un vrai fichier Data exp avec ces en-têtes exacts (eval du littéral
 // du dépôt, jamais de private/seed.json).
@@ -72,13 +100,21 @@ const journalEntries = async () => {
   const r = await handle(new Request('https://api.test/api/activity', { headers: { Origin: 'http://localhost', Authorization: 'Bearer ' + token } }), env);
   return (await r.json()).entries || [];
 };
-const env = { PULSE_KV: kv, JWT_SECRET: 'j'.repeat(48), LEGACY_SALT: 's', ALLOWED_ORIGIN: 'http://localhost' };
+// Compte de service simulé (clé RSA générée pour le test) : le Worker signe
+// son JWT avec elle pour lire Google Sheets — ici, Google est simulé.
+const { privateKey: testServiceKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const testServiceAccount = {
+  type: 'service_account', project_id: 'projet-factures-483821',
+  client_email: 'yassir-pulse@projet-factures-483821.iam.gserviceaccount.com',
+  private_key: testServiceKey.export({ type: 'pkcs8', format: 'pem' })
+};
+const env = { PULSE_KV: kv, JWT_SECRET: 'j'.repeat(48), LEGACY_SALT: 's', ALLOWED_ORIGIN: 'http://localhost', GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify(testServiceAccount) };
 store.set('accounts', JSON.stringify([
   { username: 'proprio', hash: await hashPassword('Proprio-Test-123'), role: 'owner', displayName: 'Propriétaire Admin', amName: null, protected: true },
   { username: 'omar.beldi', hash: await hashPassword('Omar-Test-12345'), role: 'am', displayName: 'Omar Beldi', amName: 'Omar Beldi', protected: true },
   { username: 'ahmed.marrouki', hash: await hashPassword('Ahmed-Test-12345'), role: 'viewer_all', displayName: 'Ahmed Marrouki', amName: null, protected: true }
 ]));
-store.set('config', JSON.stringify({ live: { ...seed.live, COMMISSIONS_SHEET_ID: 'COMM_TEST_ID_000000000001', COMMISSIONS_GID: '9', COMMISSIONS_TAB: 'Commissions' }, kool: koolCfg }));
+store.set('config', JSON.stringify(testConfigBase));
 store.set('defaults', JSON.stringify({ commissions: seed.commissions, portfolios: seed.portfolios }));
 
 const html = readFileSync('index.html', 'utf8').replace(/<script type="module"[^>]*><\/script>/, '').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '');
@@ -86,13 +122,152 @@ const bundle = readFileSync('dist-test/app.js', 'utf8');
 const sheetCalls = [];
 const errors = [];
 
+// ---- Google Sheets simulé (G3 suite) ----
+// Le front n'appelle plus Google directement : c'est le Worker qui lit les
+// feuilles (GET /api/sheets/:source) via le compte de service. Dans ce test,
+// le fetch global (Node) est simulé : jeton OAuth + métadonnées + valeurs,
+// avec les données des fixtures CSV du fichier (converties en lignes).
+// buildGoogleMockData(overrides) reconstruit les classeurs simulés ;
+// setGoogleMockTabs(id, tabs) ajoute/remplace les onglets d'un classeur ;
+// googleFailTabs simule un onglet illisible (403 sur les valeurs).
+const csvToRows = (csv) => {
+  const rows = [];
+  let row = [], cur = '', inQ = false;
+  const s = String(csv || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '"') {
+      if (inQ && s[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === ',' && !inQ) { row.push(cur); cur = ''; }
+    else if ((ch === '\n' || (ch === '\r' && s[i + 1] === '\n')) && !inQ) {
+      if (ch === '\r') i++;
+      row.push(cur); rows.push(row); row = []; cur = '';
+    } else if (ch !== '\r' || inQ) { cur += ch; }
+  }
+  row.push(cur);
+  if (row.some((c) => String(c).trim() !== '')) rows.push(row);
+  return rows;
+};
+let googleSheetsData = null;
+const googleFailTabs = new Set();
+// googleFailAllValues simule des feuilles toutes illisibles (403 sur les
+// valeurs) : réplique l'ancien environnement de test où la lecture Google
+// directe échouait, pour les tests qui prérèglent des données en
+// localStorage et ne doivent pas les voir écrasées par la synchro auto.
+let googleFailAllValues = false;
+function buildGoogleMockData(overrides) {
+  const ov = overrides || {};
+  // Portefeuilles : un onglet par AM (données CSV « port » groupées par AM).
+  const portTabs = {};
+  const portRows = csvToRows(ov.port || koolCsvPort);
+  const portHdr = portRows[0] || [];
+  const idxAmPort = portHdr.findIndex((h) => String(h).trim().toLowerCase() === 'am');
+  const byAm = {};
+  for (let r = 1; r < portRows.length; r++) {
+    const am = idxAmPort !== -1 ? String(portRows[r][idxAmPort] || '').trim() : '';
+    if (!am) continue;
+    if (!byAm[am]) byAm[am] = [portHdr];
+    byAm[am].push(portRows[r]);
+  }
+  for (const am of Object.keys(byAm)) portTabs[am] = byAm[am];
+  googleSheetsData = {
+    [UNIQUE]: {
+      ...portTabs,
+      Commissions: csvToRows(ov.comm || koolCsvComm),
+      'Offre Participation': csvToRows(ov.offre || koolCsvOffre),
+      Budget: [
+        ['AM', 'Budget', 'APP'],
+        ['Omar Beldi', '100000', 'Yassir'],
+        ['Eya Majdoub', '50000', 'Yassir'],
+        ['Omar Beldi', '80000', 'Kool'],
+        ['Global', '200000', 'Yassir']
+      ],
+      Statuts: [
+        ['id', 'Restaurant Name', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10', 'Status'],
+        ['1', 'Resto Yassir A', '', '', '', '', '', '', '', '', 'Active'],
+        ['2', 'Resto Yassir B', '', '', '', '', '', '', '', '', 'Inactive'],
+        ['3', 'Resto Alpha', '', '', '', '', '', '', '', '', 'Active']
+      ],
+      '2025 Yassir': [
+        ['', 'W 45', 'W 46', 'W 47'],
+        ['Requested', 100, 110, 120],
+        ['Delivered Orders', 5, 6, 7],
+        ['GMV (Total Food VF)', 100, 120, 140],
+        ['CA YASSIR', 10, 12, 14]
+      ],
+      // 2025 Kool : pas de données par défaut (les tests existants supposent
+      // « aucune donnée Kool 2025 ») ; seul un override explicite en fournit.
+      '2025 Kool': ov.hist2025 ? csvToRows(ov.hist2025) : [['', 'W 45', 'W 46', 'W 47']]
+    },
+    [OCT]: { 'Data exp': [TARGET_HEADERS_TEST.slice(), yassirRow('16/10/2026', 'YAF-1', 'Resto Yassir A', 100, 0, '', '')] },
+    [NOV]: { 'Data exp': [TARGET_HEADERS_TEST.slice(), yassirRow('16/11/2026', 'YAF-2', 'Resto Yassir A', 60, 0, '', '')] },
+    [DATA_KOOL]: { Data: csvToRows(ov.data || koolCsvData) },
+    [DETAILS]: { Articles: csvToRows(ov.items || koolCsvItems) }
+  };
+  return googleSheetsData;
+}
+function setGoogleMockData(overrides) { return buildGoogleMockData(overrides); }
+function setGoogleMockTabs(spreadsheetId, tabs) {
+  if (!googleSheetsData) buildGoogleMockData(null);
+  googleSheetsData[spreadsheetId] = { ...(googleSheetsData[spreadsheetId] || {}), ...tabs };
+}
+let googleMockInstalled = false;
+function installGoogleMock() {
+  if (!googleSheetsData) buildGoogleMockData(null);
+  if (googleMockInstalled) return;
+  googleMockInstalled = true;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) {
+      return { ok: true, status: 200, json: async () => ({ access_token: 'ya29.test-token', expires_in: 3600, token_type: 'Bearer' }) };
+    }
+    if (u.includes('sheets.googleapis.com/v4/spreadsheets/')) {
+      const m = u.match(/spreadsheets\/([A-Za-z0-9_-]+)(?:\/values\/([^?]+))?/);
+      if (!m) throw new Error('URL Google inattendue : ' + u);
+      const id = m[1];
+      const tabs = googleSheetsData[id] || {};
+      if (!m[2]) {
+        const titles = Object.keys(tabs);
+        return { ok: true, status: 200, json: async () => ({ sheets: titles.map((t, i) => ({ properties: { sheetId: i, title: t } })) }) };
+      }
+      const range = decodeURIComponent(m[2]);
+      const rm = range.match(/^'((?:[^']|'')+)'!A(\d+):ZZ(\d+)$/);
+      if (!rm) throw new Error('Plage inattendue : ' + range);
+      const title = rm[1].replace(/''/g, "'");
+      if (googleFailAllValues || googleFailTabs.has(title)) {
+        return { ok: false, status: 403, json: async () => ({ error: { code: 403, message: 'Forbidden' } }) };
+      }
+      const rows = tabs[title] || [];
+      const slice = rows.slice(Number(rm[2]) - 1, Number(rm[3]));
+      return { ok: true, status: 200, json: async () => ({ range, majorDimension: 'ROWS', values: slice }) };
+    }
+    return realFetch(u, opts);
+  };
+}
+// Le cache feuilles du Worker (KV, sans expiration dans ce test) doit être
+// vidé entre deux boots, sinon un test lirait les données du précédent.
+const clearSheetCache = () => {
+  for (const k of [...store.keys()]) if (k.startsWith('sheetcache:')) store.delete(k);
+  clearGoogleTokenCache();
+};
+
+
 function boot() {
+  clearSheetCache();
+  googleFailTabs.clear();
+  googleFailAllValues = false;
+  buildGoogleMockData(null);
+  installGoogleMock();
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
   w.__PULSE_API__ = 'https://api.test';
+  w.__sheetApiCalls = [];
   w.fetch = async (url, opts = {}) => {
     const u = String(url);
     if (u.startsWith('https://api.test')) {
+      if (u.includes('/api/sheets/')) w.__sheetApiCalls.push(u);
       const r = await handle(new Request(u, { method: opts.method || 'GET', body: opts.body, headers: { Origin: 'http://localhost', ...(opts.headers || {}) } }), env);
       return { ok: r.ok, status: r.status, json: () => r.json(), text: () => r.text() };
     }
@@ -126,13 +301,19 @@ test('mauvais mot de passe : erreur affichée, application toujours verrouillée
   assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), true);
 });
 
-test('connexion AM : app déverrouillée, rôle venant du serveur, synchro Sheets avec les IDs reçus après connexion', async () => {
+test('connexion AM : app déverrouillée, rôle venant du serveur, synchro via /api/sheets (aucun appel Google direct)', async () => {
   const w = boot();
   await login(w, 'omar.beldi', 'Omar-Test-12345');
   assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false);
   assert.equal(w.document.getElementById('headerUserBadge').textContent, 'Omar Beldi');
-  const id = seed.live.PORTFOLIOS_SHEET_ID;
-  assert.ok(sheetCalls.some((u) => u.includes(id)), 'aucun appel Google Sheets avec les IDs issus de /api/bootstrap');
+  // La synchro automatique (à la connexion) lit les feuilles via le Worker :
+  // des appels /api/sheets/:source ont eu lieu, et le front n'a jamais
+  // appelé docs.google.com directement (ni CSV, ni gviz, ni XLSX).
+  await wait(800);
+  assert.ok(w.__sheetApiCalls.some((u) => u.includes('/api/sheets/portfolios')), 'aucun appel /api/sheets/portfolios : ' + JSON.stringify(w.__sheetApiCalls));
+  assert.ok(w.__sheetApiCalls.some((u) => u.includes('/api/sheets/commissions')), 'aucun appel /api/sheets/commissions');
+  assert.ok(!sheetCalls.some((u) => u.includes('docs.google.com')), 'le front appelle encore Google directement : ' + JSON.stringify(sheetCalls));
+  assert.ok(!w.__sheetApiCalls.some((u) => u.includes('fresh=1')), 'la synchro automatique ne doit jamais passer fresh=1');
   assert.equal(w.sessionStorage.getItem('pulse_token_v1').split('.').length, 3);
   assert.equal(w.localStorage.getItem('pulse_token_v1'), null); // pas de "se souvenir de moi" coché
 });
@@ -236,29 +417,25 @@ const koolCsvOffrePart = toCsv([
 ]);
 
 function bootKool(overrides) {
+  clearSheetCache();
+  googleFailTabs.clear();
+  googleFailAllValues = false;
+  // Les overrides alimentent le mock Google (le Worker lit les feuilles) :
+  // plus aucun CSV servi directement au front.
+  buildGoogleMockData(overrides || null);
+  installGoogleMock();
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
   w.__PULSE_API__ = 'https://api.test';
+  w.__sheetApiCalls = [];
   w.fetch = async (url, opts = {}) => {
     const u = String(url);
     if (u.startsWith('https://api.test')) {
+      if (u.includes('/api/sheets/')) w.__sheetApiCalls.push(u);
       const r = await handle(new Request(u, { method: opts.method || 'GET', body: opts.body, headers: { Origin: 'http://localhost', ...(opts.headers || {}) } }), env);
       return { ok: r.ok, status: r.status, json: () => r.json(), text: () => r.text() };
     }
-    if (u.includes('format=xlsx')) return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-    const kc = koolCfg;
-    const ov = overrides || {};
-    const match = (id) => id && u.includes(id);
-    let body = null;
-    if (match(kc.DATA_SHEET_ID)) body = ov.data || koolCsvData;
-    else if (match(kc.ORDER_ITEMS_SHEET_ID)) body = ov.items || koolCsvItems;
-    else if (match(kc.COMMISSION_SHEET_ID)) body = ov.comm || koolCsvComm;
-    else if (match(kc.PORTFOLIOS_SHEET_ID)) body = ov.port || koolCsvPort;
-    else if (match(kc.OFFRE_PARTICIPATION_SHEET_ID)) body = ov.offre || koolCsvOffre;
-    // 2025 Kool : pas de données par défaut (les tests existants supposent
-    // « aucune donnée Kool 2025 ») ; seul un override explicite en fournit.
-    else if (match(kc.HISTORICAL_2025_SHEET_ID)) body = ov.hist2025 || null;
-    if (body !== null) return { ok: true, status: 200, text: async () => body, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    sheetCalls.push(u);
     return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
   };
   w.addEventListener('error', (e) => errors.push(e.message));
@@ -1142,6 +1319,15 @@ test('Notifications Kool : Traité / Tout lu, regroupement, tri, clic, nouvelles
 // Participation. Coût restaurant total = 17 (A 0 + B 5 + C 8 + D 0 + E 4).
 // Budget global préréglé en localStorage avant le chargement de l'application.
 function bootYassirWithBudget(globalBudget) {
+  clearSheetCache();
+  googleFailTabs.clear();
+  googleFailAllValues = false;
+  installGoogleMock();
+  // La feuille Budget simulée est rendue illisible : le budget préréglé en
+  // localStorage doit survivre à la synchro automatique (ancien comportement :
+  // la lecture Google directe échouait en test, la synchro ne touchait pas
+  // au budget local).
+  googleFailTabs.add('Budget');
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window;
   w.__PULSE_API__ = 'https://api.test';
@@ -1234,6 +1420,13 @@ test('Carte profil : budget global pour un compte sans budget personnel, « — 
   const ilYAJours = (n) => fmtFR(new Date(Date.now() - n * 86400000));
 
   const build = async (budgetStore, user, pwd, rowsSpec) => {
+    clearSheetCache();
+    installGoogleMock();
+    // Comme bootYassirWithBudget : toutes les feuilles simulées sont
+    // illisibles — les données préréglées en localStorage (budgets, règles
+    // Offre, portefeuilles) survivent à la synchro automatique, comme avant
+    // la migration quand la lecture Google directe échouait en test.
+    googleFailAllValues = true;
     const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
     const w = dom.window;
     w.__PULSE_API__ = 'https://api.test';
@@ -1455,16 +1648,12 @@ test('Classeur fusionné : filtre par colonne APP (portefeuilles, commissions, o
     'Omar Beldi', mapOld, 'Kool');
   assert.ok(mapOld['resto ancien'], 'sans colonne APP : ligne gardée');
 
-  // Onglet Budget : il ne doit pas injecter de restaurants 'Yassir'/'Kool'.
-  const wbRows = {
-    'Omar Beldi': portRows,
-    'Budget': [['AM', 'Budget global', 'APP'], ['Omar beldi', 337181, 'Yassir'], ['Omar beldi', 90000, 'Kool']],
-    'Commissions': [['Restaurant', 'Commission', 'APP'], ['Resto X', 20, 'Yassir']],
-    '2025 Kool': [['', 'W 07'], ['Requested', 100]]
-  };
-  const res = w.yassirExtrairePortefeuillesDepuisClasseur(Object.keys(wbRows), function (n) { return wbRows[n]; }, 'Yassir', null);
-  assert.equal(Object.keys(res.map).length, 2, 'portefeuilles Yassir via classeur : 2 restos');
-  assert.ok(!res.map['yassir'] && !res.map['kool'], 'onglet Budget : aucun resto Yassir/Kool injecté');
+  // Les anciens lecteurs directs Google (classeur XLSX, gviz, JSONP) n'existent
+  // plus : le Worker ne lit que les onglets AM pour les portefeuilles (l'onglet
+  // Budget ne peut plus injecter de restaurants 'Yassir'/'Kool').
+  assert.equal(typeof w.yassirExtrairePortefeuillesDepuisClasseur, 'undefined', 'extracteur de classeur encore présent');
+  assert.equal(typeof w.yassirLireClasseurToutesFeuilles, 'undefined', 'lecteur multi-onglets direct encore présent');
+  assert.equal(typeof w.yassirFetchGoogleWorkbookXlsx, 'undefined', 'téléchargement XLSX direct encore présent');
 
   // Commissions : filtre APP, ancien format sans en-tête conservé.
   const commRows = [
@@ -1619,112 +1808,65 @@ test('2025 Kool : le stockage validé stocke et compte, l\'invalide retourne 0 s
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
-// ---- Multi-onglets : data journalière par onglet (2026-11-26) ----
-// Construit un classeur XLSX simulé (ArrayBuffer) à partir d'une liste
-// [nomOnglet, aoa].
-const construireClasseurXlsx = (w, onglets) => {
-  const wb = w.XLSX.utils.book_new();
-  onglets.forEach(([nom, aoa]) => {
-    w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(aoa), nom);
-  });
-  const out = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  return (out instanceof ArrayBuffer) ? out : new Uint8Array(out).buffer;
-};
-// Lit un CSV (chaîne) en AoA via SheetJS (pour construire l'onglet principal
-// d'un classeur simulé à partir du deck CSV existant).
-const aoaDepuisCsv = (w, csv) => {
-  const wbCsv = w.XLSX.read(csv, { type: 'string' });
-  return w.XLSX.utils.sheet_to_json(wbCsv.Sheets[wbCsv.SheetNames[0]], { header: 1, defval: '' });
-};
+// ---- Multi-onglets : la fusion est désormais côté Worker (G3 suite) ----
+// Les onglets journaliers sont fusionnés par /api/sheets/:source ; les tests
+// G3 plus bas couvrent la pagination, la garde manuelle et l'échec isolé.
 
-test('Multi-onglets : fusion des onglets, mapping par en-têtes, onglets invalides ignorés', async () => {
+test('G3 : lecture paginée — toutes les pages fusionnées, en-têtes une seule fois', async () => {
   const w = bootKool();
-  const sheetId = 'TEST_MULTI_TAB_ID_000000000001';
-  const mainAoa = [
-    ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
-    ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
-    ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '5']
-  ];
-  // Onglet journalier : mêmes colonnes dans un ordre différent + 2 commandes
-  // (1006 le 19/11, 1007 le 20/11).
-  const dailyAoa = [
-    ['Restaurant', 'Remise', 'N° commande', 'Date', 'Montant HT', 'Annulé', 'Raison annulation', '', '', '', 'Frais livraison', ''],
-    ['Resto Alpha', '2', '1006', '19/11/2026', '30.00', '', '', '', '', '', '4', ''],
-    ['Resto Beta', '0', '1007', '20/11/2026', '20.00', '', '', '', '', '', '3', '']
-  ];
-  const badAoa = [['Ville', 'Segment', 'Restaurant'], ['Tunis', 'Top', 'Resto X']];
-  const xlsxBuf = construireClasseurXlsx(w, [
-    ['Data', mainAoa],
-    ['2026-11-19', dailyAoa],
-    ['Portefeuilles', badAoa],
-    ['Vide', []]
-  ]);
-  let xlsxFetches = 0;
-  const origFetch = w.fetch;
-  w.fetch = async (url, opts = {}) => {
-    const u = String(url);
-    if (u.includes(sheetId)) {
-      if (u.includes('format=xlsx')) {
-        xlsxFetches++;
-        return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => xlsxBuf };
-      }
-      return { ok: true, status: 200, text: async () => toCsv(mainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-    }
-    return origFetch(url, opts);
-  };
-  w.yassirViderCacheOngletsClasseur();
-  const merged = await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, { force: true });
-  assert.equal(xlsxFetches, 1, 'découverte XLSX : 1 téléchargement attendu');
-  assert.equal(merged.length, 5, 'lignes fusionnées : 1 en-tête + 2 + 2, obtenu ' + merged.length);
-  const byOid = {};
-  merged.slice(1).forEach((r) => { byOid[String(r[4] || '').trim()] = r; });
-  assert.ok(byOid['1001'] && byOid['1002'], 'commandes de l\'onglet principal absentes');
-  assert.ok(byOid['1006'] && byOid['1007'], 'commandes de l\'onglet journalier absentes');
-  // Mapping par en-têtes : la commande 1006 a ses valeurs aux bons indices
-  // (Date en 3, Restaurant en 6, Montant HT en 9, Remise en 11) malgré
-  // l'ordre des colonnes différent dans son onglet.
-  assert.equal(byOid['1006'][3], '19/11/2026', 'date 1006 mal mappée');
-  assert.equal(byOid['1006'][6], 'Resto Alpha', 'restaurant 1006 mal mappé');
-  assert.equal(String(byOid['1006'][9]), '30.00', 'montant 1006 mal mappé');
-  assert.equal(String(byOid['1006'][11]), '2', 'remise 1006 mal mappée');
-  // Onglet invalide (portefeuilles) et onglet vide ignorés : pas de « Resto X ».
-  assert.ok(!merged.some((r) => String(r[6] || '').includes('Resto X')), 'onglet invalide non ignoré');
+  await login(w, 'proprio', 'Proprio-Test-123');
+  // Data Kool simulée : 5 commandes (1001-1005). pageSize=2 -> 3 pages.
+  const callsBefore = w.__sheetApiCalls.length;
+  const rows = await w.yassirLireFeuilleViaApi('data-kool', { brand: 'kool', pageSize: 2 });
+  assert.equal(rows.length, 6, '1 en-tête + 5 lignes attendues, obtenu ' + rows.length);
+  assert.equal(rows[0][4], 'N° commande', '1re ligne = en-têtes');
+  assert.equal(rows.filter((r) => String(r[4] || '') === 'N° commande').length, 1, 'en-têtes répétés entre les pages');
+  const oids = rows.slice(1).map((r) => String(r[4] || '').trim()).sort();
+  assert.deepEqual(oids, ['1001', '1002', '1003', '1004', '1005'], 'commandes fusionnées : ' + oids.join(','));
+  const newCalls = w.__sheetApiCalls.slice(callsBefore);
+  assert.ok(newCalls.some((u) => u.includes('/api/sheets/data-kool') && u.includes('page=0')), 'page 0 non appelée');
+  assert.ok(newCalls.some((u) => u.includes('page=1')), 'page 1 non appelée');
+  assert.ok(newCalls.some((u) => u.includes('page=2')), 'page 2 non appelée');
+  assert.ok(!newCalls.some((u) => u.includes('fresh=1')), 'lecture paginée sans fresh=1');
+  assert.ok(!sheetCalls.some((u) => u.includes('docs.google.com')), 'appel Google direct pendant la lecture paginée');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
-test('Multi-onglets : classeur à un seul onglet = comportement inchangé, pas de second téléchargement XLSX', async () => {
-  const w = bootKool();
-  const sheetId = 'TEST_SINGLE_TAB_ID_00000000001';
-  const mainAoa = [
-    ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
-    ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
-    ['', '', '', '17/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '5']
-  ];
-  const xlsxBuf = construireClasseurXlsx(w, [['Data', mainAoa]]);
-  let xlsxFetches = 0;
-  const origFetch = w.fetch;
-  w.fetch = async (url, opts = {}) => {
-    const u = String(url);
-    if (u.includes(sheetId)) {
-      if (u.includes('format=xlsx')) {
-        xlsxFetches++;
-        return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => xlsxBuf };
-      }
-      return { ok: true, status: 200, text: async () => toCsv(mainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-    }
-    return origFetch(url, opts);
-  };
-  w.yassirViderCacheOngletsClasseur();
-  const r1 = await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, {});
-  assert.equal(r1.length, 3, '1er appel : lignes de l\'onglet principal');
-  assert.equal(xlsxFetches, 1, '1er appel : une seule découverte XLSX');
-  const r2 = await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, {});
-  assert.equal(r2.length, 3, '2e appel : mêmes lignes');
-  assert.equal(xlsxFetches, 1, '2e appel : aucun téléchargement XLSX supplémentaire (cache 1 onglet)');
-  assert.deepEqual(r2, r1, 'résultat identique entre les deux appels');
-  // Synchro manuelle : force la redécouverte.
-  await w.yassirLireClasseurToutesFeuilles(sheetId, '0', w.yassirValiderEnTetesDataKool, { force: true });
-  assert.equal(xlsxFetches, 2, 'appel forcé : redécouverte XLSX');
+test('G3 : garde synchro manuelle proprio + échec d’une source isolé des autres', async () => {
+  // Synchro manuelle par un AM : bloquée avant tout appel (pas de fresh=1).
+  const wAm = bootKool();
+  await login(wAm, 'omar.beldi', 'Omar-Test-12345');
+  const labelBefore = wAm.document.getElementById('labelSyncKoolSheets').textContent;
+  wAm.yassirSyncKoolSheets(true);
+  assert.equal(wAm.document.getElementById('labelSyncKoolSheets').textContent, labelBefore, 'synchro manuelle Kool lancée par un AM');
+  assert.ok(!wAm.__sheetApiCalls.some((u) => u.includes('fresh=1')), 'un AM a déclenché une lecture fresh=1');
+
+  // Échec d'une source (onglet Statuts illisible) : Statuts en échec, Budget OK.
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  googleFailTabs.add('Statuts');
+  try {
+    await w.yassirSyncRestoStatusSheet(true);
+    assert.equal(w.yassirStatutSynchroParSource()['Statut Active/Inactive'], false, 'Statuts non marqué en échec');
+    await w.yassirSyncBudgetSheet(true);
+    assert.equal(w.yassirStatutSynchroParSource()['Budget'], true, 'Budget en échec alors que sa feuille est lisible');
+  } finally {
+    googleFailTabs.delete('Statuts');
+  }
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('G3 : synchro Budget via /api/sheets — budgets Yassir et Kool séparés', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncBudgetSheet(true);
+  // Feuille simulée : Omar 100 000 (Yassir) + Eya 50 000 (Yassir), Omar 80 000 (Kool).
+  const stored = JSON.parse(w.localStorage.getItem('yassir_vf_budget_v1') || '{}');
+  assert.equal(stored.byAm['Omar Beldi'], 100000, 'budget Yassir Omar : ' + JSON.stringify(stored));
+  assert.equal(stored.byAm['Eya Majdoub'], 50000, 'budget Yassir Eya');
+  const storedKool = JSON.parse(w.localStorage.getItem('kool_vf_budget_v1') || '{}');
+  assert.equal(storedKool.byAm['Omar Beldi'], 80000, 'budget Kool Omar : ' + JSON.stringify(storedKool));
+  assert.equal(w.yassirStatutSynchroParSource()['Budget'], true, 'Budget non marqué OK');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
@@ -1741,11 +1883,6 @@ test('Kool : synchro multi-onglets (Data + détails articles), pas de duplicatio
     ['Resto Alpha', '2', '1006', '19/11/2026', '30.00', '', '', '', '', '', '4', ''],
     ['Resto Beta', '0', '1007', '20/11/2026', '20.00', '', '', '', '', '', '3', '']
   ];
-  const dataWbBuf = construireClasseurXlsx(w, [
-    ['Data', aoaDepuisCsv(w, koolCsvData)],
-    ['2026-11-19', dailyDataAoa],
-    ['Portefeuilles', [['Ville', 'Segment', 'Restaurant'], ['Tunis', 'Top', 'Resto X']]]
-  ]);
   // Onglet journalier Détails articles : colonnes dans un ordre différent.
   const dailyItemsAoa = [
     ['Article', 'Order ID', 'Date', 'Restaurant', 'Category', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
@@ -1753,17 +1890,14 @@ test('Kool : synchro multi-onglets (Data + détails articles), pas de duplicatio
     ['Tiramisu', '1006', '19/11/2026', 'Resto Alpha', 'Dessert', 1, 6, 0, 6, 'Food'],
     ['Salade César', '1007', '20/11/2026', 'Resto Beta', 'Salade', 2, 8, 0, 8, 'Food']
   ];
-  const itemsWbBuf = construireClasseurXlsx(w, [
-    ['Détails', aoaDepuisCsv(w, koolCsvItems)],
-    ['2026-11-19', dailyItemsAoa]
-  ]);
-  const origFetch = w.fetch;
-  w.fetch = async (url, opts = {}) => {
-    const u = String(url);
-    if (u.includes(koolCfg.DATA_SHEET_ID) && u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => dataWbBuf };
-    if (u.includes(koolCfg.ORDER_ITEMS_SHEET_ID) && u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => itemsWbBuf };
-    return origFetch(url, opts);
-  };
+  // Onglets journaliers ajoutés au mock Google (le Worker les fusionne et
+  // ignore l'onglet invalide « Portefeuilles ») ; la synchro manuelle
+  // (fresh=1) les relit.
+  setGoogleMockTabs(DATA_KOOL, {
+    '2026-11-19': dailyDataAoa,
+    Portefeuilles: [['Ville', 'Segment', 'Restaurant'], ['Tunis', 'Top', 'Resto X']]
+  });
+  setGoogleMockTabs(DETAILS, { '2026-11-19': dailyItemsAoa });
   const lireKpiGmvBrut = () => {
     const kpi = {};
     w.document.querySelectorAll('#synthGlobalKpisBody tr').forEach((tr) => {
@@ -1803,10 +1937,10 @@ test('Yassir : synchro multi-onglets par mois (fusion des onglets journaliers)',
   const novId = 'YASSIR_NOV_TEST_ID_000000000002';
   const prevConfig = store.get('config');
   try {
-    store.set('config', JSON.stringify({ live: { ...seed.live, HISTORICAL_MONTHS: [
+    store.set('config', JSON.stringify({ ...testConfigBase, live: { ...testConfigBase.live, HISTORICAL_MONTHS: [
       { label: 'Octobre (Google Sheets)', sheetId: octId, gid: '0', tab: 'Data exp' },
       { label: 'Novembre (Google Sheets)', sheetId: novId, gid: '0', tab: 'Data exp' }
-    ] }, kool: koolCfg }));
+    ] } }));
     const w = boot();
     const mkRow = (date, oid, resto, itemTot) => yassirRow(date, oid, resto, itemTot, 0, '', '');
     // Octobre : onglet principal (1 commande) + onglet journalier aux colonnes
@@ -1816,26 +1950,11 @@ test('Yassir : synchro multi-onglets par mois (fusion des onglets journaliers)',
     const octDailyAoa = [octDailyHeaders,
       [...mkRow('17/10/2026', 'YAF-9002', 'Resto Yassir B', 50)].reverse(),
       [...mkRow('20/11/2026', 'YAF-9004', 'Resto Yassir C', 40)].reverse()];
-    const octWbBuf = construireClasseurXlsx(w, [
-      ['Data exp', octMainAoa],
-      ['2026-10-17', octDailyAoa]
-    ]);
     // Novembre : un seul onglet (comportement inchangé).
     const novMainAoa = [TARGET_HEADERS_TEST.slice(), mkRow('16/11/2026', 'YAF-9003', 'Resto Yassir A', 60)];
-    const novWbBuf = construireClasseurXlsx(w, [['Data exp', novMainAoa]]);
-    const origFetch = w.fetch;
-    w.fetch = async (url, opts = {}) => {
-      const u = String(url);
-      if (u.includes(octId)) {
-        if (u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => octWbBuf };
-        return { ok: true, status: 200, text: async () => toCsv(octMainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-      }
-      if (u.includes(novId)) {
-        if (u.includes('format=xlsx')) return { ok: true, status: 200, text: async () => '', json: async () => ({}), arrayBuffer: async () => novWbBuf };
-        return { ok: true, status: 200, text: async () => toCsv(novMainAoa), json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-      }
-      return origFetch(url, opts);
-    };
+    // Onglets dans le mock Google (le Worker les fusionne par mois).
+    setGoogleMockTabs(octId, { 'Data exp': octMainAoa, '2026-10-17': octDailyAoa });
+    setGoogleMockTabs(novId, { 'Data exp': novMainAoa });
     await login(w, 'proprio', 'Proprio-Test-123');
     await w.yassirSyncHistoricalSheets(true);
     // 2 sources (Octobre + Novembre), 4 commandes (9001 + 9002 + 9004 + 9003).
@@ -1876,6 +1995,8 @@ test('Fenêtre active : décembre accepté, mai rejeté', () => {
 test('Notifications Kool : alerte Budget à 90 % avec les budgets Kool', async () => {
   const w = bootKool({ data: koolCsvDataDeck, comm: koolCsvCommDeck, port: koolCsvPortDeck });
   w.localStorage.setItem('kool_vf_budget_v1', JSON.stringify({ byAm: { 'Omar Beldi': 25 }, global: 25 }));
+  // Feuille Budget illisible : le budget préréglé survit à la synchro auto.
+  googleFailTabs.add('Budget');
   await login(w, 'proprio', 'Proprio-Test-123');
   await w.yassirSyncKoolSheets(true);
   w.yassirSwitchBrand('kool');
@@ -2409,15 +2530,9 @@ test('Item 4 : le bouton relit la vraie feuille (pas l\u2019instantané KV), éc
   w.document.getElementById('inputNewRestRate').value = '42';
   w.yassirAddCommission();
   assert.ok(corps().includes('marqueur test unique'), 'marqueur non ajouté à la grille');
-  // La feuille simulée renvoie 2 taux, dont un nouveau restaurant.
-  const origFetch = w.fetch;
-  w.fetch = async (url, opts) => {
-    const u = String(url);
-    if (u.includes('COMM_TEST_ID_000000000001')) {
-      return { ok: true, status: 200, text: async () => 'Restaurant,Commission,APP\nResto Test,23.5,Yassir\nResto Deux,10,Yassir\n' };
-    }
-    return origFetch(url, opts);
-  };
+  // La feuille simulée renvoie 2 taux, dont un nouveau restaurant : le mock
+  // Google change, la relecture manuelle (fresh=1) relit la feuille.
+  setGoogleMockData({ comm: 'Restaurant,Commission,APP\nResto Test,23.5,Yassir\nResto Deux,10,Yassir\n' });
   const ok = await w.yassirSyncDefaultCommissions();
   assert.equal(ok, true, 'la relecture a échoué');
   assert.ok(corps().includes('resto test'), 'le nouveau taux de la feuille n\u2019est pas dans la grille');
@@ -2425,9 +2540,11 @@ test('Item 4 : le bouton relit la vraie feuille (pas l\u2019instantané KV), éc
   assert.ok(!corps().includes('marqueur test unique'), 'l\u2019ancienne grille (instantané KV) est toujours là');
   assert.ok(w.document.body.innerHTML.includes('Recharger depuis Google Sheets'), 'libellé du bouton incorrect');
   assert.ok(!w.document.body.innerHTML.includes('Restaurer grille Sheet'), 'ancien libellé trompeur toujours présent');
-  // Échec de lecture : la grille actuelle est conservée, jamais vidée.
-  w.fetch = async (url, opts) => origFetch(url, opts);
+  // Échec de lecture (onglet Commissions illisible) : la grille actuelle est
+  // conservée, jamais vidée.
+  googleFailTabs.add('Commissions');
   const ok2 = await w.yassirSyncDefaultCommissions();
+  googleFailTabs.delete('Commissions');
   assert.equal(ok2, false, 'la relecture en échec devrait renvoyer false');
   assert.ok(corps().includes('resto test'), 'la grille a été vidée après un échec de lecture');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
@@ -2457,15 +2574,9 @@ test('Kool : après une synchro fraîche, la semaine par défaut suit les donné
   await wait(600);
   let sel = w.document.getElementById('filterWeekSelect');
   assert.ok(sel.value.endsWith('|S47'), 'semaine par défaut = S47 avant données fraîches, pas ' + sel.value);
-  // Données fraîches jusqu'au 26/11/2026 (W48).
-  const fetchOrig = w.fetch;
-  w.fetch = async (url, opts = {}) => {
-    const u = String(url);
-    if (u.includes(koolCfg.DATA_SHEET_ID) && !u.includes('format=xlsx')) {
-      return { ok: true, status: 200, text: async () => koolCsvDataW48fin, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-    }
-    return fetchOrig(url, opts);
-  };
+  // Données fraîches jusqu'au 26/11/2026 (W48) : le mock Google change, la
+  // synchro manuelle (fresh=1) relit la feuille.
+  setGoogleMockData({ data: koolCsvDataW48fin });
   await w.yassirSyncKoolSheets(true);
   await wait(600);
   sel = w.document.getElementById('filterWeekSelect');
@@ -2493,14 +2604,7 @@ test('Kool : un choix manuel de semaine (W47) n\'est jamais écrasé par une syn
   await wait(300);
   assert.equal(w.document.getElementById('filterDateStart').value, '2026-11-16', 'début W47 choisi');
   // Données fraîches jusqu'au 26/11/2026 (W48) : la synchro ne doit rien changer.
-  const fetchOrig = w.fetch;
-  w.fetch = async (url, opts = {}) => {
-    const u = String(url);
-    if (u.includes(koolCfg.DATA_SHEET_ID) && !u.includes('format=xlsx')) {
-      return { ok: true, status: 200, text: async () => koolCsvDataW48fin, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
-    }
-    return fetchOrig(url, opts);
-  };
+  setGoogleMockData({ data: koolCsvDataW48fin });
   await w.yassirSyncKoolSheets(true);
   await wait(600);
   assert.ok(w.document.getElementById('filterWeekSelect').value.endsWith('|S47'), 'semaine manuelle W47 écrasée : ' + w.document.getElementById('filterWeekSelect').value);
@@ -2690,6 +2794,9 @@ test('Item 5b : règles de secours depuis la config KV (plus rien en dur) + band
     cfg.defaultOffreRules = reglesSecours;
     store.set('config', JSON.stringify(cfg));
     const w = boot();
+    // La feuille Offre Participation simulée est illisible : la synchro
+    // échoue, les règles de secours du bootstrap restent utilisées.
+    googleFailTabs.add('Offre Participation');
     await login(w, 'proprio', 'Proprio-Test-123');
     // Les règles de secours arrivent par le bootstrap, pas par le dépôt.
     const lues = w.yassirGetDefaultOffreParticipationRules();
@@ -2709,6 +2816,7 @@ test('Item 5b : règles de secours depuis la config KV (plus rien en dur) + band
     assert.ok(fb.textContent.includes('EXPIRÉES'), 'le bandeau ne dit pas que les règles sont expirées : ' + fb.textContent);
     assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
   } finally {
+    googleFailTabs.delete('Offre Participation');
     store.set('config', prevConfig);
   }
 });
@@ -2732,39 +2840,10 @@ test('Item 5c : purgerNombre lit le dernier séparateur comme décimal', () => {
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
-// ---- Item 10a (audit 2026-11-27) : un seul téléchargement XLSX par classeur / 60 s ----
-test('Item 10a : fetchGoogleWorkbookXlsx mémorisé 60 s (un seul téléchargement par connexion)', async () => {
-  const w = boot();
-  let nbFetchXlsx = 0;
-  const origFetch = w.fetch;
-  w.fetch = async (url, opts) => {
-    const u = String(url);
-    if (u.includes('format=xlsx')) {
-      nbFetchXlsx++;
-      const wb = w.XLSX.utils.book_new();
-      w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet([['A'], [1]]), 'Feuille');
-      const buf = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const ab = new Uint8Array(buf).buffer;
-      return { ok: true, status: 200, arrayBuffer: async () => ab.slice(0), text: async () => '', json: async () => ({}) };
-    }
-    return origFetch(url, opts);
-  };
-  const p1 = w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
-  const p2 = w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
-  const wb1 = await p1;
-  const wb2 = await p2;
-  // Le téléchargement a lieu après la promesse des libs (micro-tâche) : on compte
-  // une fois les deux promesses résolues.
-  assert.equal(nbFetchXlsx, 1, 'deux appels parallèles = deux téléchargements');
-  assert.equal(wb1, wb2, 'les deux appels ne partagent pas la même promesse');
-  await w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001');
-  assert.equal(nbFetchXlsx, 1, 'appel dans les 60 s = nouveau téléchargement');
-  await w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0001', true);
-  assert.equal(nbFetchXlsx, 2, 'forceFresh doit retélécharger');
-  await w.yassirFetchGoogleWorkbookXlsx('ID_TEST_XLSX_0002');
-  assert.equal(nbFetchXlsx, 3, 'un autre classeur doit être téléchargé');
-  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
-});
+// ---- Item 10a : SUPPRIMÉ (G3 suite) — le téléchargement XLSX direct du
+// classeur n'existe plus : le Worker lit les feuilles et sert les pages via
+// /api/sheets/:source (cache KV 5 min côté serveur). Remplacé par les tests
+// G3 (lecture paginée, garde manuelle, échec isolé, Budget) plus haut.
 
 // ---- Item 10b/10c (audit 2026-11-27) : marque active seulement + statut par source ----
 test('Item 10b/10c : à la connexion, seules les synchros de la marque active + statut par source', async () => {

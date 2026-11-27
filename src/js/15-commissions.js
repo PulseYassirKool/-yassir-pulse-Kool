@@ -82,9 +82,11 @@
       window.yassirSyncDefaultCommissions = function () {
         if (!isOwnerAdmin()) return Promise.resolve(false);
         var brand = (typeof currentBrand !== 'undefined' && currentBrand === 'kool') ? 'kool' : 'yassir';
-        return window.yassirLireCommissionsDepuisFeuille(brand).then(function (res) {
+        // Relecture manuelle : fresh=1 force le Worker à relire la feuille
+        // (sinon le cache serveur de 5 minutes servirait les taux d'avant).
+        return window.yassirLireCommissionsDepuisFeuille(brand, true).then(function (res) {
           if (!res.ok || res.count === 0) {
-            showToast('Relecture de la feuille Google Sheets impossible : vos taux actuels sont conservés. Vérifiez le partage de la feuille.', 'error');
+            showToast('Relecture de la feuille impossible pour le moment : vos taux actuels sont conservés.', 'error');
             return false;
           }
           state.customCommissions = Object.assign({}, res.map);

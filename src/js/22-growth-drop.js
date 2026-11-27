@@ -726,19 +726,9 @@
         if (icon) icon.classList.add('fa-spin');
         if (label) label.textContent = 'Sync Statut...';
 
-        var statusRowsPromise = fetchGoogleWorkbookXlsx(LIVE_SHEETS_CONFIG.RESTO_STATUS_SHEET_ID)
-          .then(function (wb) {
-            var targetSheet = wb.SheetNames.find(function (n) {
-              var low = n.toLowerCase();
-              return low.includes('active') || low.includes('status') || low.includes('statut');
-            }) || wb.SheetNames[0];
-            var rows = XLSX.utils.sheet_to_json(wb.Sheets[targetSheet], { header: 1, defval: '' });
-            if (!rows || rows.length < 2) throw new Error('Feuille statut vide');
-            return rows;
-          })
-          .catch(function () {
-            return fetchGoogleSheetByGidSmart(LIVE_SHEETS_CONFIG.RESTO_STATUS_SHEET_ID, LIVE_SHEETS_CONFIG.RESTO_STATUS_GID, '');
-          });
+        // Statuts Active/Inactive via le Worker (G3 suite) : source
+        // 'statuts' (feuille Yassir uniquement — le Worker renvoie vide en Kool).
+        var statusRowsPromise = yassirLireFeuilleViaApi('statuts', { brand: 'yassir', fresh: !!(manualTrigger && isOwnerAdmin()) });
 
         return statusRowsPromise
           .then(function (rows) {
@@ -842,7 +832,7 @@
                 );
               } else {
                 showToast(
-                  'Aucune ligne Active/Inactive trouvée. Vérifiez que la feuille Google Sheets est partagée en <strong>« Tous les utilisateurs disposant du lien : Lecteur »</strong>.',
+                  'Aucune ligne Active/Inactive trouvée dans la feuille Statuts.',
                   'error'
                 );
               }
@@ -853,7 +843,7 @@
             if (icon) icon.classList.remove('fa-spin');
             if (label) label.textContent = 'Sync Statut Active/Inactive';
             if (manualTrigger) {
-              showToast('Impossible de lire la feuille Active / Inactive (vérifiez le partage public en lecture de la feuille Google Sheets).', 'error');
+              showToast('Impossible de lire la feuille Statuts via le serveur. Réessayez plus tard.', 'error');
             }
           });
       };

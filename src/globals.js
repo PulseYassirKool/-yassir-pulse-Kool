@@ -4,7 +4,7 @@
 // APRÈS la connexion par window.yassirChargerLibsLourdes() (appelée dans
 // onAuthenticated, 02b-auth.js). Tant qu'elles ne sont pas là, les graphiques
 // sont ignorés (chaque site `new Chart` vérifie déjà window.Chart) et
-// fetchGoogleWorkbookXlsx attend le chargement avant XLSX.read.
+// l'import de fichier XLSX local attend le chargement avant XLSX.read.
 window.__PULSE_API__ = import.meta.env.VITE_API_URL || '';
 
 var _libsLourdesModules = null;

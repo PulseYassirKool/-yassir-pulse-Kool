@@ -338,6 +338,27 @@ test('hist2025 : pas de filtre restaurant ; Eya voit Yassir, rien en Kool', asyn
   } finally { restoreFetch(originalFetch); }
 });
 
+test('hist2025 : colonne à en-tête vide conservée (matrice 2025, libellés de lignes)', async () => {
+  // La matrice 2025 a un coin vide : ['', 'W 45', 'W 46', …] ; la 1re
+  // colonne porte les libellés (« Requested », …) que le panneau YoY lit.
+  // Sans repli positionnel, l'alignement par nom d'en-tête la supprimait.
+  const originalFetch = globalThis.fetch;
+  installMock();
+  try {
+    sheetsData[UNIQUE]['2025 Kool'] = [
+      ['', 'W 45', 'W 46', 'W 47'],
+      ['Requested', '100', '110', '120'],
+      ['Delivered Orders', '5', '6', '7']
+    ];
+    const proprio = await login('proprio', 'Secret-Proprio-1');
+    const h = await call('GET', '/api/sheets/hist2025?brand=kool', null, proprio);
+    assert.equal(h.status, 200);
+    assert.equal(h.json.totalRows, 2);
+    assert.deepEqual(h.json.rows[1], ['Requested', '100', '110', '120']);
+    assert.deepEqual(h.json.rows[2], ['Delivered Orders', '5', '6', '7']);
+  } finally { restoreFetch(originalFetch); }
+});
+
 test('data-kool multi-onglets : dédupe (2e écrase 1re), filtre AM, pagination', async () => {
   const originalFetch = globalThis.fetch;
   installMock();
