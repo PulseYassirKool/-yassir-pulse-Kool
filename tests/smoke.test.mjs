@@ -3167,3 +3167,21 @@ test('Garde anti-date (2026-11-27, bug CA/GMV) : purgerNombre rejette les dates 
   assert.equal(pn('1234.57'), 1234.57, 'décimal simple intact');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
+
+
+test('End Date lue (2026-11-27, simulation Participation) : une règle expire', () => {
+  const w = boot();
+  // Avant : le prédicat idxEnd contenait h.includes('au') et « restAUrant
+  // name » (colonne 1) était pris pour End Date — endDate valait '' pour
+  // TOUTES les règles, aucune n'expirait jamais (les Pack 01–15/11
+  // s'appliquaient aussi après le 15/11).
+  const rows = [
+    ['Area', 'Restaurant Name', 'C %', 'TAG', 'Responsable Account', 'Répartition', 'Participation de C %', "Détails de l'offre", 'Start Date', 'End Date', 'Période', 'APP'],
+    ['Tunis', 'Tacos Chaneb Bardo', '20', 'Pack', 'Aziza Souli', '', '0', 'Tacos poulet pané + Boisson + frite = 12,9 au lieu de 18,4', '01/11/2026', '15/11/2026', '', 'Yassir']
+  ];
+  const rules = w.yassirParseOffreParticipationRows(rows, 'Yassir');
+  assert.equal(rules.length, 1);
+  assert.equal(rules[0].startDate, '2026-11-01', 'Start Date lue');
+  assert.equal(rules[0].endDate, '2026-11-15', 'End Date lue (pas le nom du restaurant)');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});

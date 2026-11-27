@@ -200,7 +200,7 @@
         var idxPartPct = headers.findIndex(function (h) { return h.includes('participation') || h.includes('part kool') || h.includes('part yassir'); });
         var idxDetails = headers.findIndex(function (h) { return h.includes('detail') || h.includes('libelle') || h.includes('description') || h.includes('condition'); });
         var idxStart = headers.findIndex(function (h) { return h.includes('start') || h.includes('debut') || h.includes('du') || h.includes('date debut'); });
-        var idxEnd = headers.findIndex(function (h) { return h.includes('end') || h.includes('fin') || h.includes('au') || h.includes('date fin') || h.includes('expiration'); });
+        var idxEnd = headers.findIndex(function (h) { return h.includes('end') || h.includes('fin') || h.includes('date fin') || h.includes('expiration'); });
         var idxPeriode = headers.findIndex(function (h) { return h.includes('periode') || h.includes('campagne'); });
 
         var parsedRules = [];
