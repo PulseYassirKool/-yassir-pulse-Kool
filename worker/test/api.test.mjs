@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handle, hashPassword } from '../src/index.js';
+import { handle, hashPassword, RateLimiter } from '../src/index.js';
 
 const kvStore = new Map();
+const rlStore = new Map();
 const kv = {
   get: async (k, t) => (kvStore.has(k) ? (t === 'json' ? JSON.parse(kvStore.get(k)) : kvStore.get(k)) : null),
   put: async (k, v) => void kvStore.set(k, v),
@@ -154,6 +155,38 @@ test("journal d'activité : un échec d'écriture KV ne casse ni le login ni l'e
   assert.equal(r.status, 200);
   // L'envoi d'activité répond OK même si l'écriture échoue.
   assert.equal((await callFailing('POST', '/api/activity', { type: 'export', detail: 'Export Excel : Test.xlsx' }, r.json.token)).status, 200);
+});
+
+test("limitation des connexions : l'objet durable compte 5 essais puis bloque le 6e, réinitialisé après succès", async () => {
+  const rl = new RateLimiter({ storage: { get: async (k) => rlStore.get(k) ?? null, put: async (k, v) => void rlStore.set(k, v), delete: async (k) => void rlStore.delete(k) } });
+  const check = (key) => rl.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({ key, max: 5, windowMs: 900000 }) })).then((r) => r.json());
+  for (let i = 0; i < 5; i++) assert.equal((await check('rl:1.2.3.4:omar.beldi')).allowed, true, 'essai ' + (i + 1) + ' autorisé');
+  assert.equal((await check('rl:1.2.3.4:omar.beldi')).allowed, false, '6e essai bloqué');
+  // Une autre clé n'est pas bloquée.
+  assert.equal((await check('rl:1.2.3.4:autre')).allowed, true, 'autre identifiant non bloqué');
+  // Réinitialisation après connexion réussie.
+  assert.equal((await rl.fetch(new Request('https://rl/reset', { method: 'POST', body: JSON.stringify({ key: 'rl:1.2.3.4:omar.beldi', reset: true }) }))).status, 200);
+  assert.equal((await check('rl:1.2.3.4:omar.beldi')).allowed, true, 'compteur réinitialisé');
+  // Clé manquante -> 400.
+  assert.equal((await rl.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({}) }))).status, 400);
+});
+
+test('limitation des connexions : 5 essais en parallèle ne contournent plus le blocage', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const rlStore2 = new Map();
+  const rl = new RateLimiter({ storage: { get: async (k) => rlStore2.get(k) ?? null, put: async (k, v) => void rlStore2.set(k, v), delete: async (k) => void rlStore2.delete(k) } });
+  const envDo = { ...env, RATE_LIMITER: { idFromName: (name) => name, get: () => ({ fetch: (req) => rl.fetch(req) }) } };
+  const callDo = (method, path, body, token) => handle(new Request('https://api.test' + path, {
+    method, body: body ? JSON.stringify(body) : undefined,
+    headers: { Origin: 'https://app.test', 'CF-Connecting-IP': '9.9.9.9', ...(token ? { Authorization: 'Bearer ' + token } : {}) }
+  }), envDo).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+  // 5 essais faux envoyés en même temps : tous rejetés (401), aucun ne passe entre la lecture et l'écriture.
+  const results = await Promise.all(Array.from({ length: 5 }, () => callDo('POST', '/api/login', { username: 'omar.beldi', password: 'faux' })));
+  assert.ok(results.every((r) => r.status === 401), 'les 5 essais parallèles sont rejetés');
+  // Le 6e essai, même avec le bon mot de passe, est bloqué (429).
+  assert.equal((await callDo('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 429);
 });
 
 test('changement de mot de passe par le proprio -> ancien jeton AM rejeté, nouveau mot de passe accepté', async () => {

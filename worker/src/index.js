@@ -76,6 +76,101 @@ async function appendActivity(env, entry) {
   } catch (e) { /* journal indisponible : on continue sans journaliser */ }
 }
 
+// ---------- Limitation de débit des connexions (audit 2026-11-27, item 3) ----------
+// Le compteur d'échecs en KV seul se contourne : des essais envoyés en
+// parallèle lisent tous « 0 échec » avant d'écrire. L'objet durable
+// RateLimiter sérialise les tentatives (une seule instance par clé
+// ip+identifiant, donc lecture + incrément atomiques).
+// La règle de limitation Cloudflare n'est pas applicable ici : le compte
+// n'a aucune zone (le Worker est sur tun-omar.workers.dev, pas sur un
+// domaine du compte), et les règles de débit sont liées à une zone.
+// Repli : si la liaison RATE_LIMITER est absente (tests, ancien
+// déploiement), on garde le compteur KV — le blocage séquentiel
+// fonctionne, seule la protection contre les essais parallèles manque.
+export class RateLimiter {
+  constructor(state) {
+    this.state = state;
+    this.mem = new Map();
+    this.queue = new Map(); // clé -> chaîne de promesses : les appels concurrents
+    // pour une même clé s'exécutent en file, jamais en parallèle.
+  }
+  async _load(key) {
+    if (this.mem.has(key)) return this.mem.get(key);
+    let entry = null;
+    try {
+      if (this.state && this.state.storage) entry = await this.state.storage.get(key);
+    } catch (e) { entry = null; }
+    if (entry) this.mem.set(key, entry);
+    return entry;
+  }
+  async _save(key, entry) {
+    this.mem.set(key, entry);
+    try {
+      if (this.state && this.state.storage) await this.state.storage.put(key, entry);
+    } catch (e) { /* mémoire seule */ }
+  }
+  async _clear(key) {
+    this.mem.delete(key);
+    try {
+      if (this.state && this.state.storage) await this.state.storage.delete(key);
+    } catch (e) {}
+  }
+  async fetch(request) {
+    const body = await request.json().catch(() => ({}));
+    const key = String(body.key || '');
+    if (!key) return new Response(JSON.stringify({ error: 'key requise' }), { status: 400 });
+    // File d'attente par clé : lecture + incrément + écriture atomiques,
+    // même si plusieurs appels arrivent en même temps.
+    const prev = this.queue.get(key) || Promise.resolve();
+    const next = prev.then(() => this._traiter(key, body));
+    this.queue.set(key, next.catch(() => {}));
+    return next;
+  }
+  async _traiter(key, body) {
+    if (body.reset) {
+      await this._clear(key);
+      return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    const max = Number(body.max) || 5;
+    const windowMs = Number(body.windowMs) || 900000;
+    const now = Date.now();
+    let entry = await this._load(key);
+    if (!entry || now >= entry.resetAt) entry = { count: 0, resetAt: now + windowMs };
+    entry.count += 1;
+    await this._save(key, entry);
+    return new Response(JSON.stringify({ allowed: entry.count <= max, count: entry.count, resetAt: entry.resetAt }), { headers: { 'Content-Type': 'application/json' } });
+  }
+}
+
+// Enregistre une tentative de connexion et dit si elle est autorisée.
+// Avec l'objet durable, la tentative est comptée avant la vérification du
+// mot de passe (comme le compteur KV avant) — les essais en parallèle ne
+// peuvent plus passer entre la lecture et l'écriture.
+async function rlCheck(env, rlKey) {
+  if (!env.RATE_LIMITER) {
+    const fails = Number(await env.PULSE_KV.get(rlKey)) || 0;
+    return { allowed: fails < MAX_FAILS, useDo: false, fails };
+  }
+  try {
+    const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(rlKey));
+    const r = await stub.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({ key: rlKey, max: MAX_FAILS, windowMs: LOCK_SECONDS * 1000 }) }));
+    const j = await r.json().catch(() => ({}));
+    return { allowed: j.allowed !== false, useDo: true, fails: 0 };
+  } catch (e) {
+    // Le limiteur ne doit jamais empêcher une connexion légitime.
+    const fails = Number(await env.PULSE_KV.get(rlKey)) || 0;
+    return { allowed: fails < MAX_FAILS, useDo: false, fails };
+  }
+}
+async function rlReset(env, rlKey, useDo) {
+  try { await env.PULSE_KV.delete(rlKey); } catch (e) {}
+  if (!useDo || !env.RATE_LIMITER) return;
+  try {
+    const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(rlKey));
+    await stub.fetch(new Request('https://rl/reset', { method: 'POST', body: JSON.stringify({ key: rlKey, reset: true }) }));
+  } catch (e) { /* réinitialisation du compteur non critique */ }
+}
+
 function cors(request, env) {
   const origin = request.headers.get('Origin');
   const allowed = (env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim());
@@ -113,14 +208,14 @@ export async function handle(request, env) {
 
     const ip = request.headers.get('CF-Connecting-IP') || 'local';
     const rlKey = `rl:${ip}:${username}`;
-    const fails = Number(await env.PULSE_KV.get(rlKey)) || 0;
-    if (fails >= MAX_FAILS) return fail(429, 'Trop de tentatives.');
+    const rl = await rlCheck(env, rlKey);
+    if (!rl.allowed) return fail(429, 'Trop de tentatives.');
 
     const account = (await listAccounts(env)).find((a) => a.username.toLowerCase() === username);
     // Même coût de calcul que le compte existe ou non (évite de révéler quels identifiants existent).
     const result = account ? await verifyPassword(account, password, env) : (await pbkdf2(password, new Uint8Array(16)), { ok: false });
     if (!result.ok) {
-      await env.PULSE_KV.put(rlKey, String(fails + 1), { expirationTtl: LOCK_SECONDS });
+      if (!rl.useDo) await env.PULSE_KV.put(rlKey, String(rl.fails + 1), { expirationTtl: LOCK_SECONDS });
       // Tentative échouée sur un compte existant (hors propriétaire) : journalisée.
       // Jamais de mot de passe dans le journal, ni de journalisation si le compte n'existe pas.
       if (account && account.role !== 'owner') {
@@ -128,7 +223,7 @@ export async function handle(request, env) {
       }
       return fail(401, 'Identifiant ou mot de passe incorrect.');
     }
-    await env.PULSE_KV.delete(rlKey);
+    await rlReset(env, rlKey, rl.useDo);
     if (result.legacy) {
       const list = await listAccounts(env);
       const target = list.find((a) => a.username === account.username);

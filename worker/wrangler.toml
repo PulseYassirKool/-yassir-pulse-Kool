@@ -6,6 +6,15 @@ compatibility_date = "2025-01-01"
 binding = "PULSE_KV"
 id = "8be04a891ffd42229324c1f890a1c0e8"
 
+# Objet durable RateLimiter : limitation des connexions (audit 2026-11-27).
+[[durable_objects]]
+binding = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RateLimiter"]
+
 [vars]
 ALLOWED_ORIGIN = "https://pulseyassirkool.github.io"   # plusieurs origines : séparées par des virgules
 # Secrets (jamais dans ce fichier) : npx wrangler secret put JWT_SECRET   |   npx wrangler secret put LEGACY_SALT
