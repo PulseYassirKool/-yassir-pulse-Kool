@@ -13,7 +13,7 @@ class_name = "RateLimiter"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RateLimiter"]
+new_sqlite_classes = ["RateLimiter"]
 
 [vars]
 ALLOWED_ORIGIN = "https://pulseyassirkool.github.io"   # plusieurs origines : séparées par des virgules
