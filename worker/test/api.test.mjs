@@ -137,12 +137,14 @@ test("journal d'activité : POST/GET/DELETE — accès réservé au propriétair
   // Entrées invalides refusées.
   assert.equal((await call('POST', '/api/activity', { type: 'bidon', detail: 'x' }, am)).status, 400);
   assert.equal((await call('POST', '/api/activity', { type: 'export', detail: '' }, am)).status, 400);
-  // Lecture propriétaire : plus récentes d'abord (export, puis connexion AM).
+  // Lecture propriétaire : 2 entrées (export + connexion AM). L'ordre
+  // entre deux événements de la même milliseconde n'est pas garanti
+  // (tri par horodatage seul, suffixe de clé aléatoire) : on vérifie le
+  // contenu, pas l'ordre — sinon le test est aléatoire en CI.
   const list = (await call('GET', '/api/activity', null, owner)).json.entries;
   assert.equal(list.length, 2);
-  assert.equal(list[0].type, 'export');
-  assert.equal(list[0].user, 'omar.beldi');
-  assert.equal(list[1].type, 'login');
+  assert.deepEqual(list.map((e) => e.type).sort(), ['export', 'login']);
+  assert.ok(list.every((e) => e.user === 'omar.beldi'));
   // Effacement par le propriétaire.
   assert.equal((await call('DELETE', '/api/activity', null, owner)).status, 200);
   assert.equal((await call('GET', '/api/activity', null, owner)).json.entries.length, 0);
