@@ -288,6 +288,33 @@ test('portefeuilles : AM ne voit que son onglet, proprio tout, Eya rien en Kool'
   } finally { restoreFetch(originalFetch); }
 });
 
+test('portefeuilles : la colonne AM est à la bonne place pour TOUS les onglets (pas seulement le 1er)', async () => {
+  // Régression 2026-11-27 : après « Sync Kool », seul Omar avait des
+  // restaurants (65), les autres AM à 0. Cause : le Worker ajoute une
+  // colonne AM aux en-têtes de référence, mais les onglets suivants
+  // alignaient leurs lignes sur ces en-têtes (colonne AM vide) puis
+  // l'émetteur ajoutait le nom de l'AM une colonne plus loin — le front
+  // lisait une colonne AM vide et ignorait ces lignes.
+  const originalFetch = globalThis.fetch;
+  installMock();
+  try {
+    const owner = await login('proprio', 'Secret-Proprio-1');
+    // Yassir : 2 lignes Omar + 1 ligne Eya, toutes avec l'AM en dernière colonne.
+    const rY = await call('GET', '/api/sheets/portfolios?brand=yassir', null, owner);
+    assert.equal(rY.status, 200);
+    assert.equal(rY.json.totalRows, 3);
+    const idxAm = rY.json.rows[0].indexOf('AM');
+    assert.notEqual(idxAm, -1);
+    assert.ok(rY.json.rows.slice(1).every((r) => r.length === rY.json.rows[0].length), 'toutes les lignes ont la largeur des en-têtes');
+    assert.deepEqual(rY.json.rows.slice(1).map((r) => r[idxAm]), ['Omar Beldi', 'Omar Beldi', 'Eya Majdoub']);
+    // Kool : même chose (Resto Omar Kool, Resto Commun, Resto Eya Kool).
+    const rK = await call('GET', '/api/sheets/portfolios?brand=kool', null, owner);
+    assert.equal(rK.json.totalRows, 3);
+    assert.deepEqual(rK.json.rows.slice(1).map((r) => r[idxAm]), ['Omar Beldi', 'Omar Beldi', 'Eya Majdoub']);
+    assert.deepEqual(restoNames(rK.json.rows), ['Resto Omar Kool', 'Resto Commun', 'Resto Eya Kool']);
+  } finally { restoreFetch(originalFetch); }
+});
+
 test('commissions / offres / budget / statuts : filtrage par portefeuille et par marque', async () => {
   const originalFetch = globalThis.fetch;
   installMock();

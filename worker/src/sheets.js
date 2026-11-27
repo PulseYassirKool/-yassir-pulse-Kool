@@ -462,9 +462,17 @@ function makeLoadContext(env, me, source, brand, plan, sink, fetchImpl, portfoli
       }
       if (dedupeKey === '' && sink.dedupe) dedupeKey = ''; // pas de clé : ligne gardée sans dédupe
       // Colonne AM ajoutée pour les portefeuilles (onglet d'origine).
+      // Elle va À L'INDEX de la colonne AM des en-têtes de référence, pas
+      // ajoutée après la ligne : les lignes des onglets suivants sont
+      // alignées sur ces en-têtes (colonne AM vide) et un simple ajout
+      // les décalait d'une colonne — le front lisait une colonne AM vide
+      // et ignorait ces lignes (seul le 1er onglet, Omar, comptait).
       let outRow = row;
       if (source === 'portfolios') {
-        outRow = [...row, ctx.tabAm || ''];
+        const amIdx = ctx.headersNorm ? ctx.headersNorm.indexOf('am') : -1;
+        outRow = [...row];
+        if (amIdx !== -1) outRow[amIdx] = ctx.tabAm || outRow[amIdx] || '';
+        else outRow.push(ctx.tabAm || '');
       }
       await sink.push(outRow, dedupeKey || null);
     }
