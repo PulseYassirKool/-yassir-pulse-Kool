@@ -2399,6 +2399,82 @@ test('Item 4 : le bouton relit la vraie feuille (pas l\u2019instantané KV), éc
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// Correctif 2 (diagnostic 2026-11-27, semaine figée) : données Kool qui
+// s'arrêtent le 22/11/2026 (W47), puis jusqu'au 26/11/2026 (W48).
+const koolCsvDataW47fin = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '16/11/2026', '1001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
+  ['', '', '', '22/11/2026', '1002', '', 'Resto Alpha', '', '', '40.00', '6', '0'],
+]);
+const koolCsvDataW48fin = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '23/11/2026', '1003', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
+  ['', '', '', '26/11/2026', '1004', '', 'Resto Alpha', '', '', '40.00', '6', '0'],
+]);
+
+test('Kool : après une synchro fraîche, la semaine par défaut suit les données (W48)', async () => {
+  const w = bootKool({ data: koolCsvDataW47fin });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  let sel = w.document.getElementById('filterWeekSelect');
+  assert.ok(sel.value.endsWith('|S47'), 'semaine par défaut = S47 avant données fraîches, pas ' + sel.value);
+  // Données fraîches jusqu'au 26/11/2026 (W48).
+  const fetchOrig = w.fetch;
+  w.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.includes(koolCfg.DATA_SHEET_ID) && !u.includes('format=xlsx')) {
+      return { ok: true, status: 200, text: async () => koolCsvDataW48fin, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    }
+    return fetchOrig(url, opts);
+  };
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  sel = w.document.getElementById('filterWeekSelect');
+  assert.ok(sel.value.endsWith('|S48'), 'semaine par défaut = S48 après synchro fraîche, pas ' + sel.value);
+  assert.equal(w.document.getElementById('filterDateStart').value, '2026-11-23', 'début W48');
+  assert.equal(w.document.getElementById('filterDateEnd').value, '2026-11-29', 'fin W48');
+  const hint = w.document.getElementById('dateRangeBoundsHint').textContent;
+  assert.ok(hint.includes('26/11/2026'), 'fraîcheur absente : ' + hint);
+  assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
+});
+
+test('Kool : un choix manuel de semaine (W47) n\'est jamais écrasé par une synchro fraîche', async () => {
+  const w = bootKool({ data: koolCsvDataW47fin });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  const sel = w.document.getElementById('filterWeekSelect');
+  assert.ok(sel.value.endsWith('|S47'), 'semaine par défaut = S47, pas ' + sel.value);
+  // Choix manuel de W47 (la semaine déjà affichée, choisie exprès).
+  w.yassirOnWeekSelectChange(sel.value);
+  await wait(300);
+  assert.equal(w.document.getElementById('filterDateStart').value, '2026-11-16', 'début W47 choisi');
+  // Données fraîches jusqu'au 26/11/2026 (W48) : la synchro ne doit rien changer.
+  const fetchOrig = w.fetch;
+  w.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (u.includes(koolCfg.DATA_SHEET_ID) && !u.includes('format=xlsx')) {
+      return { ok: true, status: 200, text: async () => koolCsvDataW48fin, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    }
+    return fetchOrig(url, opts);
+  };
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  assert.ok(w.document.getElementById('filterWeekSelect').value.endsWith('|S47'), 'semaine manuelle W47 écrasée : ' + w.document.getElementById('filterWeekSelect').value);
+  assert.equal(w.document.getElementById('filterDateStart').value, '2026-11-16', 'début W47 perdu');
+  assert.equal(w.document.getElementById('filterDateEnd').value, '2026-11-22', 'fin W47 perdue');
+  assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
+});
+
 test('Item 4 : avertissement « modifications temporaires » visible pour le proprio, masqué pour les AM', async () => {
   const w = boot();
   await login(w, 'proprio', 'Proprio-Test-123');

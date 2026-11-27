@@ -111,6 +111,20 @@
         updateDatePresetButtonsUI('LAST_7');
       }
 
+      // Après une synchro de données réussie, la semaine par défaut doit
+      // suivre les données fraîches (diagnostic 2026-11-27 : cache jusqu'au
+      // 22 nov. → filtre resté W47 alors que les données fraîches allaient
+      // jusqu'au 26 nov., W48). Sans choix manuel, on repart de la semaine
+      // contenant la date max. Un choix manuel (semaine, plage, préréglage
+      // ou Reset) n'est JAMAIS écrasé.
+      function reappliquerSemaineParDefautApresSynchro() {
+        if (state.semaineChoisieManuellement) return;
+        state.dateStart = '';
+        state.dateEnd = '';
+        appliquerFiltreSemaineRapideParDefaut();
+        mettreAJourBarreDatesEtFichiers();
+      }
+
       function indexKoolOrderItemsRows(rows) {
         var byOrder = new Map();
         var byResto = new Map();
@@ -936,11 +950,20 @@
           brandArchives.kool.statRows = [];
 
           if (wasBrand !== 'kool') {
+            // Synchro en arrière-plan (marque active = Yassir) : la semaine
+            // en cache pour Kool est périmée — on l'efface pour ne pas
+            // restaurer une vieille semaine à la prochaine bascule. La
+            // semaine par défaut sera appliquée à la bascule / synchro active.
+            if (!state.semaineChoisieManuellement) {
+              brandArchives.kool.dateStart = '';
+              brandArchives.kool.dateEnd = '';
+            }
             currentBrand = wasBrand;
             restoreBrandCacheToState(wasBrand);
           } else {
             applyBrandVisualTheme('kool');
             if (state.rawSourceRows && state.rawSourceRows.length > 1) {
+              reappliquerSemaineParDefautApresSynchro();
               executerTraitementMetier();
             } else {
               mettreAJourInterface();

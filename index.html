@@ -919,6 +919,13 @@
             </div>
           </div>
 
+          <!-- Fraîcheur des données (diagnostic 2026-11-27) : l'élément manquait,
+               le texte « Données du … au … » de mettreAJourBarreDatesEtFichiers
+               n'était jamais affiché. -->
+          <div class="flex items-center gap-1.5">
+            <span id="dateRangeBoundsHint" class="text-[10px] font-bold text-slate-400"></span>
+          </div>
+
           <!-- Filtre Data préc (compact) -->
           <div id="prevDateRangeFilterRow" class="hidden flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-dashed border-pink-200/80">
             <div class="flex flex-wrap items-center gap-1.5">

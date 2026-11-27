@@ -234,6 +234,9 @@
       }
 
       window.yassirClearDateFilter = function () {
+        // Effacement explicite du filtre (« Reset ») : un choix manuel, lui
+        // aussi — la synchro ne doit pas réappliquer la semaine par défaut.
+        state.semaineChoisieManuellement = true;
         state.dateStart = '';
         state.dateEnd = '';
         var inpStart = document.getElementById('filterDateStart');
@@ -426,7 +429,14 @@
               inpEnd.value = state.dateEnd || '';
             }
             if (hintEl) {
-              hintEl.textContent = '(Disponible : ' + state.minAvailableDate + ' → ' + state.maxAvailableDate + ')';
+              // Fraîcheur des données près du filtre (diagnostic 2026-11-27) :
+              // l'élément #dateRangeBoundsHint manquait dans index.html, ce
+              // texte n'était jamais affiché.
+              var fmtFR = function (iso) {
+                var p = String(iso || '').split('-');
+                return (p.length === 3) ? (p[2] + '/' + p[1] + '/' + p[0]) : (iso || '');
+              };
+              hintEl.textContent = '(Données du ' + fmtFR(state.minAvailableDate) + ' au ' + fmtFR(state.maxAvailableDate) + ')';
             }
           } else {
             dateBar.classList.add('hidden');
@@ -489,6 +499,11 @@
       }
 
       window.yassirOnWeekSelectChange = function (val) {
+        // Choix manuel : la semaine choisie ne doit jamais être écrasée par
+        // la semaine par défaut réappliquée après une synchro (diagnostic
+        // 2026-11-27, semaine figée). Vaut aussi quand l'utilisateur efface
+        // la sélection (val vide = toute la période, choix explicite).
+        state.semaineChoisieManuellement = true;
         var inpStart = document.getElementById('filterDateStart');
         var inpEnd = document.getElementById('filterDateEnd');
         if (!val) {
@@ -566,6 +581,9 @@
       }
 
       window.yassirOnDateRangeChange = function () {
+        // Choix manuel de dates : protège contre l'écrasement par la semaine
+        // par défaut après une synchro (diagnostic 2026-11-27).
+        state.semaineChoisieManuellement = true;
         var inpStart = document.getElementById('filterDateStart');
         var inpEnd = document.getElementById('filterDateEnd');
         var selW = document.getElementById('filterWeekSelect');
@@ -597,6 +615,9 @@
 
       window.yassirApplyDatePreset = function (preset) {
         if (!state.maxAvailableDate || !state.minAvailableDate) return;
+        // Choix manuel (préréglage Tout / 7j / 14j / 30j / 3 mois) : protège
+        // contre l'écrasement par la semaine par défaut après une synchro.
+        state.semaineChoisieManuellement = true;
         var inpStart = document.getElementById('filterDateStart');
         var inpEnd = document.getElementById('filterDateEnd');
         var selW = document.getElementById('filterWeekSelect');

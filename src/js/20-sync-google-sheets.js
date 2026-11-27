@@ -588,6 +588,9 @@
 
           if (loadedMonths.length > 0) {
             detecterBornesDatesSource(state.rawSourceRows);
+            // Semaine par défaut sur les données fraîches (diagnostic
+            // 2026-11-27) : sans choix manuel, la semaine suit la date max.
+            reappliquerSemaineParDefautApresSynchro();
             if (!state.dateStart && !state.dateEnd) {
               updateDatePresetButtonsUI('ALL');
             } else {

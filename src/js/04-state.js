@@ -6,6 +6,11 @@
         storedFilesMeta: [],
         dateStart: '',
         dateEnd: '',
+        // Choix manuel de la période (semaine, plage ou préréglage) : tant
+        // qu'il est vrai, une synchro ne réapplique jamais la semaine par
+        // défaut (diagnostic 2026-11-27, semaine figée). Remis à zéro à la
+        // connexion (nouvelle session) ; en mémoire uniquement.
+        semaineChoisieManuellement: false,
         timeStart: '09:00',
         timeEndNextDay: '01:00',
         minAvailableDate: '',

@@ -376,6 +376,9 @@
           if (!state.minAvailableDate || !state.maxAvailableDate) {
             detecterBornesDatesSource(state.rawSourceRows);
           }
+          // Nouvelle session : aucun choix manuel de période, la semaine par
+          // défaut suit les données (diagnostic 2026-11-27).
+          state.semaineChoisieManuellement = false;
           state.dateStart = '';
           state.dateEnd = '';
           appliquerFiltreSemaineRapideParDefaut();
