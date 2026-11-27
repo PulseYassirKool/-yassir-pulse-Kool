@@ -77,6 +77,26 @@ test('routes protégées : sans jeton ou jeton falsifié -> 401 ; bootstrap avec
   assert.equal(JSON.stringify(json.user).includes('hash'), false);
 });
 
+test('bootstrap restreint (G3 suite) : le proprio voit tout, un AM ne voit ni les IDs des classeurs ni les règles de secours', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  kvStore.set('config', JSON.stringify({ live: { X: 'secret-id', HISTORICAL_MONTHS: [{ label: 'Octobre' }] }, kool: { DATA_SHEET_ID: 'kool-id' }, defaultOffreRules: [{ restaurant: 'resto secours', cPct: 10 }] }));
+  kvStore.set('defaults', JSON.stringify({ commissions: { a: 1 }, portfolios: {} }));
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  const bootOwner = (await call('GET', '/api/bootstrap', null, owner)).json;
+  assert.equal(bootOwner.config.live.X, 'secret-id');
+  assert.equal(bootOwner.config.defaultOffreRules.length, 1);
+  const bootAm = (await call('GET', '/api/bootstrap', null, am)).json;
+  assert.deepEqual(bootAm.config, { live: {}, kool: {} });
+  assert.equal(bootAm.config.defaultOffreRules, undefined);
+  assert.equal(JSON.stringify(bootAm).includes('secret-id'), false);
+  assert.equal(JSON.stringify(bootAm).includes('kool-id'), false);
+  assert.deepEqual(bootAm.defaults, { commissions: { a: 1 }, portfolios: {} });
+});
+
 test('gestion des comptes : réservée au propriétaire, mot de passe >= 10, pas d\'auto-suppression', async () => {
   kvStore.set('accounts', JSON.stringify([
     { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },

@@ -2821,6 +2821,26 @@ test('Item 5b : règles de secours depuis la config KV (plus rien en dur) + band
   }
 });
 
+// ---- G3 suite (2026-11-27) : /api/bootstrap restreint pour les non-proprio ----
+test('G3 bootstrap restreint : un AM ne reçoit ni les IDs des classeurs ni les règles de secours', async () => {
+  const prevConfig = store.get('config');
+  const reglesSecours = [{ area: 'Test', restaurant: 'resto secours', cPct: 100, tag: 'Discount', am: 'Test AM', partPct: 10, startDate: '2026-11-01', endDate: '2026-11-30', periode: 'Secours Test' }];
+  try {
+    const cfg = JSON.parse(prevConfig);
+    cfg.defaultOffreRules = reglesSecours;
+    store.set('config', JSON.stringify(cfg));
+    const w = boot();
+    await login(w, 'omar.beldi', 'Omar-Test-12345');
+    // L'AM ne reçoit pas les règles de secours : le repli ne s'applique pas.
+    assert.equal(w.yassirGetDefaultOffreParticipationRules().length, 0, 'un AM ne doit pas recevoir les règles de secours du bootstrap');
+    // Le front fonctionne quand même : écran applicatif visible, pas d'erreur JS.
+    assert.equal(w.document.getElementById('appWrapper').classList.contains('hidden'), false, 'application non affichée après connexion AM');
+    assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+  } finally {
+    store.set('config', prevConfig);
+  }
+});
+
 // ---- Item 5c (audit 2026-11-27) : purgerNombre, le dernier séparateur est décimal ----
 test('Item 5c : purgerNombre lit le dernier séparateur comme décimal', () => {
   const w = boot();

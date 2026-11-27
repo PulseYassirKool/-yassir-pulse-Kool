@@ -346,7 +346,14 @@ export async function handle(request, env) {
 
   if (path === '/api/bootstrap' && method === 'GET') {
     const [config, defaults] = await Promise.all([env.PULSE_KV.get('config', 'json'), env.PULSE_KV.get('defaults', 'json')]);
-    return reply({ config: config || { live: {}, kool: {} }, defaults: defaults || { commissions: {}, portfolios: {} } });
+    const safeConfig = config || { live: {}, kool: {} };
+    const safeDefaults = defaults || { commissions: {}, portfolios: {} };
+    // G3 suite : le propriétaire voit tout. Les autres comptes ne reçoivent
+    // ni les identifiants des classeurs (le front lit les feuilles via
+    // /api/sheets/:source et n'a plus besoin des IDs) ni les règles de
+    // secours « Offre Participation » (le repli ne s'applique qu'au proprio).
+    if (me.role === 'owner') return reply({ config: safeConfig, defaults: safeDefaults });
+    return reply({ config: { live: {}, kool: {} }, defaults: safeDefaults });
   }
 
   // ---------- Lecture Google Sheets côté serveur (G3, tranche 1) ----------
@@ -373,9 +380,9 @@ export async function handle(request, env) {
   // Sources : portfolios, commissions, offres, budget, statuts, hist2025,
   // data-oct, data-nov, data-kool, details-kool. Le Worker lit les IDs dans
   // la KV `config` et ne les expose jamais. Filtrage par rôle/AM appliqué
-  // côté Worker (voir worker/src/sheets.js). /api/bootstrap n'est PAS
-  // restreint dans ce lot : le front actuel lit encore les feuilles
-  // directement et a besoin des IDs jusqu'à sa migration.
+  // côté Worker (voir worker/src/sheets.js). /api/bootstrap est restreint
+  // depuis la migration du front : seuls les proprios reçoivent les IDs
+  // des classeurs et les règles de secours.
   if (path.startsWith('/api/sheets/') && method === 'GET') {
     let source;
     try {
