@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { handle, hashPassword } from '../src/index.js';
 import { clearGoogleTokenCache } from '../src/google-sheets.js';
+import { findRestaurantCol, isDetailsKoolHeaders } from '../src/sheets.js';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -505,5 +506,45 @@ test('viewer_all voit tout comme le proprio (lecture seule)', async () => {
     assert.equal(r.status, 200);
     assert.equal(r.json.totalRows, 3);
     assert.equal(r.json.filtered, false);
+  } finally { restoreFetch(originalFetch); }
+});
+
+
+test('isDetailsKoolHeaders : « Order_id » (underscore) accepté (diagnostic 2026-11-27)', () => {
+  // La vraie feuille détails Kool a pour en-tête « Order_id », pas « Order ID ».
+  // L'ancien validateur exigeait « order id » (espace) : l'onglet était ignoré
+  // silencieusement -> 0 ligne, HTTP 200, sans aucune erreur.
+  assert.equal(isDetailsKoolHeaders(['order_id', 'article', 'quantité', 'prix']), true);
+  assert.equal(isDetailsKoolHeaders(['n° commande', 'article']), true);
+  assert.equal(isDetailsKoolHeaders(['date', 'montant']), false);
+});
+
+
+test('details-kool : en-tête « Order_id » (underscore) — l\'onglet n\'est plus ignoré', async () => {
+  const originalFetch = globalThis.fetch;
+  installMock();
+  try {
+    sheetsData[DETAILS]['Articles'] = [
+      ['Order_id', 'Article', 'Quantité', 'Prix'],
+      ['CMD-1', 'Pizza', '1', '20'],
+      ['CMD-1', 'Burger', '2', '20'],
+      ['CMD-2', 'Salade', '1', '15'],
+      ['CMD-3', 'Tacos', '1', '30'],
+      ['CMD-9', 'Inconnu', '1', '9']
+    ];
+    sheetsData[DETAILS]['Articles 02-11'] = [
+      ['Order_id', 'Article', 'Quantité', 'Prix'],
+      ['CMD-1', 'Pizza', '1', '20'],
+      ['CMD-4', 'Frites', '1', '10']
+    ];
+    const owner = await login('proprio', 'Secret-Proprio-1');
+    const rOwner = await call('GET', '/api/sheets/details-kool?brand=kool', null, owner);
+    assert.equal(rOwner.status, 200);
+    assert.equal(rOwner.json.totalRows, 6);
+    // AM Omar : CMD-1 (Pizza + Burger) et CMD-4 Frites.
+    const omar = await login('omar.beldi', 'Omar-Password-2');
+    const r = await call('GET', '/api/sheets/details-kool?brand=kool', null, omar);
+    assert.equal(r.json.totalRows, 3);
+    assert.deepEqual(r.json.rows.slice(1).map((x) => `${x[0]}:${x[1]}`), ['CMD-1:Pizza', 'CMD-1:Burger', 'CMD-4:Frites']);
   } finally { restoreFetch(originalFetch); }
 });

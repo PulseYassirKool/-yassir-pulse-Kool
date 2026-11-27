@@ -74,7 +74,7 @@ export function normalizeName(value) {
   return res;
 }
 
-const ORDER_ID_RE = /^(n[°o]?\s*commande|order\s*id|numero\s*commande)$/;
+const ORDER_ID_RE = /^(n[°o]?[_\s]*commande|order[_\s]*id|numero[_\s]*commande)$/;
 const RESTO_HEADERS = ['restaurant name', 'restaurant', 'nom du restaurant', 'nom restaurant', 'store name', 'store', 'enseigne', 'partenaire', 'nom'];
 const isOrderIdHeader = (h) => ORDER_ID_RE.test(h);
 const isArticleHeader = (h) => h === 'article' || h.includes('article') || h.includes('item');
