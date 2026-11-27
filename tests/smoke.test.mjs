@@ -3185,3 +3185,21 @@ test('End Date lue (2026-11-27, simulation Participation) : une règle expire', 
   assert.equal(rules[0].endDate, '2026-11-15', 'End Date lue (pas le nom du restaurant)');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
+
+
+test('BOGOF classé offre article (2026-11-27, simulation Participation)', () => {
+  const w = boot();
+  const estCarte = w.yassirEstOffreTouteLaCarteKool;
+  // « 1 pizza achetée = 1 offerte » est une offre article, pas « toute la
+  // carte » : avant, le repli « true par défaut » la comptait en vue carte
+  // et l'excluait de la vue article.
+  assert.equal(estCarte({ tag: 'BOGOF', details: '1 pizza achetée = 1 offerte', periode: '' }), false, 'BOGOF = article');
+  assert.equal(estCarte({ tag: 'Pack', details: 'Tacos + boisson', periode: '' }), false, 'Pack = article (déjà)');
+  assert.equal(estCarte({ tag: 'Discount', details: '40% sur tt la carte', periode: '' }), true, 'Discount carte = carte');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Item 10a : SUPPRIMÉ (G3 suite) — le téléchargement XLSX direct du
+// classeur n'existe plus : le Worker lit les feuilles et sert les pages via
+// /api/sheets/:source (cache KV 5 min côté serveur). Remplacé par les tests
+// G3 (lecture paginée, garde manuelle, échec isolé, Budget) plus haut.

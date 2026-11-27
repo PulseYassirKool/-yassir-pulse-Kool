@@ -368,7 +368,7 @@
         if (!rl) return false;
         var combined = normalizeText((rl.tag || '') + ' ' + (rl.details || '') + ' ' + (rl.periode || ''));
         if (!combined) return true;
-        if (combined.includes('article') || combined.includes('pack') || combined.includes('menu specifique') || combined.includes('produit') || combined.includes('super promo')) {
+        if (combined.includes('article') || combined.includes('pack') || combined.includes('bogof') || combined.includes('menu specifique') || combined.includes('produit') || combined.includes('super promo')) {
           return false;
         }
         if (combined.includes('toute la carte') || combined.includes('tout le menu') || combined.includes('all menu') || combined.includes('discount')) {
@@ -376,6 +376,7 @@
         }
         return true;
       }
+      window.yassirEstOffreTouteLaCarteKool = estOffreTouteLaCarteKool;
 
       // Formate le libellé d'une règle d'offre Kool pour l'affichage (ex: "20% sur toute la carte" ou TAG)
       function formaterLibelleOffreKool(rl) {
