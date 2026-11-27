@@ -189,3 +189,28 @@
         _amStatsCache.set(cacheKey, resObj);
         return resObj;
       }
+
+      // Résolution du budget affiché dans la carte profil du menu latéral.
+      // Règle : ne jamais comparer des dépenses réelles à un budget absent —
+      // un budget non chargé (synchro Budget en échec, ou AM sans ligne dans
+      // la feuille) n'est pas un budget à 0, sinon le « Reste Budget » devient
+      // négatif (ex. -99 915,79 TND) et le % tombe à 0.
+      // - budget du périmètre connu (> 0) : périmètre tel quel, libellé « Budget AM ».
+      // - sinon, si l'utilisateur voit tout (proprio / lecture) et que le budget
+      //   global de la marque active est connu : périmètre Global, libellé
+      //   « Budget global », dépenses globales face au budget global.
+      // - sinon : budget inconnu (budgetConnu = false) — l'affichage met « — ».
+      function resoudreBudgetCarteProfil(scopeAm) {
+        var st = calculerStatsPourAm(scopeAm);
+        if (st && st.budgetTnd > 0) {
+          return { stats: st, budgetTnd: st.budgetTnd, budgetConnu: true, libelle: 'Budget AM', scope: scopeAm };
+        }
+        if (typeof canViewAllPortfolios === 'function' && canViewAllPortfolios()) {
+          var stGlobal = calculerStatsPourAm('ALL');
+          if (stGlobal && stGlobal.budgetTnd > 0) {
+            return { stats: stGlobal, budgetTnd: stGlobal.budgetTnd, budgetConnu: true, libelle: 'Budget global', scope: 'ALL' };
+          }
+        }
+        return { stats: st, budgetTnd: 0, budgetConnu: false, libelle: 'Budget AM', scope: scopeAm };
+      }
+      window.yassirResoudreBudgetCarteProfil = resoudreBudgetCarteProfil;

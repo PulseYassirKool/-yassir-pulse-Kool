@@ -42,7 +42,8 @@ const kv = { get: async (k, t) => (store.has(k) ? (t === 'json' ? JSON.parse(sto
 const env = { PULSE_KV: kv, JWT_SECRET: 'j'.repeat(48), LEGACY_SALT: 's', ALLOWED_ORIGIN: 'http://localhost' };
 store.set('accounts', JSON.stringify([
   { username: 'proprio', hash: await hashPassword('Proprio-Test-123'), role: 'owner', displayName: 'Propriétaire Admin', amName: null, protected: true },
-  { username: 'omar.beldi', hash: await hashPassword('Omar-Test-12345'), role: 'am', displayName: 'Omar Beldi', amName: 'Omar Beldi', protected: true }
+  { username: 'omar.beldi', hash: await hashPassword('Omar-Test-12345'), role: 'am', displayName: 'Omar Beldi', amName: 'Omar Beldi', protected: true },
+  { username: 'ahmed.marrouki', hash: await hashPassword('Ahmed-Test-12345'), role: 'viewer_all', displayName: 'Ahmed Marrouki', amName: null, protected: true }
 ]));
 store.set('config', JSON.stringify({ live: { ...seed.live, COMMISSIONS_SHEET_ID: 'COMM_TEST_ID_000000000001', COMMISSIONS_GID: '9', COMMISSIONS_TAB: 'Commissions' }, kool: koolCfg }));
 store.set('defaults', JSON.stringify({ commissions: seed.commissions, portfolios: seed.portfolios }));
@@ -1109,6 +1110,121 @@ test('Notifications Yassir : alerte Budget dépassé à 90 % puis 100 % (global)
   assert.equal(wOk.document.getElementById('notifCntBudget').textContent, '0', 'compteur Budget : 0 à 17 %');
   wOk.yassirSetNotifCategoryFilter('BUDGET');
   assert.ok(!wOk.document.getElementById('yassirNotifListBody').textContent.includes('Budget'), 'alerte Budget présente à tort');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Carte profil du menu latéral : budget jamais négatif ----
+// Bug signalé (capture Ahmed Marrouki, 27/11/2026) : Budget AM 0.00 TND,
+// Reste Budget -99 915,79 TND — des dépenses réelles comparées à un budget
+// absent (synchro Budget non chargée, ou AM sans ligne dans la feuille).
+// Règle : budget du périmètre connu -> périmètre tel quel ; sinon, pour un
+// compte qui voit tout (proprio / lecture), budget global face aux dépenses
+// globales ; sinon « — », jamais 0 ni un reste négatif.
+test('Carte profil : budget global pour un compte sans budget personnel, « — » si aucun budget', async () => {
+  // Dates relatives (jamais de date absolue figée : la CI casse sinon).
+  const fmtFR = (d) => String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+  const ilYAJours = (n) => fmtFR(new Date(Date.now() - n * 86400000));
+
+  const build = async (budgetStore, user, pwd, rowsSpec) => {
+    const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
+    const w = dom.window;
+    w.__PULSE_API__ = 'https://api.test';
+    w.localStorage.setItem('yassir_vf_budget_v1', JSON.stringify(budgetStore));
+    // Au moins une règle Offre Participation : sans aucune règle, le coût de
+    // participation des livrées vaut 0 (comportement existant) ; les remises
+    // sans règle sont alors comptées à 100 % restaurant (règle Yassir).
+    w.localStorage.setItem('yassir_vf_offre_participation_v1', JSON.stringify([
+      { area: '', restaurant: 'resto test omar', restaurantNorm: 'resto test omar', cPct: 10, tag: 'Toute la carte', am: 'Omar Beldi', partPct: 10, details: '', startDate: '', endDate: '', periode: '' }
+    ]));
+    w.localStorage.setItem('yassir_vf_am_portfolios_v9', JSON.stringify({
+      'resto test omar': { am: 'Omar Beldi', displayName: 'Resto Test Omar', ville: 'Tunis', segment: 'Top Performer' },
+      'resto test nour': { am: 'Nour Ali', displayName: 'Resto Test Nour', ville: 'Tunis', segment: 'Top Performer' },
+      'resto test eya': { am: 'Eya Majdoub', displayName: 'Resto Test Eya', ville: 'Tunis', segment: 'Top Performer' }
+    }));
+    w.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.startsWith('https://api.test')) {
+        const r = await handle(new Request(u, { method: opts.method || 'GET', body: opts.body, headers: { Origin: 'http://localhost', ...(opts.headers || {}) } }), env);
+        return { ok: r.ok, status: r.status, json: () => r.json(), text: () => r.text() };
+      }
+      sheetCalls.push(u);
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    };
+    w.addEventListener('error', (e) => errors.push(e.message));
+    w.addEventListener('unhandledrejection', (e) => errors.push(String(e.reason)));
+    w.eval(bundle);
+    await login(w, user, pwd);
+    const makeXlsxFile = (aoa, sheetName, fileName) => {
+      const wb = w.XLSX.utils.book_new();
+      w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(aoa), sheetName);
+      const buf = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      return new w.File([buf], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    };
+    const idxOrigDeliv = TARGET_HEADERS_TEST.indexOf('original delivery amount');
+    const idxDeliv = TARGET_HEADERS_TEST.indexOf('delivery amount');
+    const idxAmtRest = TARGET_HEADERS_TEST.indexOf('amount to restaurant');
+    const dataAoa = [TARGET_HEADERS_TEST.slice()];
+    rowsSpec.forEach((spec, i) => {
+      const r = yassirRow(ilYAJours(spec.jours), 'YAF-90' + (10 + i), spec.resto, spec.itemTot, spec.remise, '', '');
+      r[idxOrigDeliv] = spec.origDeliv; r[idxDeliv] = spec.deliv; r[idxAmtRest] = spec.itemTot;
+      dataAoa.push(r);
+    });
+    const dataFile = makeXlsxFile(dataAoa, 'Data exp', 'data-exp.xlsx');
+    w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
+    await wait(1200);
+    return w;
+  };
+  const cardTxt = (w, id) => w.document.getElementById(id).textContent;
+  // Dépenses simulées : Omar LR&LG 15 + offres 0 = 15 ; Nour 0 + 5 = 5 ;
+  // Eya 0 + 20 = 20 ; global LR&LG 15, offres 25, total 40.
+  const rowsStd = [
+    { jours: 3, resto: 'Resto Test Omar', itemTot: 100, remise: 0, origDeliv: 20, deliv: 5 },
+    { jours: 3, resto: 'Resto Test Nour', itemTot: 50, remise: 5, origDeliv: 10, deliv: 10 },
+    { jours: 2, resto: 'Resto Test Eya', itemTot: 200, remise: 20, origDeliv: 0, deliv: 0 }
+  ];
+  const budgets = { byAm: { 'Omar Beldi': 1000, 'Nour Ali': 500 }, global: 1500 };
+
+  // (a) Lecture seule, filtre sur Eya (sans ligne de budget) -> budget global.
+  const wA = await build(budgets, 'ahmed.marrouki', 'Ahmed-Test-12345', rowsStd);
+  wA.yassirSelectAmFilter('Eya Majdoub');
+  assert.equal(wA.document.getElementById('lmdProfileBudgetCard').classList.contains('hidden'), false, 'carte cachée (a)');
+  assert.equal(cardTxt(wA, 'profileBudgetLabel'), 'Budget global :', 'libellé (a)');
+  assert.equal(cardTxt(wA, 'profileBudgetTnd'), '1500.00 TND', 'budget global (a)');
+  assert.equal(cardTxt(wA, 'profileLrLgTnd'), '15.00 TND (1.0%)', 'LR&LG global (a)');
+  assert.equal(cardTxt(wA, 'profileOfferPartTnd'), '25.00 TND (1.7%)', 'offres global (a)');
+  assert.equal(cardTxt(wA, 'profileLrLgVsBudgetAmPct'), '2.7%', '% global (a)');
+  assert.equal(cardTxt(wA, 'profileRemainingBudgetTnd'), '1460.00 TND', 'reste global (a)');
+
+  // (b) AM avec sa propre ligne de budget -> son budget, comportement inchangé.
+  const wB = await build(budgets, 'omar.beldi', 'Omar-Test-12345', rowsStd);
+  assert.equal(wB.document.getElementById('lmdProfileBudgetCard').classList.contains('hidden'), false, 'carte cachée (b)');
+  assert.equal(cardTxt(wB, 'profileBudgetLabel'), 'Budget AM :', 'libellé (b)');
+  assert.equal(cardTxt(wB, 'profileBudgetTnd'), '1000.00 TND', 'budget Omar (b)');
+  assert.equal(cardTxt(wB, 'profileLrLgTnd'), '15.00 TND (1.5%)', 'LR&LG Omar (b)');
+  assert.equal(cardTxt(wB, 'profileOfferPartTnd'), '0.00 TND (0.0%)', 'offres Omar (b)');
+  assert.equal(cardTxt(wB, 'profileLrLgVsBudgetAmPct'), '1.5%', '% Omar (b)');
+  assert.equal(cardTxt(wB, 'profileRemainingBudgetTnd'), '985.00 TND', 'reste Omar (b)');
+
+  // (c) Aucun budget chargé -> « — » partout, jamais de reste négatif.
+  const wC = await build({ byAm: {}, global: 0 }, 'ahmed.marrouki', 'Ahmed-Test-12345', rowsStd);
+  wC.yassirSelectAmFilter('Omar Beldi');
+  assert.equal(cardTxt(wC, 'profileBudgetTnd'), '—', 'budget « — » (c)');
+  assert.equal(cardTxt(wC, 'profileLrLgVsBudgetAmPct'), '—', '% « — » (c)');
+  assert.equal(cardTxt(wC, 'profileRemainingBudgetTnd'), '—', 'reste « — » (c)');
+  assert.equal(cardTxt(wC, 'profileLrLgTnd'), '15.00 TND', 'LR&LG sans % (c)');
+  assert.ok(!wC.document.getElementById('lmdProfileBudgetCard').textContent.includes('-'), 'signe négatif présent (c)');
+
+  // (c2) Cas exact de la capture : dépenses 57 278,79 + 42 637,00, budget 0
+  // -> plus jamais -99 915,79. (Resto sans règle : remise à 100 % restaurant.)
+  const wD = await build({ byAm: {}, global: 0 }, 'ahmed.marrouki', 'Ahmed-Test-12345', [
+    { jours: 2, resto: 'Resto Test Nour', itemTot: 42637, remise: 42637, origDeliv: 57278.79, deliv: 0 }
+  ]);
+  wD.yassirSelectAmFilter('Nour Ali');
+  assert.equal(cardTxt(wD, 'profileLrLgTnd'), '57278.79 TND', 'LR&LG capture (c2)');
+  assert.equal(cardTxt(wD, 'profileOfferPartTnd'), '42637.00 TND', 'offres capture (c2)');
+  assert.equal(cardTxt(wD, 'profileRemainingBudgetTnd'), '—', 'reste « — » capture (c2)');
+  assert.ok(!wD.document.getElementById('lmdProfileBudgetCard').textContent.includes('-99915.79'), 'reste -99915.79 toujours présent (c2)');
 
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

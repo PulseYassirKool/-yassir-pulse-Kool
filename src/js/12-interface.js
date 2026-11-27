@@ -322,7 +322,11 @@
         document.getElementById('kpiTotalCa').textContent = currentStats.caLivrees.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' TND';
         document.getElementById('kpiCaBreakdown').textContent = 'Total reçues : ' + currentStats.caRecues.toFixed(2) + ' TND';
 
-        // Mise à jour de l'encart Profil AM (LR/LG & Budget du AM uniquement, sans Global)
+        // Mise à jour de l'encart Profil AM (LR/LG & Budget du périmètre).
+        // Le budget affiché est toujours celui du périmètre des dépenses :
+        // budget de l'AM du périmètre, ou budget global (proprio / lecture)
+        // quand l'AM n'a pas de ligne de budget. Budget absent = « — »,
+        // jamais 0 ni un reste négatif.
         var profileScopeAm = (currentUser && currentUser.role === 'am' && currentUser.amName)
           ? currentUser.amName
           : activeFilter;
@@ -330,39 +334,50 @@
         if (profCardEl) {
           if (profileScopeAm && profileScopeAm !== 'ALL') {
             profCardEl.classList.remove('hidden');
-            var profStats = calculerStatsPourAm(profileScopeAm);
-            var pctLrVsBudgetAm = profStats.budgetTnd > 0
-              ? ((profStats.lrLgTnd / profStats.budgetTnd) * 100).toFixed(1)
-              : '0.0';
-            var pctOfferVsBudgetAm = profStats.budgetTnd > 0
-              ? ((profStats.offerPartTnd / profStats.budgetTnd) * 100).toFixed(1)
-              : '0.0';
-            var pctTotalVsBudgetAm = profStats.budgetTnd > 0
-              ? ((profStats.totalBudgetUsedTnd / profStats.budgetTnd) * 100).toFixed(1)
-              : '0.0';
+            var profBudget = (typeof yassirResoudreBudgetCarteProfil === 'function')
+              ? yassirResoudreBudgetCarteProfil(profileScopeAm)
+              : { stats: calculerStatsPourAm(profileScopeAm), budgetTnd: 0, budgetConnu: false, libelle: 'Budget AM' };
+            var profStats = profBudget.stats;
+            var budgetConnu = !!profBudget.budgetConnu;
+            var pctLrVsBudgetAm = budgetConnu
+              ? ((profStats.lrLgTnd / profBudget.budgetTnd) * 100).toFixed(1)
+              : null;
+            var pctOfferVsBudgetAm = budgetConnu
+              ? ((profStats.offerPartTnd / profBudget.budgetTnd) * 100).toFixed(1)
+              : null;
+            var pctTotalVsBudgetAm = budgetConnu
+              ? ((profStats.totalBudgetUsedTnd / profBudget.budgetTnd) * 100).toFixed(1)
+              : null;
 
             var elProfLr = document.getElementById('profileLrLgTnd');
             var elProfOp = document.getElementById('profileOfferPartTnd');
             var elProfBud = document.getElementById('profileBudgetTnd');
+            var elProfBudLbl = document.getElementById('profileBudgetLabel');
             var elProfBudPct = document.getElementById('profileLrLgVsBudgetAmPct');
             var elProfRem = document.getElementById('profileRemainingBudgetTnd');
-            if (elProfLr) elProfLr.textContent = profStats.lrLgTnd.toFixed(2) + ' TND (' + pctLrVsBudgetAm + '%)';
-            if (elProfOp) elProfOp.textContent = profStats.offerPartTnd.toFixed(2) + ' TND (' + pctOfferVsBudgetAm + '%)';
-            if (elProfBud) elProfBud.textContent = profStats.budgetTnd.toFixed(2) + ' TND';
-            if (elProfBudPct) elProfBudPct.textContent = pctTotalVsBudgetAm + '%';
+            if (elProfBudLbl) elProfBudLbl.textContent = profBudget.libelle + ' :';
+            if (elProfLr) elProfLr.textContent = profStats.lrLgTnd.toFixed(2) + ' TND' + (pctLrVsBudgetAm !== null ? ' (' + pctLrVsBudgetAm + '%)' : '');
+            if (elProfOp) elProfOp.textContent = profStats.offerPartTnd.toFixed(2) + ' TND' + (pctOfferVsBudgetAm !== null ? ' (' + pctOfferVsBudgetAm + '%)' : '');
+            if (elProfBud) elProfBud.textContent = budgetConnu ? profBudget.budgetTnd.toFixed(2) + ' TND' : '—';
+            if (elProfBudPct) elProfBudPct.textContent = budgetConnu ? pctTotalVsBudgetAm + '%' : '—';
             var elProfBar = document.getElementById('profileBudgetProgressBar');
             if (elProfBar) {
-              var numPct = parseFloat(pctTotalVsBudgetAm) || 0;
+              var numPct = budgetConnu ? (parseFloat(pctTotalVsBudgetAm) || 0) : 0;
               elProfBar.style.width = Math.min(100, Math.max(0, numPct)) + '%';
               elProfBar.className = numPct >= 95
                 ? 'h-full rounded-full bg-[#FF2A6D] transition-all duration-500'
                 : (numPct >= 75 ? 'h-full rounded-full bg-amber-400 transition-all duration-500' : 'h-full rounded-full bg-[#00BFA5] transition-all duration-500');
             }
             if (elProfRem) {
-              elProfRem.textContent = profStats.remainingBudgetTnd.toFixed(2) + ' TND';
-              elProfRem.className = profStats.remainingBudgetTnd >= 0
-                ? 'text-[#00BFA5] font-extrabold font-mono'
-                : 'text-[#FF2A6D] bg-white px-1.5 py-0.2 rounded-full font-extrabold font-mono';
+              if (budgetConnu) {
+                elProfRem.textContent = profStats.remainingBudgetTnd.toFixed(2) + ' TND';
+                elProfRem.className = profStats.remainingBudgetTnd >= 0
+                  ? 'text-[#00BFA5] font-extrabold font-mono'
+                  : 'text-[#FF2A6D] bg-white px-1.5 py-0.2 rounded-full font-extrabold font-mono';
+              } else {
+                elProfRem.textContent = '—';
+                elProfRem.className = 'text-white font-extrabold font-mono';
+              }
             }
           } else {
             profCardEl.classList.add('hidden');
