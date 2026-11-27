@@ -268,9 +268,14 @@
           if (!ligneEstDeLaMarque(cRow, idxApp, brandFilter)) continue;
           var cName = String(cRow[idxRest]).replace(/[‎‏‪-‮]/g, '').trim().toLowerCase();
           var rawRateVal = cRow[idxRate];
-          var cRate = (typeof rawRateVal === 'number' && rawRateVal > 0 && rawRateVal < 1)
-            ? Number((rawRateVal * 100).toFixed(4))
-            : purgerNombre(String(rawRateVal).replace(/%|[‎‏‪-‮]/g, ''));
+          // Même règle que parsePercentNumber (correctif partPct b9c9f708) :
+          // une valeur entre 0 et 1 est une fraction — la feuille écrit
+          // « 0,238 » pour 23,8 %. La synchro Kool lit la feuille en CSV
+          // (chaînes) : sans ce ×100, « 0,238 » était lu 0,238 point au
+          // lieu de 23,8. Les nombres XLSX (Yassir) passent par le même
+          // chemin : 0.238 (nombre) vaut aussi 23,8, comme avant.
+          var cRate = purgerNombre(String(rawRateVal).replace(/%|[‎‏‪-‮]/g, ''));
+          if (cRate > 0 && cRate < 1) cRate = Number((cRate * 100).toFixed(4));
           if (cName && cName !== 'restaurant' && cName !== 'restaurant name' && !isNaN(cRate) && cRate > 0) {
             map[cName] = cRate;
             count++;
@@ -382,6 +387,10 @@
             // Semaine par défaut sur les données fraîches (diagnostic
             // 2026-11-27) : sans choix manuel, la semaine suit la date max.
             reappliquerSemaineParDefautApresSynchro();
+            // La semaine appliquée doit être persistée dans le cache de la
+            // marque active, sinon une bascule de marque restaure l'ancienne
+            // semaine (ou aucune) au lieu de celle qui vient d'être appliquée.
+            saveCurrentStateToBrandCache('yassir');
             if (!state.dateStart && !state.dateEnd) {
               updateDatePresetButtonsUI('ALL');
             } else {

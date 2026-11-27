@@ -792,6 +792,47 @@ test('partPct CSV : "0,1" vaut 10 points, "0,238" vaut 23,8 (bug ×100 Kool)', (
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Correctif 4a : parseCommissionRows — même motif ×100 que partPct ----
+// La feuille Commissions écrit « 0,238 » (= 23,8 %) ; la synchro Kool lit
+// la feuille en CSV (chaînes) et seuls les NOMBRES entre 0 et 1 étaient
+// multipliés par 100 — « 0,238 » était lu 0,238 point au lieu de 23,8.
+test('Commissions CSV : "0,238" vaut 23,8 (même motif ×100 que partPct)', () => {
+  const w = boot();
+  const p = w.yassirParseCommissionRows;
+  assert.ok(typeof p === 'function', 'yassirParseCommissionRows non exposé');
+  // Chaînes CSV (synchro Kool) : « 0,238 » = 23,8 %, « 0,1 » = 10 %.
+  const rowsKool = p([
+    ['Restaurant', 'Commission', 'APP'],
+    ['Resto Alpha', '0,238', 'Kool'],
+    ['Resto Beta', '0,1', 'Kool'],
+    ['Resto Gamma', '23,8', 'Kool'],
+    ['Resto Delta', '0', 'Kool'],
+    ['Resto Epsilon', '25', 'Kool'],
+    ['Resto Zeta', '20%', 'Kool']
+  ], 'Kool');
+  assert.equal(rowsKool.count, 5, '5 taux lus (le taux 0 est exclu)');
+  assert.equal(rowsKool.map['resto alpha'], 23.8, '"0,238" doit valoir 23,8');
+  assert.equal(rowsKool.map['resto beta'], 10, '"0,1" doit valoir 10');
+  assert.equal(rowsKool.map['resto gamma'], 23.8, '"23,8" inchangé');
+  assert.equal(rowsKool.map['resto epsilon'], 25, '"25" inchangé');
+  assert.equal(rowsKool.map['resto zeta'], 20, '"20%" inchangé');
+  assert.equal(rowsKool.map['resto delta'], undefined, 'taux 0 exclu');
+  // Nombres (XLSX Yassir) : comportement inchangé.
+  const rowsYassir = p([
+    ['Restaurant', 'Commission', 'APP'],
+    ['Resto Alpha', 0.238, 'Yassir'],
+    ['Resto Beta', 23.8, 'Yassir']
+  ], 'Yassir');
+  assert.equal(rowsYassir.count, 2, '2 taux Yassir');
+  assert.equal(rowsYassir.map['resto alpha'], 23.8, '0.238 (nombre) = 23,8');
+  assert.equal(rowsYassir.map['resto beta'], 23.8, '23.8 (nombre) inchangé');
+  // « 17,017 » reste 17.017 : une seule virgule suivie de 3 chiffres est
+  // une décimale dans les vraies feuilles (45 taux), pas 17 017.
+  const rowsM = p([['Restaurant', 'Commission', 'APP'], ['Resto M', '17,017', 'Yassir']], 'Yassir');
+  assert.equal(rowsM.map['resto m'], 17.017, '"17,017" doit valoir 17.017');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 test('Kool : partPct CSV "0,1" — chiffres W47 reproduits (plateforme 3 707,65, restaurant 27 309,77)', async () => {
   const w = bootKool({ data: koolCsvDataW47, items: koolCsvItemsW47, offre: koolCsvOffreW47 });
   await login(w, 'proprio', 'Proprio-Test-123');
@@ -2736,6 +2777,46 @@ test('Kool : après une synchro fraîche, la semaine par défaut suit les donné
   assert.equal(w.document.getElementById('filterDateEnd').value, '2026-11-29', 'fin W48');
   const hint = w.document.getElementById('dateRangeBoundsHint').textContent;
   assert.ok(hint.includes('26/11/2026'), 'fraîcheur absente : ' + hint);
+  assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
+});
+
+// Correctif 4b : la semaine par défaut appliquée après synchro est persistée
+// dans le cache de la marque active — sinon une bascule de marque restaure
+// l'ancienne semaine (S47 au lieu de S48, ou aucune).
+test('Cache de marque : bascule → synchro → la semaine est re-sauvegardée', async () => {
+  // Kool : W47 puis W48 frais — le cache Kool doit contenir S48, pas S47.
+  const w = bootKool({ data: koolCsvDataW47fin });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  assert.ok(w.document.getElementById('filterWeekSelect').value.endsWith('|S47'), 'semaine par défaut = S47 avant données fraîches, pas ' + w.document.getElementById('filterWeekSelect').value);
+  setGoogleMockData({ data: koolCsvDataW48fin });
+  await w.yassirSyncKoolSheets(true);
+  await wait(600);
+  assert.ok(w.document.getElementById('filterWeekSelect').value.endsWith('|S48'), 'semaine par défaut = S48 après synchro fraîche, pas ' + w.document.getElementById('filterWeekSelect').value);
+  const cacheKool = w.yassirGetDatesCacheMarque('kool');
+  assert.equal(cacheKool.dateStart, '2026-11-23', 'cache Kool : début S48, pas ' + JSON.stringify(cacheKool));
+  assert.equal(cacheKool.dateEnd, '2026-11-29', 'cache Kool : fin S48, pas ' + JSON.stringify(cacheKool));
+
+  // Yassir : données jusqu'au 16/11 (S47) à la connexion, puis une commande
+  // du 26/11/2026 (S48, comme la fixture Kool W48) dans Novembre — le cache
+  // Yassir doit contenir S48. (Une date future serait rejetée par
+  // parseOrderDayToIsoDate, d'où le 26/11 et non début décembre.)
+  const wY = boot();
+  await login(wY, 'proprio', 'Proprio-Test-123');
+  await wait(600);
+  assert.ok(wY.document.getElementById('filterWeekSelect').value.endsWith('|S47'), 'semaine Yassir = S47 avant données fraîches, pas ' + wY.document.getElementById('filterWeekSelect').value);
+  setGoogleMockTabs(NOV, { 'Data exp': [TARGET_HEADERS_TEST.slice(), yassirRow('16/11/2026', 'YAF-2', 'Resto Yassir A', 60, 0, '', ''), yassirRow('26/11/2026', 'YAF-3', 'Resto Yassir A', 60, 0, '', '')] });
+  await wY.yassirSyncHistoricalSheets(true);
+  await wait(600);
+  assert.ok(wY.document.getElementById('filterWeekSelect').value.endsWith('|S48'), 'semaine Yassir = S48 après synchro fraîche, pas ' + wY.document.getElementById('filterWeekSelect').value);
+  const cacheYassir = wY.yassirGetDatesCacheMarque('yassir');
+  assert.equal(cacheYassir.dateStart, '2026-11-23', 'cache Yassir : début S48, pas ' + JSON.stringify(cacheYassir));
+  assert.equal(cacheYassir.dateEnd, '2026-11-29', 'cache Yassir : fin S48, pas ' + JSON.stringify(cacheYassir));
   assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
 });
 

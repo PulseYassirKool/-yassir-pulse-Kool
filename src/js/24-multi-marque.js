@@ -413,6 +413,14 @@
         state.currentPage = 1;
       }
 
+      // Lecture seule du cache de marque (diagnostic / tests) : dates
+      // mémorisées pour une marque, sans toucher à l'état courant.
+      window.yassirGetDatesCacheMarque = function (brandKey) {
+        var b = brandArchives[brandKey === 'kool' ? 'kool' : 'yassir'];
+        if (!b) return { dateStart: '', dateEnd: '' };
+        return { dateStart: b.dateStart || '', dateEnd: b.dateEnd || '' };
+      };
+
       function applyBrandVisualTheme(brandKey) {
         var isKool = brandKey === 'kool';
         if (isKool) {
@@ -943,6 +951,10 @@
             applyBrandVisualTheme('kool');
             if (state.rawSourceRows && state.rawSourceRows.length > 1) {
               reappliquerSemaineParDefautApresSynchro();
+              // La semaine appliquée doit être persistée dans le cache de la
+              // marque active, sinon une bascule de marque restaure l'ancienne
+              // semaine (ou aucune) au lieu de celle qui vient d'être appliquée.
+              saveCurrentStateToBrandCache('kool');
               executerTraitementMetier();
             } else {
               mettreAJourInterface();
