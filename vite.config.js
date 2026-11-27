@@ -26,11 +26,11 @@ function csp(apiUrl) {
   const api = apiUrl ? new URL(apiUrl).origin : '';
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://docs.google.com", // 'unsafe-inline' : gestionnaires onclick="" hérités ; JSONP Google Sheets
+    "script-src 'self' 'unsafe-inline'", // 'unsafe-inline' : gestionnaires onclick="" hérités (M4, chantier séparé)
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `connect-src 'self' ${api} https://docs.google.com https://*.googleusercontent.com`.replace(/\s+/g, ' ').trim(),
+    `connect-src 'self' ${api}`.replace(/\s+/g, ' ').trim(),
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'"
