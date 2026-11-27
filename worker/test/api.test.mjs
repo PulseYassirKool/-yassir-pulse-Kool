@@ -1,13 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handle, hashPassword, RateLimiter } from '../src/index.js';
+import { activityKey, ACTIVITY_TTL_SECONDS } from '../src/activity-log.js';
 
 const kvStore = new Map();
+const kvMeta = new Map(); // clé -> { metadata, expirationTtl } (options du put)
 const rlStore = new Map();
 const kv = {
   get: async (k, t) => (kvStore.has(k) ? (t === 'json' ? JSON.parse(kvStore.get(k)) : kvStore.get(k)) : null),
-  put: async (k, v) => void kvStore.set(k, v),
-  delete: async (k) => void kvStore.delete(k)
+  put: async (k, v, opts) => {
+    kvStore.set(k, typeof v === 'string' ? v : JSON.stringify(v));
+    if (opts) kvMeta.set(k, { metadata: opts.metadata, expirationTtl: opts.expirationTtl });
+  },
+  delete: async (k) => { kvStore.delete(k); kvMeta.delete(k); },
+  list: async ({ prefix = '', limit = 1000, cursor } = {}) => {
+    const names = [...kvStore.keys()].filter((k) => k.startsWith(prefix)).sort();
+    let start = 0;
+    if (cursor) { const i = names.indexOf(cursor); start = i === -1 ? names.length : i + 1; }
+    const page = names.slice(start, start + limit);
+    const done = start + page.length >= names.length;
+    return {
+      keys: page.map((name) => ({ name, metadata: kvMeta.get(name) ? kvMeta.get(name).metadata : undefined })),
+      list_complete: done,
+      cursor: done ? null : page[page.length - 1]
+    };
+  }
+};
+// Vide le journal (nouvelles clés + ancien modèle + marqueur d'effacement).
+const clearActivityKeys = () => {
+  for (const k of [...kvStore.keys()]) {
+    if (k.startsWith('activity:') || k === 'activity_log') kvStore.delete(k);
+  }
+  for (const k of [...kvMeta.keys()]) {
+    if (k.startsWith('activity:')) kvMeta.delete(k);
+  }
 };
 const SALT = 'SEL_HERITE::';
 const legacy = async (p) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(SALT + p)))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -70,7 +96,7 @@ test('gestion des comptes : réservée au propriétaire, mot de passe >= 10, pas
 });
 
 test("journal d'activité : connexion AM et échec journalisés, proprio ignoré", async () => {
-  kvStore.delete('activity_log');
+  clearActivityKeys();
   kvStore.set('accounts', JSON.stringify([
     { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
     { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
@@ -82,17 +108,19 @@ test("journal d'activité : connexion AM et échec journalisés, proprio ignoré
   // Connexion réussie AM -> entrée login ; connexion proprio -> rien.
   assert.equal((await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).status, 200);
   assert.equal((await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).status, 200);
-  const entries = JSON.parse(kvStore.get('activity_log'));
+  // Lecture proprio : plus récentes d'abord (login, puis login_fail).
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  const entries = (await call('GET', '/api/activity', null, owner)).json.entries;
   assert.equal(entries.length, 2);
-  assert.equal(entries[0].type, 'login_fail');
+  assert.equal(entries[0].type, 'login');
   assert.equal(entries[0].user, 'omar.beldi');
-  assert.equal(entries[1].type, 'login');
+  assert.equal(entries[1].type, 'login_fail');
   assert.equal(entries[1].user, 'omar.beldi');
   assert.ok(!JSON.stringify(entries).includes('faux')); // jamais de mot de passe dans le journal
 });
 
 test("journal d'activité : POST/GET/DELETE — accès réservé au propriétaire", async () => {
-  kvStore.delete('activity_log');
+  clearActivityKeys();
   kvStore.set('accounts', JSON.stringify([
     { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
     { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
@@ -120,20 +148,27 @@ test("journal d'activité : POST/GET/DELETE — accès réservé au propriétair
   assert.equal((await call('GET', '/api/activity', null, owner)).json.entries.length, 0);
 });
 
-test("journal d'activité : plafond à 500 entrées, les plus anciennes sortent (FIFO)", async () => {
-  const seed = [];
-  for (let i = 0; i < 500; i++) seed.push({ ts: 1000 + i, user: 'omar.beldi', type: 'export', detail: 'Entrée ' + i });
-  kvStore.set('activity_log', JSON.stringify(seed));
+test("journal d'activité : plafond à 500 entrées, les plus anciennes sortent", async () => {
+  clearActivityKeys();
+  // 500 entrées simulées (une clé KV par événement, horodatages croissants).
+  const now = Date.now();
+  for (let i = 0; i < 500; i++) {
+    const ts = now - (500 - i) * 1000;
+    await kv.put(activityKey(ts), '', { expirationTtl: ACTIVITY_TTL_SECONDS, metadata: { ts, user: 'omar.beldi', type: 'export', detail: 'Entrée ' + i } });
+  }
   kvStore.set('accounts', JSON.stringify([
-    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false },
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true }
   ]));
   const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
   assert.ok(am);
-  // La connexion AM ajoute 1 entrée : le journal reste à 500, la plus ancienne sort.
-  const entries = JSON.parse(kvStore.get('activity_log'));
+  // La connexion AM ajoute 1 entrée : la lecture reste à 500, la plus ancienne sort.
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  const entries = (await call('GET', '/api/activity', null, owner)).json.entries;
   assert.equal(entries.length, 500);
-  assert.equal(entries[0].detail, 'Entrée 1');
-  assert.equal(entries[499].type, 'login');
+  assert.equal(entries[0].type, 'login', 'la connexion est la plus récente');
+  assert.equal(entries[499].detail, 'Entrée 1', 'la plus ancienne (Entrée 0) est sortie');
+  assert.ok(entries.every((e) => e.detail !== 'Entrée 0'));
 });
 
 test("journal d'activité : un échec d'écriture KV ne casse ni le login ni l'envoi", async () => {
@@ -142,7 +177,8 @@ test("journal d'activité : un échec d'écriture KV ne casse ni le login ni l'e
   ]));
   const kvFailing = {
     get: kv.get,
-    put: async (k, v) => { if (k === 'activity_log') throw new Error('KV indisponible'); return kv.put(k, v); },
+    list: kv.list,
+    put: async (k, v, opts) => { if (String(k).startsWith('activity:')) throw new Error('KV indisponible'); return kv.put(k, v, opts); },
     delete: kv.delete
   };
   const envFailing = { ...env, PULSE_KV: kvFailing };
@@ -205,10 +241,11 @@ test('limitation des connexions : 5 essais en parallèle ne contournent plus le 
 });
 
 test("journal d'activité : un utilisateur ne peut pas envoyer plus de 50 événements par heure", async () => {
-  kvStore.delete('activity_log');
+  clearActivityKeys();
   for (const k of [...kvStore.keys()]) if (k.startsWith('actrl:')) kvStore.delete(k);
   kvStore.set('accounts', JSON.stringify([
-    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false },
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true }
   ]));
   const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
   for (let i = 0; i < 50; i++) {
@@ -216,9 +253,76 @@ test("journal d'activité : un utilisateur ne peut pas envoyer plus de 50 évén
   }
   assert.equal((await call('POST', '/api/activity', { type: 'export', detail: 'Export 51' }, am)).status, 429, '51e événement refusé');
   // Le journal garde les 50 événements + la connexion : rien n'est effacé par le flood.
-  const list = JSON.parse(kvStore.get('activity_log'));
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  const list = (await call('GET', '/api/activity', null, owner)).json.entries;
   assert.equal(list.length, 51, 'le journal n\'a pas été inondé');
   assert.ok(list.some((e) => e.type === 'login'), 'la connexion est toujours dans le journal');
+});
+
+// ---- I4 : une clé KV par événement, TTL 90 jours ----
+test("I4 : écriture concurrente sans perte (20 envois en parallèle, tous présents)", async () => {
+  clearActivityKeys();
+  for (const k of [...kvStore.keys()]) if (k.startsWith('actrl:')) kvStore.delete(k);
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false },
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true }
+  ]));
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  // 20 envois simultanés : avec l'ancien modèle (une seule clé en
+  // lecture-modification-écriture), certains auraient été écrasés.
+  const results = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    call('POST', '/api/activity', { type: 'export', detail: 'Export concurrent ' + i }, am)));
+  assert.ok(results.every((r) => r.status === 200), 'les 20 envois sont acceptés');
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  const entries = (await call('GET', '/api/activity', null, owner)).json.entries;
+  assert.equal(entries.length, 21, '20 exports + 1 connexion, aucune perte');
+  for (let i = 0; i < 20; i++) {
+    assert.ok(entries.some((e) => e.detail === 'Export concurrent ' + i), 'Export concurrent ' + i + ' présent');
+  }
+});
+
+test('I4 : chaque événement a sa propre clé avec TTL 90 jours', async () => {
+  clearActivityKeys();
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
+  ]));
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  assert.equal((await call('POST', '/api/activity', { type: 'export', detail: 'Export TTL' }, am)).status, 200);
+  const keys = [...kvStore.keys()].filter((k) => k.startsWith('activity:') && k !== 'activity:clearedAt');
+  assert.equal(keys.length, 2, 'une clé par événement (connexion + export)');
+  for (const k of keys) {
+    assert.match(k, /^activity:\d{13}:[0-9a-f]{16}$/, 'clé activity:<ts inversé>:<aléatoire>');
+    assert.equal(kvMeta.get(k).expirationTtl, ACTIVITY_TTL_SECONDS, 'TTL 90 jours');
+    assert.equal(kvMeta.get(k).expirationTtl, 90 * 24 * 3600);
+  }
+  // Plus aucune écriture dans l'ancienne clé unique.
+  assert.equal(kvStore.has('activity_log'), false);
+});
+
+test("I4 : GET fusionne l'ancien journal, DELETE efface tout (nouveau + ancien)", async () => {
+  clearActivityKeys();
+  const now = Date.now();
+  // Ancien modèle : 2 entrées dans la clé unique (horodatages passés).
+  kvStore.set('activity_log', JSON.stringify([
+    { ts: now - 3600000, user: 'omar.beldi', type: 'export', detail: 'Ancien export 1' },
+    { ts: now - 1800000, user: 'omar.beldi', type: 'login', detail: 'Ancienne connexion' }
+  ]));
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false },
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true }
+  ]));
+  const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
+  assert.equal((await call('POST', '/api/activity', { type: 'export', detail: 'Nouvel export' }, am)).status, 200);
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  // Lecture : 4 entrées (2 nouvelles + 2 anciennes), plus récentes d'abord.
+  const before = (await call('GET', '/api/activity', null, owner)).json.entries;
+  assert.equal(before.length, 4);
+  assert.ok(before.some((e) => e.detail === 'Ancien export 1'), 'ancien journal toujours lisible');
+  assert.ok(before.some((e) => e.detail === 'Nouvel export'));
+  // Effacement : plus rien, et l'ancienne clé a disparu.
+  assert.equal((await call('DELETE', '/api/activity', null, owner)).status, 200);
+  assert.equal((await call('GET', '/api/activity', null, owner)).json.entries.length, 0);
+  assert.equal(kvStore.has('activity_log'), false, 'ancienne clé supprimée');
 });
 
 test('changement de mot de passe par le proprio -> ancien jeton AM rejeté, nouveau mot de passe accepté', async () => {

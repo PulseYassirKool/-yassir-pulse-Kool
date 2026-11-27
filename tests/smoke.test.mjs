@@ -38,7 +38,40 @@ const yassirRow = (date, oid, resto, itemTot, dAmt, dType, fCat) => {
   return r;
 };
 const store = new Map();
-const kv = { get: async (k, t) => (store.has(k) ? (t === 'json' ? JSON.parse(store.get(k)) : store.get(k)) : null), put: async (k, v) => void store.set(k, v), delete: async (k) => void store.delete(k) };
+const kvMeta = new Map(); // clé -> { metadata, expirationTtl } (options du put)
+const kv = {
+  get: async (k, t) => (store.has(k) ? (t === 'json' ? JSON.parse(store.get(k)) : store.get(k)) : null),
+  put: async (k, v, opts) => {
+    store.set(k, typeof v === 'string' ? v : JSON.stringify(v));
+    if (opts) kvMeta.set(k, { metadata: opts.metadata, expirationTtl: opts.expirationTtl });
+  },
+  delete: async (k) => { store.delete(k); kvMeta.delete(k); },
+  list: async ({ prefix = '', limit = 1000, cursor } = {}) => {
+    const names = [...store.keys()].filter((k) => k.startsWith(prefix)).sort();
+    let start = 0;
+    if (cursor) { const i = names.indexOf(cursor); start = i === -1 ? names.length : i + 1; }
+    const page = names.slice(start, start + limit);
+    const done = start + page.length >= names.length;
+    return {
+      keys: page.map((name) => ({ name, metadata: kvMeta.get(name) ? kvMeta.get(name).metadata : undefined })),
+      list_complete: done,
+      cursor: done ? null : page[page.length - 1]
+    };
+  }
+};
+// Journal d'activité (I4 : une clé KV par événement) : vider le journal et
+// le relire via le contrat HTTP GET /api/activity (compte proprio — la
+// connexion proprio n'est jamais journalisée, donc la lecture ne pollue pas).
+const clearJournal = () => {
+  for (const k of [...store.keys()]) if (k.startsWith('activity:') || k === 'activity_log') store.delete(k);
+  for (const k of [...kvMeta.keys()]) if (k.startsWith('activity:')) kvMeta.delete(k);
+};
+const journalEntries = async () => {
+  const loginR = await handle(new Request('https://api.test/api/login', { method: 'POST', body: JSON.stringify({ username: 'proprio', password: 'Proprio-Test-123' }), headers: { Origin: 'http://localhost' } }), env);
+  const token = (await loginR.json()).token;
+  const r = await handle(new Request('https://api.test/api/activity', { headers: { Origin: 'http://localhost', Authorization: 'Bearer ' + token } }), env);
+  return (await r.json()).entries || [];
+};
 const env = { PULSE_KV: kv, JWT_SECRET: 'j'.repeat(48), LEGACY_SALT: 's', ALLOWED_ORIGIN: 'http://localhost' };
 store.set('accounts', JSON.stringify([
   { username: 'proprio', hash: await hashPassword('Proprio-Test-123'), role: 'owner', displayName: 'Propriétaire Admin', amName: null, protected: true },
@@ -1861,19 +1894,19 @@ test('Notifications Kool : alerte Budget à 90 % avec les budgets Kool', async (
 
 // ---- Journal d'activité des AM (visible uniquement par le proprio) ----
 test("journal d'activité : un AM est journalisé (export + déconnexion), le proprio ne l'est pas", async () => {
-  store.delete('activity_log');
+  clearJournal();
   const w = boot();
   await login(w, 'omar.beldi', 'Omar-Test-12345');
   w.yassirJournaliser('export', 'Export Excel : Test.xlsx');
   await wait(400);
   // La connexion AM (côté Worker) + l'export sont journalisés.
-  let entries = JSON.parse(store.get('activity_log') || '[]');
+  let entries = await journalEntries();
   assert.ok(entries.some((e) => e.type === 'login' && e.user === 'omar.beldi'), 'connexion AM absente du journal');
   assert.ok(entries.some((e) => e.type === 'export' && e.user === 'omar.beldi' && e.detail.includes('Test.xlsx')), 'export AM absent du journal');
   // Déconnexion journalisée.
   w.yassirLogout();
   await wait(400);
-  entries = JSON.parse(store.get('activity_log') || '[]');
+  entries = await journalEntries();
   assert.ok(entries.some((e) => e.type === 'logout' && e.user === 'omar.beldi'), 'déconnexion AM absente du journal');
   // Le proprio n'est jamais journalisé : ni sa connexion, ni ses appels à l'aide.
   const before = entries.length;
@@ -1881,7 +1914,7 @@ test("journal d'activité : un AM est journalisé (export + déconnexion), le pr
   await login(w2, 'proprio', 'Proprio-Test-123');
   w2.yassirJournaliser('export', 'Export Excel : Proprio.xlsx');
   await wait(400);
-  entries = JSON.parse(store.get('activity_log') || '[]');
+  entries = await journalEntries();
   assert.equal(entries.length, before, 'le proprio ne doit rien ajouter au journal');
   assert.ok(!entries.some((e) => e.user === 'proprio'), 'aucune entrée proprio dans le journal');
 });
@@ -1899,7 +1932,7 @@ test("déconnexion côté serveur : l'ancien jeton meurt, la reconnexion fonctio
   assert.equal(me.status, 401, 'ancien jeton toujours accepté après déconnexion serveur');
   // Le jeton est effacé du navigateur et la déconnexion est journalisée.
   assert.equal(w.sessionStorage.getItem('pulse_token_v1'), null, 'jeton non effacé');
-  const entries = JSON.parse(store.get('activity_log') || '[]');
+  const entries = await journalEntries();
   assert.ok(entries.some((e) => e.type === 'logout' && e.user === 'omar.beldi'), 'déconnexion AM absente du journal');
   // Reconnexion possible avec le même mot de passe.
   await login(w, 'omar.beldi', 'Omar-Test-12345');
@@ -1937,11 +1970,11 @@ test("déconnexion : l'échec de /api/logout ne bloque pas la déconnexion local
 });
 
 test("journal d'activité : échec de connexion AM journalisé côté Worker", async () => {
-  store.delete('activity_log');
+  clearJournal();
   const w = boot();
   await login(w, 'omar.beldi', 'mauvais-mot-de-passe');
   await wait(300);
-  const entries = JSON.parse(store.get('activity_log') || '[]');
+  const entries = await journalEntries();
   assert.equal(entries.length, 1, 'un seul échec attendu');
   assert.equal(entries[0].type, 'login_fail');
   assert.equal(entries[0].user, 'omar.beldi');
@@ -1949,6 +1982,7 @@ test("journal d'activité : échec de connexion AM journalisé côté Worker", a
 });
 
 test("journal d'activité : le proprio voit le journal et ses filtres, l'AM ne voit pas le bouton", async () => {
+  clearJournal(); // vider aussi les clés activity:* des tests précédents (fusionnées en lecture)
   store.set('activity_log', JSON.stringify([
     { ts: Date.now() - 3000, user: 'omar.beldi', type: 'login', detail: 'Connexion' },
     { ts: Date.now() - 2000, user: 'omar.beldi', type: 'export', detail: 'Export Excel : Test.xlsx' },
@@ -1986,12 +2020,12 @@ test("journal d'activité : le proprio voit le journal et ses filtres, l'AM ne v
 });
 
 test("journal d'activité : alerte marquée « Traité » journalisée", async () => {
-  store.delete('activity_log');
+  clearJournal();
   const w = boot();
   await login(w, 'omar.beldi', 'Omar-Test-12345');
   w.yassirTraiterAlerte('test|key');
   await wait(400);
-  const entries = JSON.parse(store.get('activity_log') || '[]');
+  const entries = await journalEntries();
   assert.ok(entries.some((e) => e.type === 'alerte' && e.detail.includes('test|key')), 'alerte traitée absente du journal');
 });
 

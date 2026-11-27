@@ -5,6 +5,7 @@
 
 import { readSheetRange } from './google-sheets.js';
 import { getSheetsData, SHEET_SOURCES } from './sheets.js';
+import { appendActivity, listActivity, clearActivity, ACTIVITY_MAX_PER_HOUR, ACTIVITY_TYPES } from './activity-log.js';
 
 const ROLES = ['owner', 'viewer_all', 'am', 'market_am'];
 const ITERATIONS = 100000; // plafond PBKDF2 sur Workers
@@ -67,21 +68,9 @@ const publicUser = (a) => ({ username: a.username, role: a.role, displayName: a.
 const listAccounts = async (env) => (await env.PULSE_KV.get('accounts', 'json')) || [];
 const saveAccounts = (env, list) => env.PULSE_KV.put('accounts', JSON.stringify(list));
 
-// ---------- Journal d'activité (AM uniquement, jamais le propriétaire) ----------
-// Clé KV `activity_log` : tableau JSON [{ts, user, type, detail}], plafonné à
-// 500 entrées (FIFO). La journalisation ne doit JAMAIS faire échouer la
-// requête principale : appendActivity ne rejette jamais.
-const ACTIVITY_LOG_KEY = 'activity_log';
-const ACTIVITY_MAX = 500;
-const ACTIVITY_MAX_PER_HOUR = 50; // par utilisateur (audit item 7) : anti-flood du journal
-const ACTIVITY_TYPES = ['login', 'logout', 'login_fail', 'export', 'alerte'];
-async function appendActivity(env, entry) {
-  try {
-    const list = (await env.PULSE_KV.get(ACTIVITY_LOG_KEY, 'json')) || [];
-    list.push(entry);
-    await env.PULSE_KV.put(ACTIVITY_LOG_KEY, JSON.stringify(list.slice(-ACTIVITY_MAX)));
-  } catch (e) { /* journal indisponible : on continue sans journaliser */ }
-}
+// Journal d'activité : voir worker/src/activity-log.js (I4 — une clé KV par
+// événement, TTL 90 jours ; jamais le propriétaire). La journalisation ne
+// doit JAMAIS faire échouer la requête principale.
 
 // ---------- Limitation de débit des connexions (audit 2026-11-27, item 3) ----------
 // Le compteur d'échecs en KV seul se contourne : des essais envoyés en
@@ -431,11 +420,11 @@ export async function handle(request, env) {
     }
     if (me.role !== 'owner') return fail(403, 'Accès réservé au propriétaire.');
     if (method === 'GET') {
-      const list = (await env.PULSE_KV.get(ACTIVITY_LOG_KEY, 'json')) || [];
-      return reply({ entries: list.slice(-ACTIVITY_MAX).reverse() });
+      const entries = await listActivity(env);
+      return reply({ entries });
     }
     if (method === 'DELETE') {
-      await env.PULSE_KV.delete(ACTIVITY_LOG_KEY);
+      await clearActivity(env);
       return reply({ ok: true });
     }
   }
