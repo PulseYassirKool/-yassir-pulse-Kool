@@ -157,6 +157,21 @@ test("journal d'activité : un échec d'écriture KV ne casse ni le login ni l'e
   assert.equal((await callFailing('POST', '/api/activity', { type: 'export', detail: 'Export Excel : Test.xlsx' }, r.json.token)).status, 200);
 });
 
+test('comptes : identifiant mal encodé (%FF) -> 400, pas 500 ; identifiant invalide -> 400', async () => {
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true }
+  ]));
+  const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
+  // %FF est une séquence UTF-8 invalide : decodeURIComponent lève une exception.
+  const bad = await call('PUT', '/api/accounts/%FF', { role: 'am', password: 'MotDePasse-Long-1' }, owner);
+  assert.equal(bad.status, 400, 'identifiant mal encodé : 400 attendue, pas 500');
+  assert.ok(!bad.json.error || typeof bad.json.error === 'string', 'réponse JSON propre');
+  // Identifiant invalide (caractères interdits) -> 400 aussi.
+  assert.equal((await call('PUT', '/api/accounts/nom!invalide', { role: 'am', password: 'MotDePasse-Long-1' }, owner)).status, 400);
+  // Identifiant vide à la connexion -> 400.
+  assert.equal((await call('POST', '/api/login', { username: '', password: 'x' })).status, 400);
+});
+
 test("limitation des connexions : l'objet durable compte 5 essais puis bloque le 6e, réinitialisé après succès", async () => {
   const rl = new RateLimiter({ storage: { get: async (k) => rlStore.get(k) ?? null, put: async (k, v) => void rlStore.set(k, v), delete: async (k) => void rlStore.delete(k) } });
   const check = (key) => rl.fetch(new Request('https://rl/check', { method: 'POST', body: JSON.stringify({ key, max: 5, windowMs: 900000 }) })).then((r) => r.json());

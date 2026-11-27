@@ -289,7 +289,14 @@ export async function handle(request, env) {
     if (path === '/api/accounts' && method === 'GET') {
       return reply({ accounts: accounts.map((a) => ({ ...publicUser(a), protected: !!a.protected })) });
     }
-    const name = decodeURIComponent(path.slice('/api/accounts/'.length)).trim().toLowerCase();
+    // Un identifiant mal encodé (% isolé, séquence UTF-8 invalide) faisait
+    // planter le Worker (500 sans en-têtes CORS) — on renvoie une 400 propre.
+    let name;
+    try {
+      name = decodeURIComponent(path.slice('/api/accounts/'.length)).trim().toLowerCase();
+    } catch (e) {
+      return fail(400, 'Identifiant invalide.');
+    }
     if (!/^[a-z0-9._-]{2,40}$/.test(name)) return fail(400, 'Identifiant invalide.');
     const idx = accounts.findIndex((a) => a.username.toLowerCase() === name);
 
