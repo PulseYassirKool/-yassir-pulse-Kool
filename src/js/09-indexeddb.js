@@ -472,7 +472,7 @@
             chipsBar.classList.remove('hidden');
             chipsBar.innerHTML = state.storedFilesMeta.map(function (fMeta, idx) {
               var removeBtn = ownerCanDelete
-                ? '<button type="button" onclick="window.yassirRemoveStoredFile(' + idx + ')" class="text-slate-400 hover:text-[#FF2A6D] ml-0.5 cursor-pointer" title="Retirer ce fichier du cumul (Propriétaire Admin)"><i class="fa-solid fa-xmark"></i></button>'
+                ? '<button type="button" data-idx="' + idx + '" onclick="window.yassirRemoveStoredFile(+this.getAttribute(\'data-idx\'))" class="text-slate-400 hover:text-[#FF2A6D] ml-0.5 cursor-pointer" title="Retirer ce fichier du cumul (Propriétaire Admin)"><i class="fa-solid fa-xmark"></i></button>'
                 : '';
               return '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#F3EBFF] text-[#6C2BD9] border border-purple-200" title="' + escapeHtml(fMeta.name) + ' (' + fMeta.rowsCount + ' lignes)">' +
                 '<i class="fa-solid fa-file-circle-check text-[#00BFA5]"></i>' +

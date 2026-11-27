@@ -2092,6 +2092,79 @@ test('XSS : Test d\'essai, charge alert(1), raison piégée — Modifier/Supprim
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- G1 (2e audit) : les deux onchange de 22-growth-drop.js ----
+test("G1 : onchange motif/CRM piégés — data-key + getAttribute, rien ne s'exécute, la saisie est enregistrée", async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  w.alert = () => { w.__ALERT__ = true; };
+
+  const makeXlsxFile = (aoa, sheetName, fileName) => {
+    const wb = w.XLSX.utils.book_new();
+    w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(aoa), sheetName);
+    const buf = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    return new w.File([buf], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  };
+
+  // Resto piégé avec commandes W46 (1 livrée) puis W47 (2 livrées) -> en croissance sur W47.
+  const charge = "');window.__xss__=1;//";
+  const restoPiege = "Resto " + charge;
+  const dataAoa = [TARGET_HEADERS_TEST.slice(),
+    yassirRow('09/11/2026', 'YAF-4001', restoPiege, 100, 0, '', ''),
+    yassirRow('16/11/2026', 'YAF-4002', restoPiege, 100, 0, '', ''),
+    yassirRow('17/11/2026', 'YAF-4003', restoPiege, 100, 0, '', '')
+  ];
+  const dataFile = makeXlsxFile(dataAoa, 'Data exp', 'data-exp.xlsx');
+  w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
+  await wait(1200);
+
+  // Resto à 0 commande (portefeuille seul, sans commande) -> input commentaire CRM.
+  w.document.getElementById('inputAmRestName').value = "Zero " + charge;
+  w.document.getElementById('selectAmAgent').value = 'Omar Beldi';
+  w.document.getElementById('inputAmRestVille').value = 'Tunis';
+  w.yassirAddRestoToAm({ preventDefault() {} });
+
+  w.yassirRenderRestaurantAnalysis();
+  await wait(300);
+
+  // 1. Select du motif : data-key présent, pas de charge interpolée dans le onchange.
+  const sel = w.document.querySelector('#growthTableBody select, #dropTableBody select');
+  assert.ok(sel, 'select du motif absent');
+  const cleMotif = sel.getAttribute('data-key');
+  assert.ok(cleMotif && cleMotif.startsWith('w47_'), 'data-key du motif absente ou mal formée : ' + cleMotif);
+  assert.ok(!sel.getAttribute('onchange').includes(charge), 'la charge est interpolée dans le onchange du motif');
+  assert.ok(sel.getAttribute('onchange').includes("getAttribute('data-key')"), 'le onchange ne relit pas data-key');
+  // Note : le harnais jsdom tourne en runScripts 'outside-only' : les gestionnaires
+  // inline ne sont jamais compilés (sel.onchange === null). On exécute donc le
+  // contenu LITTÉRAL de l'attribut onchange avec `this` = l'élément, exactement
+  // comme le ferait le navigateur : si la charge était interpolée dans le code,
+  // elle s'exécuterait ici.
+  const handlerMotif = new w.Function(sel.getAttribute('onchange'));
+  sel.value = 'Promo active';
+  handlerMotif.call(sel);
+  assert.equal(w.__xss__, undefined, 'la charge du motif s\'est exécutée !');
+  assert.equal(w.__ALERT__, undefined, 'alert(1) du motif s\'est exécutée !');
+  // Re-rendu : le motif choisi persiste (clé exacte retrouvée).
+  w.yassirRenderRestaurantAnalysis();
+  const sel2 = w.document.querySelector('#growthTableBody select, #dropTableBody select');
+  assert.equal(sel2.value, 'Promo active', 'le motif choisi n\'a pas été enregistré');
+
+  // 2. Input commentaire CRM : même protection.
+  const input = w.document.querySelector('#zeroOrdersWeekTableBody input[type="text"]');
+  assert.ok(input, 'input commentaire CRM absent');
+  const cleCrm = input.getAttribute('data-key');
+  assert.ok(cleCrm && cleCrm.startsWith('crm_w47_'), 'data-key CRM absente : ' + cleCrm);
+  assert.ok(!input.getAttribute('onchange').includes(charge), 'la charge est interpolée dans le onchange CRM');
+  const handlerCrm = new w.Function(input.getAttribute('onchange'));
+  input.value = 'Appelé, relance semaine prochaine';
+  handlerCrm.call(input);
+  assert.equal(w.__xss__, undefined, 'la charge CRM s\'est exécutée !');
+  w.yassirRenderRestaurantAnalysis();
+  const input2 = w.document.querySelector('#zeroOrdersWeekTableBody input[type="text"]');
+  assert.equal(input2.value, 'Appelé, relance semaine prochaine', 'le commentaire CRM n\'a pas été enregistré');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Semaines (audit 2026-11-27, item 6) : générées en JavaScript ----
 test('Semaines : options générées en JavaScript, 2026 inchangées, 2027 présentes', () => {
   const w = boot();

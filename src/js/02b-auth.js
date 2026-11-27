@@ -270,7 +270,7 @@
             '<td class="px-4 py-2.5 font-mono text-slate-400"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-[10px] font-bold text-slate-600"><i class="fa-solid fa-shield-halved text-[#00BFA5]"></i>Chiffré PBKDF2</span></td>' +
             '<td class="px-4 py-2.5">' + badge + '</td>' +
             '<td class="px-4 py-2.5 text-right whitespace-nowrap">' +
-              '<button type="button" onclick="window.yassirPrefillAccount(' + idx + ')" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#F3EBFF] hover:bg-purple-200 text-[#6C2BD9] transition cursor-pointer">Modifier</button>' +
+              '<button type="button" data-idx="' + idx + '" onclick="window.yassirPrefillAccount(+this.getAttribute(\'data-idx\'))" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#F3EBFF] hover:bg-purple-200 text-[#6C2BD9] transition cursor-pointer">Modifier</button>' +
               deleteBtn +
             '</td>' +
             '</tr>';

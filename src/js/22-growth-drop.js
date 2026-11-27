@@ -578,7 +578,7 @@
           var areaBg = isGrowth ? 'bg-[#D9EAD3]/60' : 'bg-[#F4CCCC]/50';
           return list.map(function (it) {
             var promoCellClass = it.promoResto > 0 ? 'bg-[#3D85C6] text-white font-bold' : 'bg-white text-slate-700';
-            var selectHtml = '<select onchange="window.yassirUpdateGrowthDropReason(\'' + escapeHtml(it.reasonKey).replace(/'/g, "\\'") + '\', this.value)" class="w-28 px-1.5 py-0.5 text-[10px] bg-white border border-slate-300 rounded focus:outline-none">' +
+            var selectHtml = '<select data-key="' + escapeHtml(it.reasonKey) + '" onchange="window.yassirUpdateGrowthDropReason(this.getAttribute(\'data-key\'), this.value)" class="w-28 px-1.5 py-0.5 text-[10px] bg-white border border-slate-300 rounded focus:outline-none">' +
               opts.map(function (op) {
                 return '<option value="' + escapeHtml(op) + '"' + (it.reason === op ? ' selected' : '') + '>' + (op ? escapeHtml(op) : '-- Choisir --') + '</option>';
               }).join('') +
@@ -684,7 +684,7 @@
                 '<td class="px-2 py-1.5 border border-slate-200 text-center font-mono font-bold text-[#FF2A6D]">0</td>' +
                 '<td class="px-2 py-1.5 border border-slate-200 text-center font-mono text-slate-600">' + z.avgLast4 + '</td>' +
                 '<td class="px-2.5 py-1.5 border border-slate-200">' +
-                  '<input type="text" value="' + escapeHtml(z.crmComment) + '" onchange="window.yassirUpdateZeroOrderCrmComment(\'' + escapeHtml(z.crmKey).replace(/'/g, "\\\'") + '\', this.value)" placeholder="Saisir commentaire CRM..." class="w-full px-2.5 py-1 text-[11px] bg-[#F8F9FC] border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F59E0B] focus:bg-white" />' +
+                  '<input type="text" value="' + escapeHtml(z.crmComment) + '" data-key="' + escapeHtml(z.crmKey) + '" onchange="window.yassirUpdateZeroOrderCrmComment(this.getAttribute(\'data-key\'), this.value)" placeholder="Saisir commentaire CRM..." class="w-full px-2.5 py-1 text-[11px] bg-[#F8F9FC] border border-amber-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F59E0B] focus:bg-white" />' +
                 '</td>' +
               '</tr>';
             }).join('');
