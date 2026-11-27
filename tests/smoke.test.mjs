@@ -1529,6 +1529,136 @@ test('Carte profil : budget global pour un compte sans budget personnel, « — 
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Cartes Portefeuilles : même correctif budget que la carte profil ----
+// Mêmes données que le test de la carte profil (Omar LR&LG 15 + offres 0 = 15 ;
+// Nour 0 + 5 = 5 ; Eya 0 + 20 = 20 ; global LR&LG 15, offres 25, total 40).
+// Budgets : Omar 1000, Nour 500, global 1500 ; Eya n'a pas de ligne.
+// Attendu : AM avec ligne -> son budget ; AM sans ligne vu par un compte qui
+// voit tout -> budget global ; aucun budget connu -> « — » partout, jamais
+// 0,00 ni reste négatif. Les montants restent ceux de l'AM, seul le budget
+// vient du résolveur (Budget AM / Budget global).
+test('Cartes Portefeuilles : budget AM, budget global, « — » si aucun budget', async () => {
+  const fmtFR = (d) => String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+  const ilYAJours = (n) => fmtFR(new Date(Date.now() - n * 86400000));
+
+  const build = async (budgetStore, user, pwd, rowsSpec) => {
+    clearSheetCache();
+    installGoogleMock();
+    googleFailAllValues = true;
+    const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
+    const w = dom.window;
+    w.__PULSE_API__ = 'https://api.test';
+    w.localStorage.setItem('yassir_vf_budget_v1', JSON.stringify(budgetStore));
+    w.localStorage.setItem('yassir_vf_offre_participation_v1', JSON.stringify([
+      { area: '', restaurant: 'resto test omar', restaurantNorm: 'resto test omar', cPct: 10, tag: 'Toute la carte', am: 'Omar Beldi', partPct: 10, details: '', startDate: '', endDate: '', periode: '' }
+    ]));
+    w.localStorage.setItem('yassir_vf_am_portfolios_v9', JSON.stringify({
+      'resto test omar': { am: 'Omar Beldi', displayName: 'Resto Test Omar', ville: 'Tunis', segment: 'Top Performer' },
+      'resto test nour': { am: 'Nour Ali', displayName: 'Resto Test Nour', ville: 'Tunis', segment: 'Top Performer' },
+      'resto test eya': { am: 'Eya Majdoub', displayName: 'Resto Test Eya', ville: 'Tunis', segment: 'Top Performer' }
+    }));
+    w.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.startsWith('https://api.test')) {
+        const r = await handle(new Request(u, { method: opts.method || 'GET', body: opts.body, headers: { Origin: 'http://localhost', ...(opts.headers || {}) } }), env);
+        return { ok: r.ok, status: r.status, json: () => r.json(), text: () => r.text() };
+      }
+      sheetCalls.push(u);
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+    };
+    w.addEventListener('error', (e) => errors.push(e.message));
+    w.addEventListener('unhandledrejection', (e) => errors.push(String(e.reason)));
+    w.eval(bundle);
+    await login(w, user, pwd);
+    const makeXlsxFile = (aoa, sheetName, fileName) => {
+      const wb = w.XLSX.utils.book_new();
+      w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(aoa), sheetName);
+      const buf = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      return new w.File([buf], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    };
+    const idxOrigDeliv = TARGET_HEADERS_TEST.indexOf('original delivery amount');
+    const idxDeliv = TARGET_HEADERS_TEST.indexOf('delivery amount');
+    const idxAmtRest = TARGET_HEADERS_TEST.indexOf('amount to restaurant');
+    const dataAoa = [TARGET_HEADERS_TEST.slice()];
+    rowsSpec.forEach((spec, i) => {
+      const r = yassirRow(ilYAJours(spec.jours), 'YAF-90' + (10 + i), spec.resto, spec.itemTot, spec.remise, '', '');
+      r[idxOrigDeliv] = spec.origDeliv; r[idxDeliv] = spec.deliv; r[idxAmtRest] = spec.itemTot;
+      dataAoa.push(r);
+    });
+    const dataFile = makeXlsxFile(dataAoa, 'Data exp', 'data-exp.xlsx');
+    w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
+    await wait(1200);
+    w.yassirSwitchTab('portefeuilles');
+    await wait(600);
+    return w;
+  };
+  const carte = (w, am) => {
+    const el = w.document.querySelector('#amSummaryCardsGrid [data-key="' + am + '"]');
+    assert.ok(el, 'carte ' + am + ' absente');
+    return el;
+  };
+  const rowsStd = [
+    { jours: 3, resto: 'Resto Test Omar', itemTot: 100, remise: 0, origDeliv: 20, deliv: 5 },
+    { jours: 3, resto: 'Resto Test Nour', itemTot: 50, remise: 5, origDeliv: 10, deliv: 10 },
+    { jours: 2, resto: 'Resto Test Eya', itemTot: 200, remise: 20, origDeliv: 0, deliv: 0 }
+  ];
+  const budgets = { byAm: { 'Omar Beldi': 1000, 'Nour Ali': 500 }, global: 1500 };
+
+  // (a) Lecture seule : Omar et Nour ont leur budget, Eya (sans ligne) -> global.
+  const wA = await build(budgets, 'ahmed.marrouki', 'Ahmed-Test-12345', rowsStd);
+  const omarA = carte(wA, 'Omar Beldi');
+  assert.ok(omarA.textContent.includes('Budget AM (TND)'), 'libellé Omar (a)');
+  assert.ok(omarA.textContent.includes('1000.00 TND'), 'budget Omar (a)');
+  assert.ok(omarA.textContent.includes('985.00 TND'), 'reste Omar (a)');
+  assert.ok(omarA.textContent.includes('15.00 TND (1.5%)'), 'LR&LG Omar (a)');
+  assert.ok(omarA.textContent.includes('0.00 TND (0.0%)'), 'offres Omar (a)');
+  assert.ok(omarA.textContent.includes('1.5 %'), '% Omar (a)');
+  const nourA = carte(wA, 'Nour Ali');
+  assert.ok(nourA.textContent.includes('Budget AM (TND)'), 'libellé Nour (a)');
+  assert.ok(nourA.textContent.includes('500.00 TND'), 'budget Nour (a)');
+  assert.ok(nourA.textContent.includes('495.00 TND'), 'reste Nour (a)');
+  assert.ok(nourA.textContent.includes('5.00 TND (1.0%)'), 'offres Nour (a)');
+  const eyaA = carte(wA, 'Eya Majdoub');
+  assert.ok(eyaA.textContent.includes('Budget global (TND)'), 'libellé Eya = global (a) : ' + eyaA.textContent.slice(0, 400));
+  assert.ok(eyaA.textContent.includes('1500.00 TND'), 'budget global Eya (a)');
+  assert.ok(eyaA.textContent.includes('1480.00 TND'), 'reste Eya = global − ses 20 (a)');
+  assert.ok(eyaA.textContent.includes('20.00 TND (1.3%)'), 'offres Eya (a)');
+  assert.ok(eyaA.textContent.includes('1.3 %'), '% Eya (a)');
+  assert.ok(!wA.document.getElementById('amSummaryCardsGrid').textContent.includes('-'), 'signe négatif dans les cartes (a)');
+
+  // (b) Aucun budget chargé -> « — » partout, jamais 0,00 ni reste négatif.
+  const wB = await build({ byAm: {}, global: 0 }, 'ahmed.marrouki', 'Ahmed-Test-12345', rowsStd);
+  const gridB = wB.document.getElementById('amSummaryCardsGrid');
+  assert.ok(gridB.textContent.includes('—'), '« — » absent (b)');
+  assert.ok(!gridB.textContent.includes('-'), 'signe négatif présent (b)');
+  ['Omar Beldi', 'Nour Ali', 'Eya Majdoub'].forEach(function (am) {
+    const c = carte(wB, am);
+    assert.ok(/Budget AM \(TND\)<\/span><strong[^>]*>—<\/strong>/.test(c.innerHTML), 'budget « — » pour ' + am + ' (b)');
+    assert.ok(/Reste Budget \(TND\)<\/span><strong[^>]*>—<\/strong>/.test(c.innerHTML), 'reste « — » pour ' + am + ' (b)');
+    assert.ok(/% Budget Utilisé \(LR\/LG \+ Offres\)<\/span><strong[^>]*>—<\/strong>/.test(c.innerHTML), '% « — » pour ' + am + ' (b)');
+  });
+
+  // (c) AM avec sa propre ligne -> son budget, comportement inchangé.
+  const wC = await build(budgets, 'omar.beldi', 'Omar-Test-12345', rowsStd);
+  const cardsC = wC.document.querySelectorAll('#amSummaryCardsGrid > div');
+  assert.equal(cardsC.length, 1, 'un AM ne voit que sa carte (c)');
+  const omarC = carte(wC, 'Omar Beldi');
+  assert.ok(omarC.textContent.includes('Budget AM (TND)'), 'libellé Omar (c)');
+  assert.ok(omarC.textContent.includes('1000.00 TND'), 'budget Omar (c)');
+  assert.ok(omarC.textContent.includes('985.00 TND'), 'reste Omar (c)');
+
+  // (d) AM sans ligne de budget -> « — » (le budget global ne se montre
+  // qu'à ceux qui voient tout, jamais à l'AM lui-même).
+  const wD = await build({ byAm: { 'Nour Ali': 500 }, global: 1500 }, 'omar.beldi', 'Omar-Test-12345', rowsStd);
+  const omarD = carte(wD, 'Omar Beldi');
+  assert.ok(!omarD.textContent.includes('1500.00 TND'), 'budget global montré à un AM sans ligne (d)');
+  assert.ok(/Budget AM \(TND\)<\/span><strong[^>]*>—<\/strong>/.test(omarD.innerHTML), 'budget « — » pour Omar sans ligne (d)');
+  assert.ok(/Reste Budget \(TND\)<\/span><strong[^>]*>—<\/strong>/.test(omarD.innerHTML), 'reste « — » pour Omar sans ligne (d)');
+  assert.ok(!omarD.textContent.includes('-'), 'signe négatif présent (d)');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Mission C : mot de passe changé par le proprio -> session AM tuée ----
 test('Mot de passe AM changé par le proprio : la session AM meurt au prochain contrôle (401 -> écran de connexion)', async () => {
   const wAm = boot();

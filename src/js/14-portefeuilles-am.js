@@ -179,15 +179,28 @@
           var pctLgGlobal = globalStats.livraisonGratuiteCount > 0
             ? ((st.livraisonGratuiteCount / globalStats.livraisonGratuiteCount) * 100).toFixed(1)
             : '0.0';
-          var pctLrLgVsBudgetAm = st.budgetTnd > 0
-            ? ((st.lrLgTnd / st.budgetTnd) * 100).toFixed(1)
-            : '0.0';
-          var pctOfferPartVsBudgetAm = st.budgetTnd > 0
-            ? ((st.offerPartTnd / st.budgetTnd) * 100).toFixed(1)
-            : '0.0';
-          var pctTotalBudgetUsed = st.budgetTnd > 0
-            ? ((st.totalBudgetUsedTnd / st.budgetTnd) * 100).toFixed(1)
-            : '0.0';
+          // Budget de la carte : même règle que la carte profil
+          // (commit 4b2bf18f) — budget de l'AM s'il a une ligne, sinon
+          // budget global de la marque active si l'utilisateur voit tout
+          // (proprio / lecture seule), sinon budget inconnu : « — »
+          // partout, jamais 0,00 ni reste négatif. Les montants LR/LG et
+          // offres restent ceux de l'AM ; seul le budget vient du résolveur.
+          var budgetRes = (typeof window.yassirResoudreBudgetCarteProfil === 'function')
+            ? window.yassirResoudreBudgetCarteProfil(am)
+            : { stats: st, budgetTnd: st.budgetTnd, budgetConnu: st.budgetTnd > 0, libelle: 'Budget AM' };
+          var budgetConnu = !!budgetRes.budgetConnu;
+          var budgetAffiche = budgetConnu ? budgetRes.budgetTnd : 0;
+          var budgetLibelle = budgetRes.libelle || 'Budget AM';
+          var pctLrLgVsBudgetAm = budgetConnu
+            ? ((st.lrLgTnd / budgetAffiche) * 100).toFixed(1)
+            : null;
+          var pctOfferPartVsBudgetAm = budgetConnu
+            ? ((st.offerPartTnd / budgetAffiche) * 100).toFixed(1)
+            : null;
+          var pctTotalBudgetUsed = budgetConnu
+            ? ((st.totalBudgetUsedTnd / budgetAffiche) * 100).toFixed(1)
+            : null;
+          var resteAffiche = budgetConnu ? (budgetAffiche - st.totalBudgetUsedTnd) : null;
 
           var zeroOrdersBlock = showZeroStats
             ? '<div class="col-span-2 mt-1 pt-1.5 border-t border-dashed border-rose-200 flex items-center justify-between">' +
@@ -211,13 +224,13 @@
               '<div class="text-right"><span class="text-slate-400 block">% Offres / Global Livrées</span><strong class="text-[#FF2A6D] text-xs">' + pctOffresGlobal + ' %</strong></div>' +
               '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Livraison Gratuite (Livrées)</span><strong class="text-[#00897B] font-mono">' + st.livraisonGratuiteCount + ' cmd</strong></div>' +
               '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">% LG / Global Livrées</span><strong class="text-[#00897B] text-xs">' + pctLgGlobal + ' %</strong></div>' +
-              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">LR & LG (Livrées)</span><strong class="text-[#6C2BD9] font-mono">' + st.lrLgTnd.toFixed(2) + ' TND (' + pctLrLgVsBudgetAm + '%)</strong></div>' +
-              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Part. Offres (Livrées)</span><strong class="text-[#FF2A6D] font-mono">' + st.offerPartTnd.toFixed(2) + ' TND (' + pctOfferPartVsBudgetAm + '%)</strong></div>' +
-              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Budget AM (TND)</span><strong class="text-[#1A1A2E] font-mono">' + st.budgetTnd.toFixed(2) + ' TND</strong></div>' +
-              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Reste Budget (TND)</span><strong class="' + (st.remainingBudgetTnd >= 0 ? 'text-[#00897B]' : 'text-[#FF2A6D]') + ' font-mono font-extrabold">' + st.remainingBudgetTnd.toFixed(2) + ' TND</strong></div>' +
+              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">LR & LG (Livrées)</span><strong class="text-[#6C2BD9] font-mono">' + st.lrLgTnd.toFixed(2) + ' TND' + (pctLrLgVsBudgetAm !== null ? ' (' + pctLrLgVsBudgetAm + '%)' : ' (—)') + '</strong></div>' +
+              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Part. Offres (Livrées)</span><strong class="text-[#FF2A6D] font-mono">' + st.offerPartTnd.toFixed(2) + ' TND' + (pctOfferPartVsBudgetAm !== null ? ' (' + pctOfferPartVsBudgetAm + '%)' : ' (—)') + '</strong></div>' +
+              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">' + budgetLibelle + ' (TND)</span><strong class="text-[#1A1A2E] font-mono">' + (budgetConnu ? budgetAffiche.toFixed(2) + ' TND' : '—') + '</strong></div>' +
+              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Reste Budget (TND)</span><strong class="' + (budgetConnu ? (resteAffiche >= 0 ? 'text-[#00897B]' : 'text-[#FF2A6D]') : 'text-slate-400') + ' font-mono font-extrabold">' + (budgetConnu ? resteAffiche.toFixed(2) + ' TND' : '—') + '</strong></div>' +
               '<div class="col-span-2 bg-[#F3EBFF]/60 px-2.5 py-1.5 rounded-xl space-y-1">' +
-                '<div class="flex items-center justify-between"><span class="text-slate-600 font-semibold">% Budget Utilisé (LR/LG + Offres)</span><strong class="' + (Number(pctTotalBudgetUsed) >= 95 ? 'text-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'text-amber-600' : 'text-[#00897B]')) + ' text-xs font-extrabold">' + pctTotalBudgetUsed + ' %</strong></div>' +
-                '<div class="w-full h-1.5 rounded-full bg-purple-200/70 overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ' + (Number(pctTotalBudgetUsed) >= 95 ? 'bg-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'bg-amber-500' : 'bg-[#00BFA5]')) + '" style="width:' + Math.min(100, Math.max(0, Number(pctTotalBudgetUsed))) + '%"></div></div>' +
+                '<div class="flex items-center justify-between"><span class="text-slate-600 font-semibold">% Budget Utilisé (LR/LG + Offres)</span><strong class="' + (budgetConnu ? (Number(pctTotalBudgetUsed) >= 95 ? 'text-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'text-amber-600' : 'text-[#00897B]')) : 'text-slate-400') + ' text-xs font-extrabold">' + (budgetConnu ? pctTotalBudgetUsed + ' %' : '—') + '</strong></div>' +
+                '<div class="w-full h-1.5 rounded-full bg-purple-200/70 overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ' + (budgetConnu ? (Number(pctTotalBudgetUsed) >= 95 ? 'bg-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'bg-amber-500' : 'bg-[#00BFA5]')) : 'bg-slate-300') + '" style="width:' + (budgetConnu ? Math.min(100, Math.max(0, Number(pctTotalBudgetUsed))) : 0) + '%"></div></div>' +
               '</div>' +
               zeroOrdersBlock +
             '</div>' +
@@ -374,15 +387,28 @@
           var pctOffresGlobal = globalStats.totalOffres > 0
             ? ((st.totalOffres / globalStats.totalOffres) * 100).toFixed(1)
             : '0.0';
-          var pctLrLgVsBudgetAm = st.budgetTnd > 0
-            ? ((st.lrLgTnd / st.budgetTnd) * 100).toFixed(1)
-            : '0.0';
-          var pctOfferPartVsBudgetAm = st.budgetTnd > 0
-            ? ((st.offerPartTnd / st.budgetTnd) * 100).toFixed(1)
-            : '0.0';
-          var pctTotalBudgetUsed = st.budgetTnd > 0
-            ? ((st.totalBudgetUsedTnd / st.budgetTnd) * 100).toFixed(1)
-            : '0.0';
+          // Budget de la carte : même règle que la carte profil
+          // (commit 4b2bf18f) — budget de l'AM s'il a une ligne, sinon
+          // budget global de la marque active si l'utilisateur voit tout
+          // (proprio / lecture seule), sinon budget inconnu : « — »
+          // partout, jamais 0,00 ni reste négatif. Les montants LR/LG et
+          // offres restent ceux de l'AM ; seul le budget vient du résolveur.
+          var budgetRes = (typeof window.yassirResoudreBudgetCarteProfil === 'function')
+            ? window.yassirResoudreBudgetCarteProfil(am)
+            : { stats: st, budgetTnd: st.budgetTnd, budgetConnu: st.budgetTnd > 0, libelle: 'Budget AM' };
+          var budgetConnu = !!budgetRes.budgetConnu;
+          var budgetAffiche = budgetConnu ? budgetRes.budgetTnd : 0;
+          var budgetLibelle = budgetRes.libelle || 'Budget AM';
+          var pctLrLgVsBudgetAm = budgetConnu
+            ? ((st.lrLgTnd / budgetAffiche) * 100).toFixed(1)
+            : null;
+          var pctOfferPartVsBudgetAm = budgetConnu
+            ? ((st.offerPartTnd / budgetAffiche) * 100).toFixed(1)
+            : null;
+          var pctTotalBudgetUsed = budgetConnu
+            ? ((st.totalBudgetUsedTnd / budgetAffiche) * 100).toFixed(1)
+            : null;
+          var resteAffiche = budgetConnu ? (budgetAffiche - st.totalBudgetUsedTnd) : null;
 
           var zeroOrdersBlock = showZeroStats
             ? '<div class="col-span-2 mt-1 pt-1.5 border-t border-dashed border-rose-200 flex items-center justify-between">' +
@@ -404,13 +430,13 @@
               '<div class="text-right"><span class="text-slate-400 block">% Livrées / Global</span><strong class="text-[#00897B] text-xs">' + pctLivreesGlobal + ' %</strong></div>' +
               '<div><span class="text-slate-400 block">Offres Livrées</span><strong class="text-[#FF2A6D]">' + st.totalOffres + ' (' + st.restosOffreCount + ' r.)</strong></div>' +
               '<div class="text-right"><span class="text-slate-400 block">% Offres / Global</span><strong class="text-[#FF2A6D] text-xs">' + pctOffresGlobal + ' %</strong></div>' +
-              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">LR & LG (Livrées)</span><strong class="text-[#6C2BD9] font-mono">' + st.lrLgTnd.toFixed(2) + ' TND (' + pctLrLgVsBudgetAm + '%)</strong></div>' +
-              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Part. Offres (Livrées)</span><strong class="text-[#FF2A6D] font-mono">' + st.offerPartTnd.toFixed(2) + ' TND (' + pctOfferPartVsBudgetAm + '%)</strong></div>' +
-              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Budget AM (TND)</span><strong class="text-[#1A1A2E] font-mono">' + st.budgetTnd.toFixed(2) + ' TND</strong></div>' +
-              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Reste Budget (TND)</span><strong class="' + (st.remainingBudgetTnd >= 0 ? 'text-[#00897B]' : 'text-[#FF2A6D]') + ' font-mono font-extrabold">' + st.remainingBudgetTnd.toFixed(2) + ' TND</strong></div>' +
+              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">LR & LG (Livrées)</span><strong class="text-[#6C2BD9] font-mono">' + st.lrLgTnd.toFixed(2) + ' TND' + (pctLrLgVsBudgetAm !== null ? ' (' + pctLrLgVsBudgetAm + '%)' : ' (—)') + '</strong></div>' +
+              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Part. Offres (Livrées)</span><strong class="text-[#FF2A6D] font-mono">' + st.offerPartTnd.toFixed(2) + ' TND' + (pctOfferPartVsBudgetAm !== null ? ' (' + pctOfferPartVsBudgetAm + '%)' : ' (—)') + '</strong></div>' +
+              '<div class="pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">' + budgetLibelle + ' (TND)</span><strong class="text-[#1A1A2E] font-mono">' + (budgetConnu ? budgetAffiche.toFixed(2) + ' TND' : '—') + '</strong></div>' +
+              '<div class="text-right pt-1 border-t border-purple-100/70"><span class="text-slate-400 block">Reste Budget (TND)</span><strong class="' + (budgetConnu ? (resteAffiche >= 0 ? 'text-[#00897B]' : 'text-[#FF2A6D]') : 'text-slate-400') + ' font-mono font-extrabold">' + (budgetConnu ? resteAffiche.toFixed(2) + ' TND' : '—') + '</strong></div>' +
               '<div class="col-span-2 bg-[#F3EBFF]/60 px-2.5 py-1.5 rounded-xl space-y-1">' +
-                '<div class="flex items-center justify-between"><span class="text-slate-600 font-semibold">% Budget Utilisé (LR/LG + Offres)</span><strong class="' + (Number(pctTotalBudgetUsed) >= 95 ? 'text-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'text-amber-600' : 'text-[#00897B]')) + ' text-xs font-extrabold">' + pctTotalBudgetUsed + ' %</strong></div>' +
-                '<div class="w-full h-1.5 rounded-full bg-purple-200/70 overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ' + (Number(pctTotalBudgetUsed) >= 95 ? 'bg-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'bg-amber-500' : 'bg-[#00BFA5]')) + '" style="width:' + Math.min(100, Math.max(0, Number(pctTotalBudgetUsed))) + '%"></div></div>' +
+                '<div class="flex items-center justify-between"><span class="text-slate-600 font-semibold">% Budget Utilisé (LR/LG + Offres)</span><strong class="' + (budgetConnu ? (Number(pctTotalBudgetUsed) >= 95 ? 'text-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'text-amber-600' : 'text-[#00897B]')) : 'text-slate-400') + ' text-xs font-extrabold">' + (budgetConnu ? pctTotalBudgetUsed + ' %' : '—') + '</strong></div>' +
+                '<div class="w-full h-1.5 rounded-full bg-purple-200/70 overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ' + (budgetConnu ? (Number(pctTotalBudgetUsed) >= 95 ? 'bg-[#FF2A6D]' : (Number(pctTotalBudgetUsed) >= 75 ? 'bg-amber-500' : 'bg-[#00BFA5]')) : 'bg-slate-300') + '" style="width:' + (budgetConnu ? Math.min(100, Math.max(0, Number(pctTotalBudgetUsed))) : 0) + '%"></div></div>' +
               '</div>' +
               zeroOrdersBlock +
             '</div>' +
