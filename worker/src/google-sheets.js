@@ -120,7 +120,15 @@ export async function readSheetRange(env, spreadsheetId, range, fetchImpl = fetc
     throw new SheetsError(400, 'Plage invalide.');
   }
   const token = await getAccessToken(env, fetchImpl);
-  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+  // Correctif 2026-11-27 (audit point 2 — montants lus tels qu'affichés) :
+  // sans valueRenderOption, l'API renvoie les valeurs FORMATÉES : une cellule
+  // affichée « 1 235 » alors qu'elle contient 1 234,57 est lue 1 235, et les
+  // décimales dépendent de la locale. Avec UNFORMATTED_VALUE, les nombres
+  // arrivent exacts (1 234,57) et les dates arrivent comme chaînes formatées
+  // (dateTimeRenderOption=FORMATTED_STRING) au lieu de numéros de série —
+  // le front les reconnaît alors comme des dates et ne les somme pas comme
+  // des montants (garde anti-date dans purgerNombre).
+  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`;
   let res;
   try {
     res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -178,7 +186,9 @@ export async function readSheetRowsChunk(env, spreadsheetId, title, startRow, en
   const end = Math.max(start, Math.floor(endRow) || start);
   const token = await getAccessToken(env, fetchImpl);
   const range = `${quoteSheetTitle(title)}!A${start}:ZZ${end}`;
-  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
+  // Valeurs non formatées (voir readSheetRange) : nombres exacts, dates en
+  // chaînes formatées — jamais de numéro de série Excel dans les montants.
+  const url = `${SHEETS_API}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`;
   let res;
   try {
     res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` } });

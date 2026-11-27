@@ -92,6 +92,12 @@ test('lecture de plage : valeurs renvoyées ; plage vide -> []', async () => {
   const sheetsCall = calls.find((c) => String(c.url).includes('sheets.googleapis.com'));
   assert.equal(sheetsCall.opts.headers.Authorization, 'Bearer ya29.test-token');
   assert.ok(String(sheetsCall.url).includes('/values/Budget!A1%3AB3') || String(sheetsCall.url).includes('/values/Budget%21A1%3AB3'));
+  // Correctif 2026-11-27 (audit point 2 — montants lus tels qu'affichés) :
+  // les valeurs doivent être demandées NON formatées (nombres exacts) avec
+  // les dates en chaînes formatées, sinon une cellule affichée « 1 235 »
+  // qui contient 1 234,57 est lue 1 235.
+  assert.ok(String(sheetsCall.url).includes('valueRenderOption=UNFORMATTED_VALUE'), 'valueRenderOption=UNFORMATTED_VALUE attendu dans ' + String(sheetsCall.url));
+  assert.ok(String(sheetsCall.url).includes('dateTimeRenderOption=FORMATTED_STRING'), 'dateTimeRenderOption=FORMATTED_STRING attendu dans ' + String(sheetsCall.url));
 
   clearGoogleTokenCache();
   const empty = mockGoogleFetch({ valuesBody: { range: 'A1:B1', majorDimension: 'ROWS' } });
