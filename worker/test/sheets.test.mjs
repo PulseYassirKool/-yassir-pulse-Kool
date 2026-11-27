@@ -548,3 +548,38 @@ test('details-kool : en-tête « Order_id » (underscore) — l\'onglet n\'est p
     assert.deepEqual(r.json.rows.slice(1).map((x) => `${x[0]}:${x[1]}`), ['CMD-1:Pizza', 'CMD-1:Burger', 'CMD-4:Frites']);
   } finally { restoreFetch(originalFetch); }
 });
+
+
+test('findRestaurantCol : « restaurant name » exact avant « Restaurant ID » (diagnostic 2026-11-27)', () => {
+  // Data Yassir : « Restaurant ID » (colonne 23) précède « restaurant name »
+  // (colonne 24). L'ancien 1er includes('restaurant') prenait l'ID et le
+  // filtre AM comparait des IDs opaques à des noms -> 0 ligne pour tous les AM.
+  assert.equal(findRestaurantCol(['order id', 'order day', 'restaurant id', 'restaurant name', 'total']), 3);
+  // Repli includes quand aucun en-tête exact n'existe.
+  assert.equal(findRestaurantCol(['order id', 'restaurant id', 'total']), 1);
+  assert.equal(findRestaurantCol(['date', 'n° commande', 'restaurant', 'montant']), 2);
+});
+
+
+test('data-oct : « Restaurant ID » avant « restaurant name » — l\'AM voit ses lignes', async () => {
+  const originalFetch = globalThis.fetch;
+  installMock();
+  try {
+    // Même disposition que la vraie Data Yassir : colonne « Restaurant ID »
+    // (IDs opaques) AVANT « restaurant name ». Avant le correctif, l'AM
+    // recevait 0 ligne (filtre sur les IDs).
+    sheetsData[OCT]['Data exp'] = [
+      ['order id', 'order day', 'Restaurant ID', 'restaurant name', 'total'],
+      ['1001', '2026-10-05', '695d184073002c8927c23c2e', 'Resto Omar 1', '40'],
+      ['1002', '2026-10-06', '695d184073002c8927c23c2f', 'Resto Eya 1', '50'],
+      ['1003', '2026-10-07', '695d184073002c8927c23c30', 'Resto Autre', '30']
+    ];
+    const owner = await login('proprio', 'Secret-Proprio-1');
+    const all = await call('GET', '/api/sheets/data-oct?brand=yassir', null, owner);
+    assert.equal(all.json.totalRows, 4); // 1001, 1002 (55), 1003, 1004
+    const omar = await login('omar.beldi', 'Omar-Password-2');
+    const rOmar = await call('GET', '/api/sheets/data-oct?brand=yassir', null, omar);
+    assert.equal(rOmar.json.totalRows, 2);
+    assert.deepEqual(rOmar.json.rows.slice(1).map((r) => r[0]), ['1001', '1004']);
+  } finally { restoreFetch(originalFetch); }
+});

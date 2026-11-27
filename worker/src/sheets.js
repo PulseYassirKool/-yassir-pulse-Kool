@@ -101,7 +101,15 @@ function findCol(headersNorm, predicate) {
   return -1;
 }
 export function findRestaurantCol(headersNorm) {
-  return findCol(headersNorm, (h) => RESTO_HEADERS.includes(h) || h.includes('restaurant') || h.includes('partenaire') || h.includes('store'));
+  // Correspondance exacte d'abord : « Restaurant ID » contient
+  // « restaurant » mais n'est pas le nom du restaurant. Avant, le 1er
+  // includes('restaurant') trouvait « Restaurant ID » (colonne 23 de la
+  // Data Yassir, avant « restaurant name » colonne 24) et le filtre AM
+  // comparait des IDs opaques à des noms → 0 ligne pour tous les AM
+  // sur les données Yassir (diagnostic 2026-11-27).
+  const exact = findCol(headersNorm, (h) => RESTO_HEADERS.includes(h));
+  if (exact !== -1) return exact;
+  return findCol(headersNorm, (h) => h.includes('restaurant') || h.includes('partenaire') || h.includes('store'));
 }
 function findAppCol(headersNorm) {
   return headersNorm.indexOf('app');
