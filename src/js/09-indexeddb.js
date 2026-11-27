@@ -800,6 +800,13 @@
          Format identique à l'ancien (valeur « AAAA-MM-JJ|AAAA-MM-JJ|SNN »,
          libellé « SNN (JJ/MM → JJ/MM) ») : les semaines 2026 générées
          sont strictement identiques aux anciennes options en dur.
+         M3 (2026-11-27) : options groupées par année (<optgroup>) et année
+         dans chaque libellé (« S47 2026 (16/11 → 22/11) ») — sans année,
+         S47 2027 (22→28/11) était indistinguable de S47 2026 (16→22/11)
+         et l'utilisateur avait choisi la mauvaise année. Les VALEURS sont
+         strictement inchangées (« AAAA-MM-JJ|AAAA-MM-JJ|SNN ») : les
+         sélecteurs de semaine et de semaine précédente continuent de
+         fonctionner sans autre retouche.
          ======================================================================== */
       function _pad2Semaines(n) { return (n < 10 ? '0' : '') + n; }
       function _formatDateISO(d) { return d.getFullYear() + '-' + _pad2Semaines(d.getMonth() + 1) + '-' + _pad2Semaines(d.getDate()); }
@@ -829,13 +836,15 @@
         var html = '<option value="">Semaine...</option>';
         annees.forEach(function (annee) {
           var nb = _nombreSemainesISO(annee);
+          html += '<optgroup label="' + annee + '">';
           for (var s = 1; s <= nb; s++) {
             var debut = _lundiSemaineISO(annee, s);
             var fin = new Date(debut);
             fin.setDate(fin.getDate() + 6);
             var label = 'S' + _pad2Semaines(s);
-            html += '<option value="' + _formatDateISO(debut) + '|' + _formatDateISO(fin) + '|' + label + '">' + label + ' (' + _formatDateFR(debut) + ' → ' + _formatDateFR(fin) + ')</option>';
+            html += '<option value="' + _formatDateISO(debut) + '|' + _formatDateISO(fin) + '|' + label + '">' + label + ' ' + annee + ' (' + _formatDateFR(debut) + ' → ' + _formatDateFR(fin) + ')</option>';
           }
+          html += '</optgroup>';
         });
         ['filterWeekSelect', 'filterPrevWeekSelect'].forEach(function (id) {
           var sel = document.getElementById(id);

@@ -2621,17 +2621,39 @@ test('Semaines : options générées en JavaScript, 2026 inchangées, 2027 prés
   // Plus aucune option en dur dans le HTML.
   assert.ok(!html.includes('2025-12-29|2026-01-04|S01'), 'options 2026 encore en dur dans index.html');
   assert.ok(!html.includes('2026-12-28|2027-01-03|S53'), 'options 2026 encore en dur dans index.html');
-  // 2026 strictement identique à l'ancienne liste en dur (valeurs + libellés).
+  // 2026 strictement identique à l'ancienne liste en dur (valeurs inchangées ;
+  // libellés avec l'année depuis M3 : « S47 2026 (16/11 → 22/11) »).
   assert.ok(values.includes('2025-12-29|2026-01-04|S01'), 'S01 2026 absente');
-  assert.ok(labels.includes('S01 (29/12 → 04/01)'), 'libellé S01 2026 incorrect');
+  assert.ok(labels.includes('S01 2026 (29/12 → 04/01)'), 'libellé S01 2026 incorrect');
   assert.ok(values.includes('2026-12-28|2027-01-03|S53'), 'S53 2026 absente');
-  assert.ok(labels.includes('S53 (28/12 → 03/01)'), 'libellé S53 2026 incorrect');
+  assert.ok(labels.includes('S53 2026 (28/12 → 03/01)'), 'libellé S53 2026 incorrect');
   // Année suivante présente : le filtre fonctionne en janvier 2027 et après.
   assert.ok(values.includes('2027-01-04|2027-01-10|S01'), 'S01 2027 absente');
-  assert.ok(labels.includes('S01 (04/01 → 10/01)'), 'libellé S01 2027 incorrect');
+  assert.ok(labels.includes('S01 2027 (04/01 → 10/01)'), 'libellé S01 2027 incorrect');
+  // M3 : groupement par année (<optgroup>) et année dans chaque libellé —
+  // c'est ce qui a fait choisir S47 2027 au lieu de S47 2026.
+  const annee = new Date().getFullYear();
+  const groupes = [...sel.querySelectorAll('optgroup')].map((g) => g.getAttribute('label'));
+  assert.deepEqual(groupes, [String(annee - 1), String(annee), String(annee + 1)], 'groupes par année incorrects : ' + JSON.stringify(groupes));
+  [...sel.options].forEach(function (o) {
+    if (!o.value) return;
+    // L'année du libellé est l'année ISO de la semaine (celle du groupe),
+    // pas celle du lundi : S01 2026 commence le 29/12/2025.
+    assert.equal(o.parentElement.tagName, 'OPTGROUP', 'option hors groupe : ' + o.textContent);
+    var anneeGroupe = o.parentElement.getAttribute('label');
+    assert.ok(o.textContent.includes(' ' + anneeGroupe + ' ('), 'libellé sans année du groupe : ' + o.textContent);
+    assert.ok(/^S\d{2} \d{4} \(\d{2}\/\d{2} → \d{2}\/\d{2}\)$/.test(o.textContent), 'format de libellé inattendu : ' + o.textContent);
+  });
+  // La semaine qui a piégé l'utilisateur : S47 2026 (16→22/11) et S47 2027
+  // (22→28/11) ont des valeurs et des libellés différents.
+  assert.ok(values.includes('2026-11-16|2026-11-22|S47'), 'S47 2026 absente');
+  assert.ok(labels.includes('S47 2026 (16/11 → 22/11)'), 'libellé S47 2026 incorrect');
+  assert.ok(values.includes('2027-11-22|2027-11-28|S47'), 'S47 2027 absente');
+  assert.ok(labels.includes('S47 2027 (22/11 → 28/11)'), 'libellé S47 2027 incorrect');
   // Les deux sélecteurs ont exactement les mêmes options.
   assert.equal(prev.options.length, sel.options.length, 'les deux sélecteurs diffèrent');
   assert.deepEqual([...prev.options].map((o) => o.value), values, 'options du sélecteur précédent différentes');
+  assert.deepEqual([...prev.querySelectorAll('optgroup')].map((g) => g.getAttribute('label')), groupes, 'groupes du sélecteur précédent différents');
   // Nombre d'options : 1 vide + semaines ISO (année-1, année, année+1).
   // Nombre de semaines ISO d'une année (52 ou 53), calculé indépendamment :
   // le jeudi de la semaine du 28 décembre donne le numéro de la dernière semaine.
@@ -2642,7 +2664,6 @@ test('Semaines : options générées en JavaScript, 2026 inchangées, 2027 prés
     const jourAnnee = Math.round((jeudi - new Date(jeudi.getFullYear(), 0, 1)) / 86400000) + 1;
     return Math.ceil(jourAnnee / 7);
   };
-  const annee = new Date().getFullYear();
   assert.equal(values.length, 1 + nbSemainesISO(annee - 1) + nbSemainesISO(annee) + nbSemainesISO(annee + 1), 'nombre d\'options incorrect');
   assert.equal(values[1].split('|')[2], 'S01', 'première semaine incorrecte');
   assert.ok(values[values.length - 1].endsWith('|S' + String(nbSemainesISO(annee + 1)).padStart(2, '0')), 'dernière semaine incorrecte');
