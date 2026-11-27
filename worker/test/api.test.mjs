@@ -83,7 +83,13 @@ test('bootstrap restreint (G3 suite) : le proprio voit tout, un AM ne voit ni le
     { username: 'omar.beldi', hash: await hashPassword('Omar-Password-2'), role: 'am', displayName: 'Omar', amName: 'Omar Beldi', protected: false }
   ]));
   kvStore.set('config', JSON.stringify({ live: { X: 'secret-id', HISTORICAL_MONTHS: [{ label: 'Octobre' }] }, kool: { DATA_SHEET_ID: 'kool-id' }, defaultOffreRules: [{ restaurant: 'resto secours', cPct: 10 }] }));
-  kvStore.set('defaults', JSON.stringify({ commissions: { a: 1 }, portfolios: {} }));
+  kvStore.set('defaults', JSON.stringify({
+    commissions: { 'resto omar': 20, 'resto nour': 15 },
+    portfolios: {
+      'Omar Beldi': [['Tunis', 'Top Performer', 'Resto Omar']],
+      'Nour Ali': [['Sousse', 'Long Tail', 'Resto Nour']]
+    }
+  }));
   const owner = (await call('POST', '/api/login', { username: 'proprio', password: 'Secret-Proprio-1' })).json.token;
   const am = (await call('POST', '/api/login', { username: 'omar.beldi', password: 'Omar-Password-2' })).json.token;
   const bootOwner = (await call('GET', '/api/bootstrap', null, owner)).json;
@@ -94,7 +100,14 @@ test('bootstrap restreint (G3 suite) : le proprio voit tout, un AM ne voit ni le
   assert.equal(bootAm.config.defaultOffreRules, undefined);
   assert.equal(JSON.stringify(bootAm).includes('secret-id'), false);
   assert.equal(JSON.stringify(bootAm).includes('kool-id'), false);
-  assert.deepEqual(bootAm.defaults, { commissions: { a: 1 }, portfolios: {} });
+  // Correctif 2026-11-27 (audit point 1 — fuite /api/bootstrap) : un AM ne
+  // reçoit que SON portefeuille et SES commissions — pas ceux des autres AM.
+  assert.deepEqual(bootAm.defaults, {
+    commissions: { 'resto omar': 20 },
+    portfolios: { 'Omar Beldi': [['Tunis', 'Top Performer', 'Resto Omar']] }
+  });
+  assert.equal(JSON.stringify(bootAm).includes('Resto Nour'), false);
+  assert.equal(JSON.stringify(bootAm).includes('resto nour'), false);
 });
 
 test('gestion des comptes : réservée au propriétaire, mot de passe >= 10, pas d\'auto-suppression', async () => {

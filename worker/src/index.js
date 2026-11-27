@@ -353,6 +353,27 @@ export async function handle(request, env) {
     // /api/sheets/:source et n'a plus besoin des IDs) ni les règles de
     // secours « Offre Participation » (le repli ne s'applique qu'au proprio).
     if (me.role === 'owner') return reply({ config: safeConfig, defaults: safeDefaults });
+    // Correctif 2026-11-27 (audit point 1 — fuite /api/bootstrap) : un AM
+    // recevait les 546 associations restaurant↔AM et les 214 taux de
+    // commission de TOUT le monde. Pour am / market_am, ne renvoyer que son
+    // propre portefeuille (portfolios[amName] = [[ville, segment, resto], …])
+    // et les commissions de ses restaurants. Les données live arrivent de
+    // toute façon par /api/sheets/* (déjà filtrées par AM) ; le snapshot
+    // bootstrap n'est qu'un repli. viewer_all (lecture seule de tout le
+    // périmètre) garde l'instantané complet.
+    if ((me.role === 'am' || me.role === 'market_am') && me.amName) {
+      const allPortfolios = (safeDefaults.portfolios && typeof safeDefaults.portfolios === 'object') ? safeDefaults.portfolios : {};
+      const ownList = Array.isArray(allPortfolios[me.amName]) ? allPortfolios[me.amName] : [];
+      const ownPortfolios = {};
+      if (ownList.length > 0) ownPortfolios[me.amName] = ownList;
+      const allCommissions = (safeDefaults.commissions && typeof safeDefaults.commissions === 'object') ? safeDefaults.commissions : {};
+      const ownCommissions = {};
+      for (const item of ownList) {
+        const rName = String((Array.isArray(item) ? item[2] : '') || '').trim().toLowerCase();
+        if (rName && Object.prototype.hasOwnProperty.call(allCommissions, rName)) ownCommissions[rName] = allCommissions[rName];
+      }
+      return reply({ config: { live: {}, kool: {} }, defaults: { commissions: ownCommissions, portfolios: ownPortfolios } });
+    }
     return reply({ config: { live: {}, kool: {} }, defaults: safeDefaults });
   }
 
