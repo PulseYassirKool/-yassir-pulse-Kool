@@ -1897,3 +1897,40 @@ test('XSS : Test d\'essai, charge alert(1), raison piégée — Modifier/Supprim
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Semaines (audit 2026-11-27, item 6) : générées en JavaScript ----
+test('Semaines : options générées en JavaScript, 2026 inchangées, 2027 présentes', () => {
+  const w = boot();
+  const sel = w.document.getElementById('filterWeekSelect');
+  const prev = w.document.getElementById('filterPrevWeekSelect');
+  assert.ok(sel && prev, 'sélecteurs de semaine absents');
+  const values = [...sel.options].map((o) => o.value);
+  const labels = [...sel.options].map((o) => o.textContent);
+  // Plus aucune option en dur dans le HTML.
+  assert.ok(!html.includes('2025-12-29|2026-01-04|S01'), 'options 2026 encore en dur dans index.html');
+  assert.ok(!html.includes('2026-12-28|2027-01-03|S53'), 'options 2026 encore en dur dans index.html');
+  // 2026 strictement identique à l'ancienne liste en dur (valeurs + libellés).
+  assert.ok(values.includes('2025-12-29|2026-01-04|S01'), 'S01 2026 absente');
+  assert.ok(labels.includes('S01 (29/12 → 04/01)'), 'libellé S01 2026 incorrect');
+  assert.ok(values.includes('2026-12-28|2027-01-03|S53'), 'S53 2026 absente');
+  assert.ok(labels.includes('S53 (28/12 → 03/01)'), 'libellé S53 2026 incorrect');
+  // Année suivante présente : le filtre fonctionne en janvier 2027 et après.
+  assert.ok(values.includes('2027-01-04|2027-01-10|S01'), 'S01 2027 absente');
+  assert.ok(labels.includes('S01 (04/01 → 10/01)'), 'libellé S01 2027 incorrect');
+  // Les deux sélecteurs ont exactement les mêmes options.
+  assert.equal(prev.options.length, sel.options.length, 'les deux sélecteurs diffèrent');
+  assert.deepEqual([...prev.options].map((o) => o.value), values, 'options du sélecteur précédent différentes');
+  // Nombre d'options : 1 vide + semaines ISO (année-1, année, année+1).
+  // Nombre de semaines ISO d'une année (52 ou 53), calculé indépendamment :
+  // le jeudi de la semaine du 28 décembre donne le numéro de la dernière semaine.
+  const nbSemainesISO = (a) => {
+    const d28 = new Date(a, 11, 28);
+    const jeudi = new Date(d28);
+    jeudi.setDate(d28.getDate() - ((d28.getDay() + 6) % 7) + 3);
+    const jourAnnee = Math.round((jeudi - new Date(jeudi.getFullYear(), 0, 1)) / 86400000) + 1;
+    return Math.ceil(jourAnnee / 7);
+  };
+  const annee = new Date().getFullYear();
+  assert.equal(values.length, 1 + nbSemainesISO(annee - 1) + nbSemainesISO(annee) + nbSemainesISO(annee + 1), 'nombre d\'options incorrect');
+  assert.equal(values[1].split('|')[2], 'S01', 'première semaine incorrecte');
+  assert.ok(values[values.length - 1].endsWith('|S' + String(nbSemainesISO(annee + 1)).padStart(2, '0')), 'dernière semaine incorrecte');
+});

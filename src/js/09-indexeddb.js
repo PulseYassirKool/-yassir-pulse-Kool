@@ -766,3 +766,61 @@
         executerTraitementMetier();
         showToast('Fichier <strong>' + escapeHtml(meta.name) + '</strong> retiré de la base enregistrée.', 'info');
       };
+
+      /* ========================================================================
+         G1. OPTIONS DE SEMAINES GÉNÉRÉES EN JAVASCRIPT (audit 2026-11-27, item 6)
+         ========================================================================
+         Les options S01…S53 étaient écrites en dur dans index.html pour la
+         seule année 2026 : à partir du 4 janvier 2027, plus aucune semaine
+         valide dans les filtres. Les options sont désormais générées ici,
+         en semaines ISO (le lundi de la semaine 1 est celui du 4 janvier),
+         pour l'année précédente, l'année en cours et l'année suivante —
+         le filtre fonctionne donc en janvier 2027 et après, sans retouche.
+         Format identique à l'ancien (valeur « AAAA-MM-JJ|AAAA-MM-JJ|SNN »,
+         libellé « SNN (JJ/MM → JJ/MM) ») : les semaines 2026 générées
+         sont strictement identiques aux anciennes options en dur.
+         ======================================================================== */
+      function _pad2Semaines(n) { return (n < 10 ? '0' : '') + n; }
+      function _formatDateISO(d) { return d.getFullYear() + '-' + _pad2Semaines(d.getMonth() + 1) + '-' + _pad2Semaines(d.getDate()); }
+      function _formatDateFR(d) { return _pad2Semaines(d.getDate()) + '/' + _pad2Semaines(d.getMonth() + 1); }
+      // Lundi de la semaine ISO n de l'année a (le 4 janvier est toujours en semaine 1).
+      function _lundiSemaineISO(annee, semaine) {
+        var d = new Date(annee, 0, 4);
+        var decalage = (d.getDay() + 6) % 7; // 0 = lundi
+        d.setDate(d.getDate() - decalage + (semaine - 1) * 7);
+        return d;
+      }
+      // Nombre de semaines ISO d'une année (52 ou 53) : le 28 décembre est
+      // toujours dans la dernière semaine ISO de l'année.
+      function _nombreSemainesISO(annee) {
+        var d = new Date(annee, 11, 28);
+        var jour = (d.getDay() + 6) % 7;
+        var jeudi = new Date(d);
+        jeudi.setDate(d.getDate() - jour + 3);
+        var premierJeudi = new Date(jeudi.getFullYear(), 0, 4);
+        var j2 = (premierJeudi.getDay() + 6) % 7;
+        premierJeudi.setDate(premierJeudi.getDate() - j2 + 3);
+        return 1 + Math.round((jeudi - premierJeudi) / (7 * 86400000));
+      }
+      window.yassirGenererOptionsSemaines = function () {
+        var anneeCourante = new Date().getFullYear();
+        var annees = [anneeCourante - 1, anneeCourante, anneeCourante + 1];
+        var html = '<option value="">Semaine...</option>';
+        annees.forEach(function (annee) {
+          var nb = _nombreSemainesISO(annee);
+          for (var s = 1; s <= nb; s++) {
+            var debut = _lundiSemaineISO(annee, s);
+            var fin = new Date(debut);
+            fin.setDate(fin.getDate() + 6);
+            var label = 'S' + _pad2Semaines(s);
+            html += '<option value="' + _formatDateISO(debut) + '|' + _formatDateISO(fin) + '|' + label + '">' + label + ' (' + _formatDateFR(debut) + ' → ' + _formatDateFR(fin) + ')</option>';
+          }
+        });
+        ['filterWeekSelect', 'filterPrevWeekSelect'].forEach(function (id) {
+          var sel = document.getElementById(id);
+          if (sel) sel.innerHTML = html;
+        });
+      };
+      // Remplissage au chargement : le bundle s'exécute après l'analyse du
+      // HTML (script module différé), les sélecteurs existent déjà.
+      window.yassirGenererOptionsSemaines();
