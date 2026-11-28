@@ -463,6 +463,19 @@ export async function handle(request, env) {
       });
       return reply(data);
     } catch (e) {
+      // Diagnostic serveur uniquement (jamais dans la réponse) : la dernière
+      // erreur de lecture (source, marque, statut) est gardée en KV pour
+      // comprendre un échec en production sans exposer de détail technique.
+      // Lecture : cf.py kv-get sheets:lastError. (Un dépassement CPU 1102
+      // tue l'invocation avant ce point : il n'apparaît pas ici.)
+      try {
+        if (env.PULSE_KV && typeof env.PULSE_KV.put === 'function') {
+          await env.PULSE_KV.put('sheets:lastError', JSON.stringify({
+            source, brand, status: String((e && e.status) || 'inconnu'),
+            at: new Date().toISOString()
+          }));
+        }
+      } catch (err) { /* le diagnostic ne doit jamais casser la lecture */ }
       if (e && e.status === 400) return fail(400, e.message);
       if (e && e.status === 500) return fail(500, 'Lecture Google Sheets non configurée.');
       return fail(502, 'Lecture de la feuille impossible.');

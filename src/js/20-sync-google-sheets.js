@@ -75,7 +75,15 @@
       // Débit bridé à 4 tranches/s (quota Sheets API : 300 lectures/min/projet).
       // Une tranche en échec 1102 (isolate froid : signature du jeton) est
       // réessayée 2 fois — la lecture est idempotente.
-      var SLICE_SIZES = { 'data-oct': 500, 'data-nov': 500, 'data-kool': 1000, 'details-kool': 1000 };
+      // Mesures locales (VM, /tmp/proto) : data-oct / data-nov 500 lignes
+      // ~5,5 ms, data-kool 1 000 lignes ~4,3 ms, details-kool 1 000 ~1,5 ms.
+      // MAIS le CPU d'un isolate Worker gratuit est plus cher que sur la VM
+      // (signature RS256 2-4 ms à froid + parsing JSON) : les tranches à ces
+      // tailles ont échoué en production le 2026-11-28 (sync Kool à 0, puis
+      // « Impossible de lire les feuilles Kool via le serveur »). Tailles
+      // divisées par deux par prudence : ~870 invocations par synchro
+      // complète, toujours très loin du quota gratuit (100 000/jour).
+      var SLICE_SIZES = { 'data-oct': 250, 'data-nov': 250, 'data-kool': 500, 'details-kool': 500 };
       var SLICE_MAX_RETRIES = 2;
       var SLICE_MIN_INTERVAL_MS = 250;
       var _sliceLastCallMs = 0;

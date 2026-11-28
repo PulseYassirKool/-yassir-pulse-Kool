@@ -99,6 +99,8 @@ test('assistant : sans clé configurée -> 503 propre ; Gemini en erreur ou vide
     assert.equal(r.status, 502);
     assert.equal(r.json.error, 'Assistant indisponible pour le moment.');
     assert.ok(!JSON.stringify(r.json).includes('500'), 'aucun détail technique dans l\'erreur');
+    // Diagnostic serveur : la cause est gardée en KV (jamais dans la réponse).
+    assert.equal(JSON.parse(kvStore.get('asst:lastError')).status, '500');
   } finally {
     globalThis.fetch = realFetch;
   }
