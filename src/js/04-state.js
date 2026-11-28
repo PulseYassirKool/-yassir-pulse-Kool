@@ -964,9 +964,18 @@
       // décimal est le DERNIER séparateur de la chaîne — « 1,234.50 » → 1234.50,
       // « 1.234,50 » → 1234.50, « 1 234,50 » → 1234.50 ; les autres séparateurs
       // (milliers, espaces) sont supprimés. Nombres simples inchangés.
+      // Plafond de vraisemblance d'un montant unitaire (bug GMV Kool
+      // 2026-11-28 : GMV global à −2,6e16) : aucun montant unitaire (commande,
+      // remise, frais) ne vaut 100 000 000 TND. Au-delà, c'est une valeur
+      // corrompue — ex. une date/heure lue comme un montant
+      // (« 10/31/2026 00:35:56 » → 1,03e13, « 20261031003556 » → 2,03e13) —
+      // on l'ignore (0) au lieu de laisser une seule ligne empoisonner la
+      // somme GMV/CA. Plafond volontairement au-dessus de 1 234 567,89 (le
+      // test Item 5c parse ce grand nombre avec espaces comme valide).
+      var MONTANT_MAX_PLAUSIBLE = 100000000;
       function purgerNombre(val) {
         if (val === null || val === undefined || val === '') return 0;
-        if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+        if (typeof val === 'number') return (Number.isFinite(val) && Math.abs(val) <= MONTANT_MAX_PLAUSIBLE) ? val : 0;
         // Un objet Date (ancien import XLSX avec cellDates:true) n'est jamais
         // un montant : il venait d'une cellule date dans une colonne montant.
         if (val instanceof Date) return 0;
@@ -979,19 +988,24 @@
         // « 31.05.2026 » valait 3 105,20 et « 2026-11-26 » valait 2 026.
         // « 31.5 » (jour.mois sans année) reste ambigu et n'est pas rejeté :
         // c'est aussi un montant plausible, et le Worker le renvoie tel quel.
+        // Étendue 2026-11-28 (bug GMV Kool −2,6e16) au format US « M/J/AAAA »
+        // de l'export Kool : « 10/31/2026 00:35:56 » valait 1,03e13.
         if (/^\d{4}[-/](0?[1-9]|1[0-2])[-/]([0-2]?[0-9]|3[01])/.test(str) ||
-            /^([0-2]?[0-9]|3[01])[./](0?[1-9]|1[0-2])[./]\d{2,4}/.test(str)) return 0;
+            /^([0-2]?[0-9]|3[01])[./](0?[1-9]|1[0-2])[./]\d{2,4}/.test(str) ||
+            /^(0?[1-9]|1[0-2])\/(0?[1-9]|[12][0-9]|3[01])\/\d{2,4}/.test(str)) return 0;
         var lastComma = str.lastIndexOf(',');
         var lastDot = str.lastIndexOf('.');
         var decPos = Math.max(lastComma, lastDot);
+        var parsed;
         if (decPos === -1) {
-          var entier = parseFloat(str.replace(/[^0-9\-+]/g, ''));
-          return Number.isFinite(entier) ? entier : 0;
+          parsed = parseFloat(str.replace(/[^0-9\-+]/g, ''));
+        } else {
+          var partieEntiere = str.slice(0, decPos).replace(/[^0-9\-+]/g, '');
+          var partieDecimale = str.slice(decPos + 1).replace(/[^0-9]/g, '');
+          parsed = parseFloat(partieEntiere + '.' + partieDecimale);
         }
-        var partieEntiere = str.slice(0, decPos).replace(/[^0-9\-+]/g, '');
-        var partieDecimale = str.slice(decPos + 1).replace(/[^0-9]/g, '');
-        var parsed = parseFloat(partieEntiere + '.' + partieDecimale);
-        return Number.isFinite(parsed) ? parsed : 0;
+        if (!Number.isFinite(parsed) || Math.abs(parsed) > MONTANT_MAX_PLAUSIBLE) return 0;
+        return parsed;
       }
 
       // Cache des heures normalisées : les mêmes valeurs d'heure reviennent des centaines

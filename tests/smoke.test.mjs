@@ -561,6 +561,48 @@ test('Kool : bascule de marque (favicon K jaune), moteur sans crash et Top des v
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Régression GMV Kool 2026-11-28 : GMV global à −2,6e16 ----
+// Cause : des valeurs date/heure dans une colonne montant (Remise) étaient
+// lues comme des montants par purgerNombre — « 10/31/2026 00:35:56 » (format
+// US de l'export Kool) valait 1,03e13, « 20261031003556 » valait 2,03e13 —
+// et une seule ligne empoisonnait la somme GMV globale. Le CA (basé sur J)
+// et le GMV par AM (lignes « Non attribué » exclues) restaient corrects.
+// Correctif : garde anti-date étendue (format US) + plafond 1 000 000 TND
+// dans purgerNombre (04-state.js). La ligne décalée (ORDER ID = heure,
+// restaurant vide, capture du 2026-11-28) ne doit pas non plus exploser le GMV.
+const koolCsvDataGmv = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '16/11/2026', '2001', '', 'Resto Alpha', '', '', '25.50', '3', '0'],
+  ['', '', '', '17/11/2026', '2002', '', 'Resto Alpha', '', '', '40.00', '6', '10/31/2026 00:35:56'],
+  ['', '', '', '17/11/2026', '2003', '', 'Resto Beta', '', '', '18.00', '2', '20261031003556'],
+  ['', '', '', '2026-10-31', '00:35:56', 'iSwi-1465', '', 'Resto X', '', 'Livreur', '20.00', '5.00', '3.00']
+]);
+
+test('Kool : GMV global correct avec des dates dans la colonne Remise (bug −2,6e16)', async () => {
+  const w = bootKool({ data: koolCsvDataGmv });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+  // Carte GMV de la vue Food VF (celle de la capture utilisateur) : 2001
+  // (25.50+0), 2002 (40+0, remise US ignorée), 2003 (18+0, remise compacte
+  // ignorée), 2004 décalée (0+5) → 88,50 TND. Avant correctif : ≈ 3,06e13.
+  assert.equal(w.document.getElementById('kpiGmvLivrees').textContent, '88,50 TND', 'carte GMV Food VF : ' + w.document.getElementById('kpiGmvLivrees').textContent);
+  // Synthèse Globale : même GMV Brut, GMV After (J) = 83,5.
+  w.yassirSwitchTab('synth_global');
+  await wait(600);
+  const kpi = {};
+  w.document.querySelectorAll('#synthGlobalKpisBody tr').forEach((tr) => {
+    const tds = tr.querySelectorAll('td');
+    if (tds.length >= 2) kpi[tds[0].textContent.trim()] = tds[1].textContent.trim();
+  });
+  assert.equal(kpi['GMV Brut (Item total)'], '88.5', 'GMV Brut Kool (dates en Remise) : ' + JSON.stringify(kpi));
+  assert.equal(kpi['GMV (Total Food VF)'], '83.5', 'GMV After Kool (J) : ' + JSON.stringify(kpi));
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 test('page de connexion : carte compacte, sélecteur Kool (un seul Kool + point noir), bascule de marque', () => {
   const w = boot();
   const card = w.document.getElementById('loginCard');

@@ -191,3 +191,137 @@ test('tranches : cache des en-têtes — sans cache, la sonde a lieu (repli)', a
   assert.equal(s1.rows.length, 1000);
   assert.equal(valuesCalls, 2);
 });
+
+// ---------------------------------------------------------------------------
+// Sécurité — faille « tab » (audit Claude, 2026-11-28) : un AM pouvait lire
+// n'importe quel onglet du classeur unique via le chemin par tranches
+// (?tab=… repris tel quel, sans validation), contournant le filtrage
+// (portefeuilles, Budget, commissions). Preuve de l'audit : Omar obtient
+// le portefeuille de Nour, les 3 lignes de Budget et la grille de
+// commissions en demandant un autre onglet. Ces tests reproduisent la
+// preuve : ils doivent ÉCHOUER avant le correctif et PASSER après.
+// ---------------------------------------------------------------------------
+const AUDIT_UNIQUE = 'AUDIT00000000000000000000000001';
+function auditTabs() {
+  return {
+    [AUDIT_UNIQUE]: {
+      'omar': [
+        ['Ville', 'Segment', 'restaurant Name', 'APP'],
+        ['Tunis', 'A', 'Resto A', 'Kool'],
+        ['Tunis', 'A', 'Resto B', 'Kool'],
+        ['Tunis', 'A', 'Resto C', 'Kool']
+      ],
+      'nour': [
+        ['Ville', 'Segment', 'restaurant Name', 'APP'],
+        ['Sousse', 'B', 'Resto de Nour', 'Kool']
+      ],
+      'Budget': [
+        ['AM', 'Budget', 'APP'],
+        ['Omar Beldi', 5000, 'Yassir'],
+        ['Nour Ali', 9000, 'Yassir'],
+        ['Global', 90000, 'Yassir']
+      ],
+      'Commissions': [
+        ['Restaurant', 'Taux', 'APP'],
+        ['Resto A', 17, 'Kool'],
+        ['Resto de Nour', 20, 'Kool']
+      ],
+      '2025 Yassir': [
+        ['Indicateur', 'W 07', 'W 08', 'W 09'],
+        ['GMV', 100, 110, 120]
+      ],
+      '2025 Kool': [
+        ['Indicateur', 'W 07', 'W 08', 'W 09'],
+        ['GMV', 50, 55, 60]
+      ],
+      'Offre Participation': [
+        ['Restaurant', 'C%', 'Article'],
+        ['Resto A', 10, 'Pizza']
+      ]
+    },
+    [DETAILS]: cannedTabs()[DETAILS]
+  };
+}
+const AUDIT_CONFIG = {
+  live: {
+    PORTFOLIOS_SHEET_ID: AUDIT_UNIQUE,
+    PORTFOLIOS_TABS: [
+      { tab: 'omar', am: 'Omar Beldi', gid: 1 },
+      { tab: 'nour', am: 'Nour Ali', gid: 2 }
+    ],
+    BUDGET_SHEET_ID: AUDIT_UNIQUE, BUDGET_TAB: 'Budget', BUDGET_GID: 3,
+    HISTORICAL_2025_SHEET_ID: AUDIT_UNIQUE, HISTORICAL_2025_GID: 4,
+    COMMISSIONS_SHEET_ID: AUDIT_UNIQUE, COMMISSIONS_TAB: 'Commissions', COMMISSIONS_GID: 5,
+    OFFRE_PARTICIPATION_SHEET_ID: AUDIT_UNIQUE, OFFRE_PARTICIPATION_GID: 6,
+    BOGOF_GID: 7
+  },
+  kool: { ORDER_ITEMS_SHEET_ID: DETAILS, COMMISSION_SHEET_ID: AUDIT_UNIQUE, COMMISSION_TAB: 'Commissions', COMMISSION_GID: 5 }
+};
+const AM_NOUR = { username: 'nour.ali', role: 'am', amName: 'Nour Ali' };
+
+test('sécurité tab : un AM demandant un onglet non autorisé → 403 (preuve audit)', async () => {
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const { env, fetchImpl } = makeEnv(AUDIT_CONFIG, auditTabs());
+  await env.PULSE_KV.put('config', JSON.stringify(AUDIT_CONFIG));
+  const is403 = (e) => e && e.status === 403;
+  // Portefeuilles : onglet d'un autre AM.
+  await assert.rejects(
+    getSheetsSlice(env, AM_OMAR, 'portfolios', 'kool', { tab: 'nour', slice: 0, sliceSize: 100 }, fetchImpl), is403);
+  // Portefeuilles : onglet partagé Budget (3 lignes : Omar 5000, Nour 9000, Global 90000).
+  await assert.rejects(
+    getSheetsSlice(env, AM_OMAR, 'portfolios', 'yassir', { tab: 'Budget', slice: 0, sliceSize: 100 }, fetchImpl), is403);
+  // Portefeuilles : grille de commissions.
+  await assert.rejects(
+    getSheetsSlice(env, AM_OMAR, 'portfolios', 'kool', { tab: 'Commissions', slice: 0, sliceSize: 100 }, fetchImpl), is403);
+  // hist2025 : onglet Budget (même classeur unique).
+  await assert.rejects(
+    getSheetsSlice(env, AM_OMAR, 'hist2025', 'yassir', { tab: 'Budget', slice: 0, sliceSize: 100 }, fetchImpl), is403);
+  // Source nommée : commissions ne peut pas lire Budget, budget ne peut pas lire Commissions.
+  await assert.rejects(
+    getSheetsSlice(env, AM_OMAR, 'commissions', 'yassir', { tab: 'Budget', slice: 0, sliceSize: 100 }, fetchImpl), is403);
+  await assert.rejects(
+    getSheetsSlice(env, AM_OMAR, 'budget', 'yassir', { tab: 'Commissions', slice: 0, sliceSize: 100 }, fetchImpl), is403);
+  // L'autre AM est bloqué symétriquement.
+  await assert.rejects(
+    getSheetsSlice(env, AM_NOUR, 'portfolios', 'kool', { tab: 'omar', slice: 0, sliceSize: 100 }, fetchImpl), is403);
+});
+
+test('sécurité tab : onglets autorisés pour un AM → 200, et proprio non restreint', async () => {
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const { env, fetchImpl } = makeEnv(AUDIT_CONFIG, auditTabs());
+  await env.PULSE_KV.put('config', JSON.stringify(AUDIT_CONFIG));
+  // Son propre onglet de portefeuille.
+  const s = await getSheetsSlice(env, AM_OMAR, 'portfolios', 'kool', { tab: 'omar', slice: 0, sliceSize: 100 }, fetchImpl);
+  assert.deepEqual(s.rows.map((r) => r[2]), ['Resto A', 'Resto B', 'Resto C']);
+  // hist2025 : son onglet de marque (matrice agrégée YoY, sans dimension restaurant).
+  const h = await getSheetsSlice(env, AM_OMAR, 'hist2025', 'yassir', { tab: '2025 Yassir', slice: 0, sliceSize: 100 }, fetchImpl);
+  assert.equal(h.rows.length, 1);
+  assert.equal(h.rows[0][0], 'GMV');
+  // Offres : son onglet nommé. (Marque Kool : le portefeuille d'Omar est
+  // Kool dans ce mock, donc le filtre par portefeuille le voit.)
+  const o = await getSheetsSlice(env, AM_OMAR, 'offres', 'kool', { tab: 'Offre Participation', slice: 0, sliceSize: 100 }, fetchImpl);
+  assert.equal(o.rows.length, 1);
+  // Le proprio n'est pas restreint par la validation des onglets.
+  const p = await getSheetsSlice(env, OWNER, 'portfolios', 'yassir', { tab: 'Budget', slice: 0, sliceSize: 100 }, fetchImpl);
+  assert.equal(p.rows.length, 3);
+});
+
+test('sécurité tab : portefeuilles filtré par lignes (défense en profondeur)', async () => {
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const { env, fetchImpl } = makeEnv(AUDIT_CONFIG, auditTabs());
+  await env.PULSE_KV.put('config', JSON.stringify(AUDIT_CONFIG));
+  // Manifeste portefeuilles partiel en KV (ex. cache pas encore à jour) :
+  // le portefeuille d'Omar n'y contient que Resto A. La tranche de son
+  // propre onglet (Resto A, B, C) ne doit renvoyer que Resto A.
+  await env.PULSE_KV.put('sheetcache:omar.beldi:kool:portfolios', JSON.stringify({
+    version: 1,
+    headers: ['Ville', 'Segment', 'restaurant Name', 'APP'],
+    totalRows: 1, chunkCount: 0,
+    _memoryRows: [['Tunis', 'A', 'Resto A', 'Kool']]
+  }));
+  const s = await getSheetsSlice(env, AM_OMAR, 'portfolios', 'kool', { tab: 'omar', slice: 0, sliceSize: 100 }, fetchImpl);
+  assert.deepEqual(s.rows.map((r) => r[2]), ['Resto A']);
+});

@@ -846,7 +846,16 @@ function sliceFilterRows(dataRows, sctx, ctx) {
       const isGlobalBudget = amCell === 'global' || amCell === 'total' || amCell === 'budget global' || amCell === 'total budget' || amCell.includes('budget global');
       if (!isGlobalBudget && !amTabMatches(amCell, ctx.me.amName)) continue;
     }
-    if (ctx.filteredRole && ctx.portfolioSet && ctx.source !== 'portfolios' && ctx.source !== 'budget' && ctx.source !== 'hist2025') {
+    // Filtre par portefeuille (audit 2026-11-28) : s'applique aussi aux
+    // portefeuilles (défense en profondeur : l'onglet est déjà validé
+    // comme étant celui de l'AM, mais une ligne d'un autre restaurant
+    // ne doit jamais passer). Reste exclu pour hist2025 : la matrice
+    // 2025 est agrégée (semaines × indicateurs, sans dimension
+    // restaurant) — un filtre par restaurant y renverrait zéro ligne
+    // et casserait la comparaison YoY pour tous les AM ; la protection
+    // pour hist2025 est la validation de l'onglet (seul « 2025 Yassir »
+    // / « 2025 Kool » est autorisé).
+    if (ctx.filteredRole && ctx.portfolioSet && ctx.source !== 'budget' && ctx.source !== 'hist2025') {
       // Détails Kool : filtrés sur la colonne Restaurant (la feuille en a
       // une) — pas besoin de l'ensemble des N° de commande de la Data Kool
       // (qui coûterait une lecture complète de data-kool par tranche).
@@ -933,6 +942,53 @@ async function loadTabSlice(env, plan, tabTitle, startRow, endRow, ctx) {
   return { headers, headerRowIdx, rows, done: chunk.length < (endRow - startRow + 1), skipped: false, empty: false };
 }
 
+// Onglets autorisés pour un utilisateur (même calcul que getSheetsTabs).
+// Renvoie la liste des titres autorisés, ou null quand tous les onglets
+// du classeur sont autorisés (sources multi : onglets de données, dont les
+// lignes sont filtrées par portefeuille). Utilisé par getSheetsTabs (liste)
+// et par getSheetsSlice (validation du paramètre tab).
+// Sécurité (audit Claude, 2026-11-28 — faille « tab ») : le paramètre tab
+// venait du client sans validation — un AM lisait n'importe quel onglet
+// du classeur unique (Budget, Commissions, portefeuille d'un autre AM)
+// via le chemin par tranches, contournant le filtrage. Désormais, un rôle
+// filtré (am / market_am) ne peut lire que ses onglets autorisés ;
+// tout autre tab → 403. Les sources multi ne sont pas concernées
+// (tous les onglets sont des onglets de données, lignes filtrées).
+async function listAllowedTabs(env, me, plan, fetchImpl) {
+  const filteredRole = me.role === 'am' || me.role === 'market_am';
+  if (plan.kind === 'multi') return null;
+  const sheets = await getSpreadsheetSheets(env, plan.spreadsheetId, fetchImpl);
+  const byTitle = new Map();
+  const byGid = new Map();
+  for (const s of sheets) {
+    byTitle.set(normalizeName(s.title), s);
+    if (s.id !== null && s.id !== undefined) byGid.set(String(s.id), s);
+  }
+  const resolveTab = (tabName, altTabs, gid) => {
+    for (const n of [tabName, ...(altTabs || [])]) {
+      const hit = byTitle.get(normalizeName(n));
+      if (hit) return hit;
+    }
+    if (gid !== undefined && gid !== null && gid !== '') {
+      const hit = byGid.get(String(gid));
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const tabs = [];
+  if (plan.kind === 'portfolios') {
+    for (const entry of plan.tabs) {
+      if (filteredRole && !amTabMatches(entry.am, me.amName)) continue;
+      const hit = resolveTab(entry.tab, entry.altTabs, entry.gid);
+      if (hit) tabs.push(hit.title);
+    }
+  } else if (plan.kind === 'named') {
+    const hit = resolveTab(plan.tab, plan.altTabs, plan.gid);
+    if (hit) tabs.push(hit.title);
+  }
+  return tabs;
+}
+
 // Point d'entrée tranche : GET /api/sheets/:source?brand=&tab=&slice=0&sliceSize=500
 // tab : titre exact de l'onglet (obtenu via ?tabs=1) ; slice : 0-based ;
 // sliceSize : lignes de feuille par tranche (1..SLICE_MAX_ROWS).
@@ -948,8 +1004,19 @@ export async function getSheetsSlice(env, me, source, brand, opts = {}, fetchImp
   const slice = Math.max(0, Math.floor(opts.slice ?? 0) || 0);
   const sliceSize = Math.min(SLICE_MAX_ROWS, Math.max(1, Math.floor(opts.sliceSize ?? SLICE_DEFAULT_ROWS) || SLICE_DEFAULT_ROWS));
   const filteredRole = me.role === 'am' || me.role === 'market_am';
+  // Sécurité (audit 2026-11-28) : valider l'onglet demandé contre les
+  // onglets autorisés pour cet utilisateur (même calcul que ?tabs=1).
+  // Un rôle filtré qui demande un autre onglet → 403, avant toute lecture.
+  // Les sources multi ne restreignent pas l'onglet (tous les onglets sont
+  // des onglets de données, lignes filtrées par portefeuille).
+  if (filteredRole) {
+    const allowed = await listAllowedTabs(env, me, plan, fetchImpl);
+    if (allowed !== null && !allowed.some((t) => normalizeName(t) === normalizeName(tabTitle))) {
+      throw new SheetsError(403, 'Onglet non autorisé.');
+    }
+  }
   let portfolioSet = null;
-  if (filteredRole && source !== 'portfolios' && source !== 'hist2025') {
+  if (filteredRole && source !== 'hist2025') {
     portfolioSet = await getPortfolioRestaurants(env, me, brand, fetchImpl);
   }
   const ctx = {
@@ -977,37 +1044,12 @@ export async function getSheetsTabs(env, me, source, brand, fetchImpl = fetch) {
   const config = (await env.PULSE_KV.get('config', 'json')) || {};
   const plan = resolveSourcePlan(config, source, brand);
   if (!plan || !plan.spreadsheetId) throw new SheetsError(502, 'Lecture de la feuille impossible.');
-  const sheets = await getSpreadsheetSheets(env, plan.spreadsheetId, fetchImpl);
-  const byTitle = new Map();
-  const byGid = new Map();
-  for (const s of sheets) {
-    byTitle.set(normalizeName(s.title), s);
-    if (s.id !== null && s.id !== undefined) byGid.set(String(s.id), s);
-  }
-  const resolveTab = (tabName, altTabs, gid) => {
-    for (const n of [tabName, ...(altTabs || [])]) {
-      const hit = byTitle.get(normalizeName(n));
-      if (hit) return hit;
-    }
-    if (gid !== undefined && gid !== null && gid !== '') {
-      const hit = byGid.get(String(gid));
-      if (hit) return hit;
-    }
-    return null;
-  };
   let tabs = [];
-  const filteredRole = me.role === 'am' || me.role === 'market_am';
-  if (plan.kind === 'portfolios') {
-    for (const entry of plan.tabs) {
-      if (filteredRole && !amTabMatches(entry.am, me.amName)) continue;
-      const hit = resolveTab(entry.tab, entry.altTabs, entry.gid);
-      if (hit) tabs.push(hit.title);
-    }
-  } else if (plan.kind === 'named') {
-    const hit = resolveTab(plan.tab, plan.altTabs, plan.gid);
-    if (hit) tabs.push(hit.title);
-  } else {
+  if (plan.kind === 'multi') {
+    const sheets = await getSpreadsheetSheets(env, plan.spreadsheetId, fetchImpl);
     tabs = sheets.slice(0, MAX_TABS).map((s) => s.title);
+  } else {
+    tabs = (await listAllowedTabs(env, me, plan, fetchImpl)) || [];
   }
   if (plan.mainTab) {
     const idx = tabs.findIndex((t) => normalizeName(t) === normalizeName(plan.mainTab));

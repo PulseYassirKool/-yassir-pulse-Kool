@@ -110,6 +110,32 @@ test('bootstrap restreint (G3 suite) : le proprio voit tout, un AM ne voit ni le
   assert.equal(JSON.stringify(bootAm).includes('resto nour'), false);
 });
 
+test('bootstrap restreint : un AM sans amName reçoit des listes vides (pas l\'instantané complet)', async () => {
+  // Audit Claude (2026-11-28) : la condition « ... && me.amName » faisait
+  // qu'un AM sans amName recevait l'instantané complet (546 restaurants,
+  // 214 commissions). Un rôle am/market_am est filtré dès le rôle, même
+  // sans amName — et sans amName les listes sont vides.
+  kvStore.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },
+    { username: 'sans.nom', hash: await hashPassword('Sans-Nom-Password-1'), role: 'am', displayName: 'Sans Nom', amName: null, protected: false }
+  ]));
+  kvStore.set('config', JSON.stringify({ live: { X: 'secret-id' }, kool: {} }));
+  kvStore.set('defaults', JSON.stringify({
+    commissions: { 'resto omar': 20, 'resto nour': 15 },
+    portfolios: {
+      'Omar Beldi': [['Tunis', 'Top Performer', 'Resto Omar']],
+      'Nour Ali': [['Sousse', 'Long Tail', 'Resto Nour']]
+    }
+  }));
+  const am = (await call('POST', '/api/login', { username: 'sans.nom', password: 'Sans-Nom-Password-1' })).json.token;
+  const boot = (await call('GET', '/api/bootstrap', null, am)).json;
+  assert.deepEqual(boot.defaults, { commissions: {}, portfolios: {} });
+  assert.equal(JSON.stringify(boot).includes('Resto Omar'), false);
+  assert.equal(JSON.stringify(boot).includes('Resto Nour'), false);
+  assert.equal(JSON.stringify(boot).includes('resto omar'), false);
+  assert.equal(JSON.stringify(boot).includes('secret-id'), false);
+});
+
 test('gestion des comptes : réservée au propriétaire, mot de passe >= 10, pas d\'auto-suppression', async () => {
   kvStore.set('accounts', JSON.stringify([
     { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true },

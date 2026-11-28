@@ -387,9 +387,13 @@ export async function handle(request, env) {
     // toute façon par /api/sheets/* (déjà filtrées par AM) ; le snapshot
     // bootstrap n'est qu'un repli. viewer_all (lecture seule de tout le
     // périmètre) garde l'instantané complet.
-    if ((me.role === 'am' || me.role === 'market_am') && me.amName) {
+    // Correctif 2026-11-28 (audit Claude) : le filtre s'applique dès le
+    // RÔLE am / market_am, même si amName est vide ou nul — avant, la
+    // condition « ... && me.amName » faisait qu'un AM sans amName recevait
+    // l'instantané complet. Sans amName, les listes sont vides.
+    if (me.role === 'am' || me.role === 'market_am') {
       const allPortfolios = (safeDefaults.portfolios && typeof safeDefaults.portfolios === 'object') ? safeDefaults.portfolios : {};
-      const ownList = Array.isArray(allPortfolios[me.amName]) ? allPortfolios[me.amName] : [];
+      const ownList = (me.amName && Array.isArray(allPortfolios[me.amName])) ? allPortfolios[me.amName] : [];
       const ownPortfolios = {};
       if (ownList.length > 0) ownPortfolios[me.amName] = ownList;
       const allCommissions = (safeDefaults.commissions && typeof safeDefaults.commissions === 'object') ? safeDefaults.commissions : {};
