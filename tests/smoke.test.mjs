@@ -156,6 +156,11 @@ const googleFailTabs = new Set();
 // directe échouait, pour les tests qui prérèglent des données en
 // localStorage et ne doivent pas les voir écrasées par la synchro auto.
 let googleFailAllValues = false;
+// googleFailValues429Count simule un quota Google dépassé : les N prochains
+// appels valeurs renvoient 429, puis les suivants réussissent. Compteur
+// remis à zéro à chaque boot ; googleValuesCalls429 compte les 429 émis.
+let googleFailValues429Count = 0;
+let googleValuesCalls429 = 0;
 function buildGoogleMockData(overrides) {
   const ov = overrides || {};
   // Portefeuilles : un onglet par AM (données CSV « port » groupées par AM).
@@ -239,6 +244,11 @@ function installGoogleMock() {
       const rm = range.match(/^'((?:[^']|'')+)'!A(\d+):ZZ(\d+)$/);
       if (!rm) throw new Error('Plage inattendue : ' + range);
       const title = rm[1].replace(/''/g, "'");
+      if (googleFailValues429Count > 0) {
+        googleFailValues429Count--;
+        googleValuesCalls429++;
+        return { ok: false, status: 429, json: async () => ({ error: { code: 429, message: 'Quota exceeded' } }) };
+      }
       if (googleFailAllValues || googleFailTabs.has(title)) {
         return { ok: false, status: 403, json: async () => ({ error: { code: 403, message: 'Forbidden' } }) };
       }
@@ -261,6 +271,8 @@ function boot() {
   clearSheetCache();
   googleFailTabs.clear();
   googleFailAllValues = false;
+  googleFailValues429Count = 0;
+  googleValuesCalls429 = 0;
   buildGoogleMockData(null);
   installGoogleMock();
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
@@ -435,6 +447,8 @@ function bootKool(overrides) {
   clearSheetCache();
   googleFailTabs.clear();
   googleFailAllValues = false;
+  googleFailValues429Count = 0;
+  googleValuesCalls429 = 0;
   // Les overrides alimentent le mock Google (le Worker lit les feuilles) :
   // plus aucun CSV servi directement au front.
   buildGoogleMockData(overrides || null);
@@ -601,6 +615,40 @@ test('Kool : GMV global correct avec des dates dans la colonne Remise (bug −2,
   assert.equal(kpi['GMV Brut (Item total)'], '88.5', 'GMV Brut Kool (dates en Remise) : ' + JSON.stringify(kpi));
   assert.equal(kpi['GMV (Total Food VF)'], '83.5', 'GMV After Kool (J) : ' + JSON.stringify(kpi));
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Kool : tranches — un 429 quota (Google) est attendu puis réessayé, les détails se chargent', async () => {
+  // Diagnostic 2026-11-28 : details-kool échouait en 502 à chaque synchro
+  // Kool — le 429 quota était invisible (Worker -> 502), le front
+  // réessayait après 2 s/5 s (même fenêtre de 60 s) et la source tombait
+  // à 0. Désormais le Worker renvoie 429, le front attend la fin de la
+  // fenêtre puis réessaie : les détails finissent par se charger.
+  // Compteur à 3 : avant le correctif, les 2 reprises courtes (2 s/5 s)
+  // s'épuisent sur les 3 429 et la source vaut [] ; après, les reprises
+  // quota (4 max) passent et les lignes arrivent.
+  const w = bootKool();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  // Synchro manuelle complète d'abord (file des tranches libre ensuite :
+  // après le login, la marque active est Yassir, donc pas de synchro auto
+  // Kool en arrière-plan qui consommerait les 429 du test).
+  await w.yassirSyncKoolSheets(true);
+  assert.ok(w.koolOrderItemsByOrderId.size > 0, 'aucun détail article Kool indexé');
+  // Fenêtre de quota ramenée à 50 ms pour le test (crochet de test).
+  w.__PULSE_SLICE_QUOTA_WAIT_MS__ = 50;
+  try {
+    // Les 3 prochains appels valeurs Google renvoient 429, puis ça passe.
+    googleFailValues429Count = 3;
+    googleValuesCalls429 = 0;
+    const rows = await w.yassirLireFeuilleViaApiTranches('details-kool', { brand: 'kool' });
+    assert.equal(googleValuesCalls429, 3, 'les 3 appels 429 attendus n\'ont pas eu lieu');
+    assert.ok(Array.isArray(rows) && rows.length > 1, 'détails vides après reprise 429');
+    assert.deepEqual(rows[0].slice(0, 3), ['Order ID', 'Date', 'Restaurant']);
+    assert.equal(rows.length - 1, 5, '5 lignes de détail attendues (fixture Articles)');
+    assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+  } finally {
+    w.__PULSE_SLICE_QUOTA_WAIT_MS__ = undefined;
+    googleFailValues429Count = 0;
+  }
 });
 
 test('page de connexion : carte compacte, sélecteur Kool (un seul Kool + point noir), bascule de marque', () => {

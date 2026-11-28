@@ -422,6 +422,7 @@ export async function handle(request, env) {
     } catch (e) {
       if (e && e.status === 400) return fail(400, e.message);
       if (e && e.status === 500) return fail(500, 'Lecture Google Sheets non configurée.');
+      if (e && e.status === 429) return fail(429, 'Quota Google Sheets dépassé, réessayez dans une minute.');
       return fail(502, 'Lecture de la feuille impossible.');
     }
   }
@@ -482,6 +483,7 @@ export async function handle(request, env) {
       } catch (err) { /* le diagnostic ne doit jamais casser la lecture */ }
       if (e && e.status === 400) return fail(400, e.message);
       if (e && e.status === 500) return fail(500, 'Lecture Google Sheets non configurée.');
+      if (e && e.status === 429) return fail(429, 'Quota Google Sheets dépassé, réessayez dans une minute.');
       return fail(502, 'Lecture de la feuille impossible.');
     }
   }

@@ -27,6 +27,19 @@ export class SheetsError extends Error {
   }
 }
 
+// Statut amont Google préservé pour le quota (429) uniquement : c'est un
+// signal transitoire et actionnable (le client attend la fin de la fenêtre
+// de 60 s et réessaie). Les autres erreurs restent un 502 générique : le
+// statut (403/404/…) révélerait l'état de la configuration du compte de
+// service, et le message de Google n'est jamais propagé.
+// (Diagnostic 2026-11-28 : details-kool échouait en 502 à chaque synchro
+// Kool — le 429 quota était invisible, le front réessayait après 2 s/5 s,
+// toujours dans la même fenêtre de 60 s, et la source tombait à 0.)
+function sheetsErrorFromResponse(res, message) {
+  if (res && res.status === 429) return new SheetsError(429, 'Quota Google Sheets dépassé.');
+  return new SheetsError(502, message);
+}
+
 // Jeton d'accès mis en cache en mémoire (par isolate Worker) jusqu'à expiration.
 let cachedToken = null;
 export function clearGoogleTokenCache() { cachedToken = null; }
@@ -102,7 +115,8 @@ export async function getAccessToken(env, fetchImpl = fetch) {
     throw new SheetsError(502, "Échange de jeton Google impossible.");
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.access_token) {
+  if (!res.ok) throw sheetsErrorFromResponse(res, "Échange de jeton Google impossible.");
+  if (!body.access_token) {
     throw new SheetsError(502, "Échange de jeton Google impossible.");
   }
   const expiresInMs = (Number(body.expires_in) || 3600) * 1000;
@@ -136,7 +150,7 @@ export async function readSheetRange(env, spreadsheetId, range, fetchImpl = fetc
     throw new SheetsError(502, 'Lecture de la feuille impossible.');
   }
   if (!res.ok) {
-    throw new SheetsError(502, 'Lecture de la feuille impossible.');
+    throw sheetsErrorFromResponse(res, 'Lecture de la feuille impossible.');
   }
   const body = await res.json().catch(() => ({}));
   return { spreadsheetId, range, values: Array.isArray(body.values) ? body.values : [] };
@@ -158,7 +172,7 @@ export async function getSpreadsheetSheets(env, spreadsheetId, fetchImpl = fetch
     throw new SheetsError(502, 'Lecture de la feuille impossible.');
   }
   if (!res.ok) {
-    throw new SheetsError(502, 'Lecture de la feuille impossible.');
+    throw sheetsErrorFromResponse(res, 'Lecture de la feuille impossible.');
   }
   const body = await res.json().catch(() => ({}));
   const sheets = Array.isArray(body.sheets) ? body.sheets : [];
@@ -196,7 +210,7 @@ export async function readSheetRowsChunk(env, spreadsheetId, title, startRow, en
     throw new SheetsError(502, 'Lecture de la feuille impossible.');
   }
   if (!res.ok) {
-    throw new SheetsError(502, 'Lecture de la feuille impossible.');
+    throw sheetsErrorFromResponse(res, 'Lecture de la feuille impossible.');
   }
   const body = await res.json().catch(() => ({}));
   return Array.isArray(body.values) ? body.values : [];

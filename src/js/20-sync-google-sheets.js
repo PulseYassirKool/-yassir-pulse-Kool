@@ -39,8 +39,25 @@
           // et faisait échouer la lecture (erreur silencieuse → []).
           // Les pages suivantes relisent le cache écrit par la page 0.
           var freshParam = (page === 0) ? fresh : 0;
-          return PulseAuth.call('GET', '/api/sheets/' + encodeURIComponent(source) +
-            '?brand=' + brand + '&page=' + page + '&pageSize=' + pageSize + '&fresh=' + freshParam)
+          // Reprise quota (2026-11-28) : un 429 sur le chemin historique
+          // (rafale de début de synchro) attend la fin de la fenêtre
+          // (60 s) puis réessaie — sans elle, la source tombait en échec
+          // immédiat (ex. Offre Participation → règles de secours). La
+          // pause est aussi notée pour les tranches, mises en pause.
+          function appelerPage(attempt) {
+            return PulseAuth.call('GET', '/api/sheets/' + encodeURIComponent(source) +
+              '?brand=' + brand + '&page=' + page + '&pageSize=' + pageSize + '&fresh=' + freshParam)
+              .catch(function (err) {
+                if (err && err.status === 429 && attempt < 2) {
+                  if (typeof window.yassirNoterQuotaGoogle === 'function') window.yassirNoterQuotaGoogle();
+                  var waitMs = (typeof yassirQuotaWaitMs === 'function') ? yassirQuotaWaitMs() : 60000;
+                  return new Promise(function (r) { setTimeout(r, waitMs); })
+                    .then(function () { return appelerPage(attempt + 1); });
+                }
+                throw err;
+              });
+          }
+          return appelerPage(0)
             .then(function (data) {
               var rows = (data && Array.isArray(data.rows)) ? data.rows : [];
               var totalPages = (data && typeof data.totalPages === 'number') ? data.totalPages : 0;
@@ -72,7 +89,7 @@
       // Le Worker ne fait ni déduplication ni alignement ici : le front s'en
       // charge (fusion par nom d'en-tête + déduplication par N° commande ;
       // détails : déduplication commande|article dans indexKoolOrderItemsRows).
-      // Débit bridé à 1 tranche / 1,5 s (quota Sheets API : 60 lectures/min
+      // Débit bridé à 1 tranche / 2 s (quota Sheets API : 60 lectures/min
       // par COMPTE — le compte de service est un seul compte — c'est lui
       // qui plafonne, pas les 300/min par projet). Le correctif « 2/s »
       // du 2026-11-28 ~12:35 visait les 300/min et restait à ~240 lectures
@@ -82,32 +99,75 @@
       // Le Worker met en cache les en-têtes par onglet (TTL 10 min) : une
       // tranche coûte 1 seule lecture (au lieu de 2 : sonde + tranche).
       // Tranches grosses = moins d'appels = moins de quota : data-oct/nov
-      // 1 000 lignes, data-kool/détails 2 000 (plafond Worker). À 1,5 s,
-      // une synchro Kool complète (~197 tranches) prend ~5 min pour
-      // ~40 lectures/min — sous les 60/min, avec marge pour les lectures
-      // historiques du début de synchro et les réessais.
+      // 1 000 lignes, data-kool/détails 2 000 (plafond Worker). À 2 s,
+      // une synchro Kool complète (~200 tranches) prend ~7 min pour
+      // ~30 lectures/min. Correctif 2026-11-28 (details-kool en 502 à
+      // chaque synchro) : à 1,5 s, la 1re minute frôlait 57 lectures
+      // (rafale historique ~17 lectures en parallèle au démarrage +
+      // ~40 tranches/min) — sans marge, le moindre isolate froid
+      // (sonde = +1 lecture) faisait tomber le quota, et le front
+      // réessayait après 2 s/5 s, toujours dans la même fenêtre de 60 s.
+      // Désormais : 2 s/tranche (~30/min, 1re minute ~47 lectures) et,
+      // sur 429, pause globale jusqu'à la fin de la fenêtre (60 s) puis
+      // reprise — la synchro finit, plus lentement, au lieu d'échouer.
       // (Les tailles avaient été divisées par deux le 2026-11-28 par
       // prudence CPU — mauvaise piste : les échecs étaient le quota, pas
       // la taille ; les mesures locales donnent ~1,5-5,5 ms / 1 000 lignes.)
-      // Une tranche en échec (429/1102, isolate froid : signature du jeton)
-      // est réessayée 2 fois AVEC ATTENTE (2 s puis 5 s) — la lecture est
+      // Une tranche en échec est réessayée : 429 (quota) → 4 reprises
+      // avec attente de la fenêtre (60 s, via la file) ; autre erreur →
+      // 2 reprises AVEC ATTENTE (2 s puis 5 s). La lecture est
       // idempotente, et un réessai immédiat ne fait qu'aggraver un 429.
       var SLICE_SIZES = { 'data-oct': 1000, 'data-nov': 1000, 'data-kool': 2000, 'details-kool': 2000 };
       var SLICE_MAX_RETRIES = 2;
-      var SLICE_MIN_INTERVAL_MS = 1500;
+      var SLICE_MAX_RETRIES_QUOTA = 4; // 429 : plus de reprises, la fenêtre est de 60 s
+      var SLICE_MIN_INTERVAL_MS = 2000;
       var SLICE_RETRY_DELAYS_MS = [2000, 5000];
+      // Fenêtre de quota Google (60 lectures/min/compte) : après un 429, on
+      // attend sa fin avant tout nouvel appel (tranches comme historique).
+      var SLICE_QUOTA_WAIT_MS = 60000;
       var _sliceLastCallMs = 0;
       var _sliceQueue = Promise.resolve();
+      var _sliceQuotaBlockedUntil = 0; // horodatage : aucun appel tranche avant cette heure
+      function yassirQuotaWaitMs() {
+        // Crochet de test : la fenêtre de quota (60 s) est ramenée à
+        // quelques ms par les tests (window.__PULSE_SLICE_QUOTA_WAIT_MS__),
+        // sans quoi un test de reprise 429 durerait des minutes.
+        try {
+          var ov = Number(window.__PULSE_SLICE_QUOTA_WAIT_MS__);
+          if (Number.isFinite(ov) && ov >= 0) return ov;
+        } catch (e) {}
+        return SLICE_QUOTA_WAIT_MS;
+      }
+      function yassirNoterQuotaGoogle() {
+        // Un 429 vient d'être reçu : bloquer les appels jusqu'à la fin de la
+        // fenêtre de quota, pour ne pas brûler le quota en réessais immédiats.
+        _sliceQuotaBlockedUntil = Date.now() + yassirQuotaWaitMs();
+      }
+      function yassirAttendreQuotaGoogle() {
+        var wait = Math.max(0, _sliceQuotaBlockedUntil - Date.now());
+        return wait > 0 ? new Promise(function (r) { setTimeout(r, wait); }) : Promise.resolve();
+      }
+      window.yassirNoterQuotaGoogle = yassirNoterQuotaGoogle;
       function yassirAppelerTranche(url) {
-        // File d'attente globale : au plus une tranche toutes les 1,5 s,
+        // File d'attente globale : au plus une tranche toutes les 2 s,
         // même quand deux synchros (Yassir + Kool) tournent en parallèle.
+        // Sur 429, la file attend la fin de la fenêtre de quota (60 s)
+        // avant le prochain appel — toutes les sources sont mises en pause.
         var task = _sliceQueue.then(function () {
+          return yassirAttendreQuotaGoogle();
+        }).then(function () {
           var now = Date.now();
           var wait = _sliceLastCallMs ? Math.max(0, SLICE_MIN_INTERVAL_MS - (now - _sliceLastCallMs)) : 0;
           _sliceLastCallMs = now + wait;
           return wait > 0 ? new Promise(function (r) { setTimeout(r, wait); }) : Promise.resolve();
         }).then(function () {
           return PulseAuth.call('GET', url);
+        }).catch(function (err) {
+          // 429 (quota Google) : noter le blocage pour que les tranches
+          // suivantes attendent la fin de la fenêtre au lieu de brûler
+          // le quota. Les autres erreurs passent telles quelles.
+          if (err && err.status === 429) yassirNoterQuotaGoogle();
+          throw err;
         });
         _sliceQueue = task.catch(function () {});
         return task;
@@ -166,7 +226,14 @@
             '?brand=' + brand + '&tab=' + encodeURIComponent(tab) +
             '&slice=' + slice + '&sliceSize=' + sliceSize)
             .catch(function (err) {
-              if (attempt < SLICE_MAX_RETRIES) {
+              // 429 (quota Google) : la file attend déjà la fin de la
+              // fenêtre (60 s) — on réessaie sans délai supplémentaire,
+              // avec plus de reprises (un 429 ne se résout pas en 2 s).
+              // Les autres erreurs gardent les reprises courtes (2 s, 5 s).
+              var isQuota = err && err.status === 429;
+              var maxRetries = isQuota ? SLICE_MAX_RETRIES_QUOTA : SLICE_MAX_RETRIES;
+              if (attempt < maxRetries) {
+                if (isQuota) return callSlice(tab, slice, attempt + 1);
                 var delay = SLICE_RETRY_DELAYS_MS[attempt] || 5000;
                 return new Promise(function (r) { setTimeout(r, delay); })
                   .then(function () { return callSlice(tab, slice, attempt + 1); });
@@ -207,15 +274,45 @@
           }
           return lireTranche();
         }
-        return yassirAppelerTranche('/api/sheets/' + encodeURIComponent(source) +
-          '?brand=' + brand + '&tabs=1')
+        // La liste des onglets (?tabs=1) n'avait AUCUNE reprise : un 429
+        // dessus faisait échouer la source entière immédiatement. Même
+        // reprise que les tranches (429 : attente de la fenêtre, 60 s).
+        function callTabs(attempt) {
+          return yassirAppelerTranche('/api/sheets/' + encodeURIComponent(source) +
+            '?brand=' + brand + '&tabs=1')
+            .catch(function (err) {
+              var isQuota = err && err.status === 429;
+              var maxRetries = isQuota ? SLICE_MAX_RETRIES_QUOTA : SLICE_MAX_RETRIES;
+              if (attempt < maxRetries) {
+                if (isQuota) return callTabs(attempt + 1);
+                var delay = SLICE_RETRY_DELAYS_MS[attempt] || 5000;
+                return new Promise(function (r) { setTimeout(r, delay); })
+                  .then(function () { return callTabs(attempt + 1); });
+              }
+              throw err;
+            });
+        }
+        return callTabs(0)
           .then(function (t) {
             var tabs = (t && Array.isArray(t.tabs)) ? t.tabs : [];
             if (tabs.length === 0) return [];
+            var failedTabs = [];
             var seq = Promise.resolve();
-            tabs.forEach(function (tab) { seq = seq.then(function () { return lireOnglet(tab); }); });
+            tabs.forEach(function (tab) {
+              seq = seq.then(function () {
+                // Un onglet en échec (tranche en échec après reprises) ne
+                // doit pas faire perdre les autres onglets : on le saute
+                // et on continue (synchro partielle plutôt que vide).
+                return lireOnglet(tab).catch(function (err) {
+                  failedTabs.push(tab);
+                  try { console.warn('[Sync] onglet ignoré après échec : ' + tab, err && err.message ? err.message : err); } catch (e) {}
+                  return false;
+                });
+              });
+            });
             return seq.then(function () {
               yassirNoterSliceSync(source, brand);
+              try { window.yassirLastSliceFailedTabs = failedTabs.slice(); } catch (e) {}
               return allRows || [];
             });
           });

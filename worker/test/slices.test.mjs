@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { getSheetsSlice, getSheetsTabs, getSheetsData, SLICE_MAX_ROWS, clearSliceHeadersCache } from '../src/sheets.js';
 import { clearGoogleTokenCache } from '../src/google-sheets.js';
+import { handle, hashPassword } from '../src/index.js';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -324,4 +325,84 @@ test('sécurité tab : portefeuilles filtré par lignes (défense en profondeur)
   }));
   const s = await getSheetsSlice(env, AM_OMAR, 'portfolios', 'kool', { tab: 'omar', slice: 0, sliceSize: 100 }, fetchImpl);
   assert.deepEqual(s.rows.map((r) => r[2]), ['Resto A']);
+});
+
+// ---------------------------------------------------------------------------
+// Quota Google (diagnostic 2026-11-28) : details-kool échouait en 502 à
+// chaque synchro Kool — le 429 quota était invisible (le Worker le
+// transformait en 502), le front réessayait après 2 s/5 s, toujours dans
+// la même fenêtre de 60 s, et la source tombait à 0. Ces tests doivent
+// ÉCHOUER avant le correctif (429 -> 502) et PASSER après (429 -> 429).
+// ---------------------------------------------------------------------------
+test('quota Google : un 429 sur une tranche est préservé (429, pas 502)', async () => {
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const { env, fetchImpl } = makeEnv(CONFIG, cannedTabs());
+  await env.PULSE_KV.put('config', JSON.stringify(CONFIG));
+  const quotaFetch = async (url) => {
+    if (String(url).includes('/values/')) {
+      return { ok: false, status: 429, json: async () => ({ error: { code: 429, message: 'Quota exceeded' } }) };
+    }
+    return fetchImpl(url);
+  };
+  await assert.rejects(
+    getSheetsSlice(env, OWNER, 'details-kool', 'kool', { tab: 'Feuille 3', slice: 0, sliceSize: 1000 }, quotaFetch),
+    (e) => e.status === 429
+  );
+  // ?tabs=1 (métadonnées) en 429 aussi.
+  const metaQuotaFetch = async (url) => {
+    if (String(url).includes('fields=sheets.properties')) {
+      return { ok: false, status: 429, json: async () => ({}) };
+    }
+    return fetchImpl(url);
+  };
+  await assert.rejects(
+    getSheetsTabs(env, OWNER, 'details-kool', 'kool', metaQuotaFetch),
+    (e) => e.status === 429
+  );
+});
+
+test('quota Google : la route /api/sheets renvoie 429 (pas 502) et le diagnostic l\'enregistre', async () => {
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const kv2 = new Map();
+  const env2 = {
+    GOOGLE_SERVICE_ACCOUNT_JSON: saJson,
+    JWT_SECRET: 'x'.repeat(40),
+    LEGACY_SALT: 'SEL_HERITE::',
+    ALLOWED_ORIGIN: 'https://app.test',
+    PULSE_KV: {
+      async get(key, type) { const v = kv2.get(key); if (v === undefined) return null; return type === 'json' ? JSON.parse(v) : v; },
+      async put(key, value) { kv2.set(key, typeof value === 'string' ? value : JSON.stringify(value)); },
+      async delete(key) { kv2.delete(key); }
+    }
+  };
+  kv2.set('accounts', JSON.stringify([
+    { username: 'proprio', hash: await hashPassword('Secret-Proprio-1'), role: 'owner', displayName: 'P', amName: null, protected: true }
+  ]));
+  kv2.set('config', JSON.stringify(CONFIG));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('oauth2.googleapis.com/token')) return { ok: true, status: 200, json: async () => ({ access_token: 'fake', expires_in: 3600 }) };
+    if (u.includes('/values/')) return { ok: false, status: 429, json: async () => ({ error: { code: 429, message: 'Quota exceeded' } }) };
+    throw new Error('URL non mockee: ' + u);
+  };
+  try {
+    const login = await handle(new Request('https://api.test/api/login', {
+      method: 'POST', body: JSON.stringify({ username: 'proprio', password: 'Secret-Proprio-1' }),
+      headers: { Origin: 'https://app.test', 'Content-Type': 'application/json' }
+    }), env2);
+    const token = (await login.json()).token;
+    assert.ok(token, 'jeton proprio attendu');
+    const r = await handle(new Request('https://api.test/api/sheets/details-kool?brand=kool&tab=Feuille%203&slice=0&sliceSize=1000', {
+      method: 'GET', headers: { Origin: 'https://app.test', Authorization: 'Bearer ' + token }
+    }), env2);
+    assert.equal(r.status, 429);
+    const lastError = JSON.parse(kv2.get('sheets:lastError'));
+    assert.equal(lastError.source, 'details-kool');
+    assert.equal(lastError.status, '429');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

@@ -114,6 +114,20 @@ test('lecture de plage : identifiant et plage invalides -> 400', async () => {
   await assert.rejects(() => readSheetRange(envSheets, '1kT0c2YtIwrqh7rkvXGybapah3yC8sNRZejHmOUO-bhA', 'A1/B2', fetchMock), (e) => e.status === 400);
 });
 
+test('quota Google : un 429 est préservé (pas transformé en 502) ; un 403 reste 502', async () => {
+  // Diagnostic 2026-11-28 (details-kool en 502 à chaque synchro) : le 429
+  // quota était invisible — le front réessayait après 2 s/5 s, toujours
+  // dans la même fenêtre de 60 s. Ce test doit ÉCHOUER avant le correctif
+  // (429 -> 502) et PASSER après (429 -> 429).
+  clearGoogleTokenCache();
+  const quota = mockGoogleFetch({ valuesStatus: 429 });
+  await assert.rejects(() => readSheetRange(envSheets, '1kT0c2YtIwrqh7rkvXGybapah3yC8sNRZejHmOUO-bhA', 'A1:B2', quota.fetchMock), (e) => e.status === 429);
+  // Un 403 reste un 502 générique (aucun détail de configuration exposé).
+  clearGoogleTokenCache();
+  const forbidden = mockGoogleFetch({ valuesStatus: 403 });
+  await assert.rejects(() => readSheetRange(envSheets, '1kT0c2YtIwrqh7rkvXGybapah3yC8sNRZejHmOUO-bhA', 'A1:B2', forbidden.fetchMock), (e) => e.status === 502);
+});
+
 test("chemins d'erreur : secret absent -> 500 ; échange refusé -> 502 ; lecture refusée -> 502", async () => {
   clearGoogleTokenCache();
   const { fetchMock } = mockGoogleFetch();
