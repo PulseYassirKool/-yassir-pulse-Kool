@@ -748,6 +748,229 @@ async function ensureSheetsCache(env, me, source, brand, fetchImpl) {
 
 // ---------- Point d'entrée : enveloppe JSON pour le front ----------
 // opts : { page (0-based), pageSize, fresh (1 = forcer, proprio seulement) }.
+// ---------- Chargement par tranches (plan gratuit : 10 ms CPU / invocation) ----------
+// Principe : le chargement complet d'une grosse source (data-nov ~40 000
+// lignes x 106 colonnes : ~1 070 ms CPU ; details-kool ~141 000 lignes :
+// ~1 200 ms CPU) dépasse de 100x le plafond gratuit. Une tranche ne lit
+// qu'une plage limitée (« Onglet!A501:ZZ1000 »), sans écriture KV, sans
+// déduplication inter-onglets et sans alignement de colonnes — le front fait
+// déjà ces deux derniers (fusion par nom d'en-tête + déduplication par
+// N° commande dans fusionnerNouveauFichierDansArchive ; à ajouter pour les
+// détails : déduplication commande|article dans indexKoolOrderItemsRows).
+// Le front enchaîne les tranches (onglet par onglet, tranche par tranche)
+// et stocke les lignes dans IndexedDB, comme aujourd'hui avec les pages.
+// Compatible plan payant : le chemin historique (pages + cache KV) est
+// inchangé ; les tranches sont un chemin additif (opts.slice / opts.tabs).
+export const SLICE_MAX_ROWS = 2000; // plafond de sécurité par tranche
+export const SLICE_DEFAULT_ROWS = 500;
+
+// Ligne vide ? Ne tester que les cellules « clés » (commande, article) : la
+// plupart des lignes les ont remplies ; si elles sont vides, on retombe sur
+// le test complet (même résultat que isEmptyRow, sans en payer le coût).
+function isEmptyRowFast(row, keyIdxs) {
+  if (!row || row.length === 0) return true;
+  for (const i of keyIdxs) {
+    if (i !== -1 && i < row.length) {
+      const c = row[i];
+      if (c !== null && c !== undefined && String(c).trim() !== '') return false;
+    }
+  }
+  return isEmptyRow(row);
+}
+
+// Ligne « Total » ? Tester la 1re cellule non vide, sans normalisation
+// (les totaux commencent par « Total » / « Sous-total » en clair).
+const TOTAL_ROW_RE = /^\s*(total|sous-total)\b/i;
+function isTotalRowFast(row) {
+  if (!row) return false;
+  for (const c of row) {
+    if (c === null || c === undefined || String(c).trim() === '') continue;
+    return TOTAL_ROW_RE.test(String(c));
+  }
+  return false;
+}
+
+function sliceFindHeader(probe, validator) {
+  if (validator) {
+    for (let i = 0; i < probe.length; i++) {
+      if (validator(normRow(probe[i]))) return i;
+    }
+    return -1;
+  }
+  return findHeaderRowIdx(probe);
+}
+
+function sliceContextFromHeaders(headers) {
+  const hNorm = normRow(headers);
+  return {
+    headers, headersNorm: hNorm,
+    idxResto: findRestaurantCol(hNorm),
+    idxApp: findAppCol(hNorm),
+    idxOrder: findOrderIdCol(hNorm),
+    idxArticle: findArticleCol(hNorm),
+    idxAm: findAmCol(hNorm),
+  };
+}
+
+// Filtres d'une tranche (miroir allégé de ctx.emitRow) : lignes vides,
+// lignes « Total » (sources Data), colonne APP (marque), portefeuille AM.
+// Pas de déduplication ni d'alignement : faits par le front.
+function sliceFilterRows(dataRows, sctx, ctx) {
+  const out = [];
+  const keyIdxs = [sctx.idxOrder, sctx.idxArticle].filter((i) => i !== -1);
+  const useKeys = keyIdxs.length > 0 ? keyIdxs : [0, 1];
+  for (const row of dataRows) {
+    if (!row) continue;
+    if (isEmptyRowFast(row, useKeys)) continue;
+    if (ctx.isDataSource && isTotalRowFast(row)) continue;
+    if (sctx.idxApp !== -1 && sctx.idxApp < row.length) {
+      const appVal = normalizeName(row[sctx.idxApp]);
+      if (ctx.source === 'budget') {
+        if ((appVal === 'kool' ? 'kool' : 'yassir') !== ctx.brand) continue;
+      } else if (appVal && appVal !== ctx.brand) {
+        continue;
+      }
+    } else if (ctx.source === 'budget' && ctx.brand !== 'yassir') {
+      continue;
+    }
+    if (ctx.source === 'budget' && ctx.filteredRole) {
+      const idxAm = sctx.idxAm;
+      const amCell = (idxAm !== -1 && idxAm < row.length) ? normalizeName(row[idxAm]) : '';
+      const isGlobalBudget = amCell === 'global' || amCell === 'total' || amCell === 'budget global' || amCell === 'total budget' || amCell.includes('budget global');
+      if (!isGlobalBudget && !amTabMatches(amCell, ctx.me.amName)) continue;
+    }
+    if (ctx.filteredRole && ctx.portfolioSet && ctx.source !== 'portfolios' && ctx.source !== 'budget' && ctx.source !== 'hist2025') {
+      // Détails Kool : filtrés sur la colonne Restaurant (la feuille en a
+      // une) — pas besoin de l'ensemble des N° de commande de la Data Kool
+      // (qui coûterait une lecture complète de data-kool par tranche).
+      // Écart de sémantique vs le chemin historique (filtre par N° de
+      // commande) : à valider sur les vraies données avant déploiement.
+      const idxResto = sctx.idxResto;
+      if (idxResto === -1 || idxResto >= row.length) continue;
+      if (!ctx.portfolioSet.has(normalizeName(row[idxResto]))) continue;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+// Lit UNE tranche d'un onglet.
+// startRow/endRow : lignes 1-based de la feuille. Tranche 0 : startRow = 1
+// (en-tête à détecter dans le morceau). Tranches suivantes : les 12
+// premières lignes sont relues pour retrouver les en-têtes (le Worker est
+// sans état entre les appels) — 1 appel values.get minuscule en plus.
+// Renvoie { headers, headerRowIdx, rows, done, skipped } ; rows = lignes de
+// DONNÉES brutes (non alignées, non dédupliquées : le front aligne par nom
+// d'en-tête et déduplique). done = la tranche est plus courte que demandé
+// (fin de l'onglet).
+async function loadTabSlice(env, plan, tabTitle, startRow, endRow, ctx) {
+  const { spreadsheetId } = plan;
+  const fetchImpl = ctx.fetchImpl;
+  if (startRow === 1) {
+    const chunk = await readSheetRowsChunk(env, spreadsheetId, tabTitle, 1, endRow, fetchImpl);
+    if (!chunk || chunk.length === 0) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: false, empty: true };
+    const headerRowIdx = sliceFindHeader(chunk.slice(0, 12), ctx.validator);
+    if (headerRowIdx === -1) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+    const headers = (chunk[headerRowIdx] || []).map((c) => (c === null || c === undefined ? '' : String(c)));
+    const sctx = sliceContextFromHeaders(headers);
+    const rows = sliceFilterRows(chunk.slice(headerRowIdx + 1), sctx, ctx);
+    return { headers, headerRowIdx, rows, done: chunk.length < endRow, skipped: false, empty: false };
+  }
+  const probe = await readSheetRowsChunk(env, spreadsheetId, tabTitle, 1, 12, fetchImpl);
+  if (!probe || probe.length === 0) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+  const headerRowIdx = sliceFindHeader(probe, ctx.validator);
+  if (headerRowIdx === -1) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+  const headers = (probe[headerRowIdx] || []).map((c) => (c === null || c === undefined ? '' : String(c)));
+  const sctx = sliceContextFromHeaders(headers);
+  const chunk = await readSheetRowsChunk(env, spreadsheetId, tabTitle, startRow, endRow, fetchImpl);
+  if (!chunk || chunk.length === 0) return { headers, headerRowIdx, rows: [], done: true, skipped: false, empty: false };
+  const rows = sliceFilterRows(chunk, sctx, ctx);
+  return { headers, headerRowIdx, rows, done: chunk.length < (endRow - startRow + 1), skipped: false, empty: false };
+}
+
+// Point d'entrée tranche : GET /api/sheets/:source?brand=&tab=&slice=0&sliceSize=500
+// tab : titre exact de l'onglet (obtenu via ?tabs=1) ; slice : 0-based ;
+// sliceSize : lignes de feuille par tranche (1..SLICE_MAX_ROWS).
+// Réponse : { source, brand, role, filtered, tab, slice, sliceSize,
+//   headers, headerRowIdx, rows, done, skipped, partial }.
+// Aucune écriture KV, aucun manifeste : le front stocke dans IndexedDB.
+export async function getSheetsSlice(env, me, source, brand, opts = {}, fetchImpl = fetch) {
+  const config = (await env.PULSE_KV.get('config', 'json')) || {};
+  const plan = resolveSourcePlan(config, source, brand);
+  if (!plan || !plan.spreadsheetId) throw new SheetsError(502, 'Lecture de la feuille impossible.');
+  const tabTitle = typeof opts.tab === 'string' ? opts.tab : '';
+  if (!tabTitle) throw new SheetsError(400, 'Onglet manquant.');
+  const slice = Math.max(0, Math.floor(opts.slice ?? 0) || 0);
+  const sliceSize = Math.min(SLICE_MAX_ROWS, Math.max(1, Math.floor(opts.sliceSize ?? SLICE_DEFAULT_ROWS) || SLICE_DEFAULT_ROWS));
+  const filteredRole = me.role === 'am' || me.role === 'market_am';
+  let portfolioSet = null;
+  if (filteredRole && source !== 'portfolios' && source !== 'hist2025') {
+    portfolioSet = await getPortfolioRestaurants(env, me, brand, fetchImpl);
+  }
+  const ctx = {
+    source, brand, fetchImpl, me, filteredRole, portfolioSet,
+    validator: plan.validator || null,
+    isDataSource: source === 'data-oct' || source === 'data-nov' || source === 'data-kool' || source === 'details-kool',
+  };
+  const startRow = slice * sliceSize + 1;
+  const endRow = (slice + 1) * sliceSize;
+  const res = await loadTabSlice(env, plan, tabTitle, startRow, endRow, ctx);
+  return {
+    source, brand, role: me.role, filtered: filteredRole,
+    tab: tabTitle, slice, sliceSize,
+    headers: res.headers, headerRowIdx: res.headerRowIdx,
+    rows: res.rows, done: res.done, skipped: res.skipped, partial: res.skipped,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// Liste des onglets d'une source (pour le chaînage des tranches côté front).
+// GET /api/sheets/:source?brand=&tabs=1 — 1 appel métadonnées, sans lecture
+// de données. Renvoie { tabs: [titres dans l'ordre, onglet principal en
+// premier], mainTab }.
+export async function getSheetsTabs(env, me, source, brand, fetchImpl = fetch) {
+  const config = (await env.PULSE_KV.get('config', 'json')) || {};
+  const plan = resolveSourcePlan(config, source, brand);
+  if (!plan || !plan.spreadsheetId) throw new SheetsError(502, 'Lecture de la feuille impossible.');
+  const sheets = await getSpreadsheetSheets(env, plan.spreadsheetId, fetchImpl);
+  const byTitle = new Map();
+  const byGid = new Map();
+  for (const s of sheets) {
+    byTitle.set(normalizeName(s.title), s);
+    if (s.id !== null && s.id !== undefined) byGid.set(String(s.id), s);
+  }
+  const resolveTab = (tabName, altTabs, gid) => {
+    for (const n of [tabName, ...(altTabs || [])]) {
+      const hit = byTitle.get(normalizeName(n));
+      if (hit) return hit;
+    }
+    if (gid !== undefined && gid !== null && gid !== '') {
+      const hit = byGid.get(String(gid));
+      if (hit) return hit;
+    }
+    return null;
+  };
+  let tabs = [];
+  const filteredRole = me.role === 'am' || me.role === 'market_am';
+  if (plan.kind === 'portfolios') {
+    for (const entry of plan.tabs) {
+      if (filteredRole && !amTabMatches(entry.am, me.amName)) continue;
+      const hit = resolveTab(entry.tab, entry.altTabs, entry.gid);
+      if (hit) tabs.push(hit.title);
+    }
+  } else if (plan.kind === 'named') {
+    const hit = resolveTab(plan.tab, plan.altTabs, plan.gid);
+    if (hit) tabs.push(hit.title);
+  } else {
+    tabs = sheets.slice(0, MAX_TABS).map((s) => s.title);
+  }
+  if (plan.mainTab) {
+    const idx = tabs.findIndex((t) => normalizeName(t) === normalizeName(plan.mainTab));
+    if (idx > 0) { const [m] = tabs.splice(idx, 1); tabs.unshift(m); }
+  }
+  return { source, brand, role: me.role, tabs, mainTab: plan.mainTab || (tabs[0] || ''), updatedAt: new Date().toISOString() };
+}
+
 export async function getSheetsData(env, me, source, brand = 'yassir', opts = {}, fetchImpl = fetch) {
   if (!SHEET_SOURCES.includes(source)) {
     throw new SheetsError(400, 'Source inconnue.');
@@ -781,6 +1004,15 @@ export async function getSheetsData(env, me, source, brand = 'yassir', opts = {}
       note: 'Feuille Statuts Yassir uniquement.',
       rows: []
     };
+  }
+
+  // Chemin par tranches (plan gratuit) : ?slice=N&sliceSize=S&tab=T ou ?tabs=1.
+  // Additif : le chemin historique (pages + cache KV) ci-dessous est inchangé.
+  if (opts.tabs === 1 || opts.tabs === '1' || opts.tabs === true) {
+    return getSheetsTabs(env, me, source, brand, fetchImpl);
+  }
+  if (opts.slice !== undefined && opts.slice !== null && opts.slice !== '') {
+    return getSheetsSlice(env, me, source, brand, opts, fetchImpl);
   }
 
   const key = cacheKey(me.username, brand, source);

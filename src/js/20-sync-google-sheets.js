@@ -22,6 +22,10 @@
         var o = opts || {};
         var brand = o.brand === 'kool' ? 'kool' : 'yassir';
         var fresh = o.fresh ? 1 : 0;
+        // Grosses sources : tranches (plan gratuit) au lieu des pages.
+        // Les petites sources gardent le chemin historique (pages + cache KV).
+        var BIG_SOURCES = { 'data-oct': 1, 'data-nov': 1, 'data-kool': 1, 'details-kool': 1 };
+        if (BIG_SOURCES[source]) return yassirLireFeuilleViaApiTranches(source, opts);
         var pageSize = o.pageSize || SHEETS_PAGE_SIZE;
         var allRows = null; // [en-têtes, ...lignes] — en-têtes de la 1re page
         var page = 0;
@@ -54,6 +58,147 @@
         return lirePage();
       }
       window.yassirLireFeuilleViaApi = yassirLireFeuilleViaApi;
+
+      // ---------- Chargement par tranches (plan gratuit : 10 ms CPU / invocation) ----------
+      // Le chargement complet d'une grosse source dépasse de 100x le plafond
+      // gratuit (data-nov ~1 070 ms CPU, details-kool ~1 200 ms). Une tranche
+      // ne lit qu'une plage limitée et ne coûte que quelques ms (mesuré avec
+      // le vrai code Worker et les vraies données, /tmp/proto) :
+      //   data-oct / data-nov (106 colonnes) : 500 lignes (~5,5 ms) ;
+      //   data-kool (33 colonnes) : 1 000 lignes (~4,3 ms) ;
+      //   details-kool (10 colonnes) : 1 000 lignes (~1,5 ms).
+      // Les feuilles sont en ordre anti-chronologique (plus récent d'abord) :
+      // les premières tranches apportent les semaines récentes.
+      // Le Worker ne fait ni déduplication ni alignement ici : le front s'en
+      // charge (fusion par nom d'en-tête + déduplication par N° commande ;
+      // détails : déduplication commande|article dans indexKoolOrderItemsRows).
+      // Débit bridé à 4 tranches/s (quota Sheets API : 300 lectures/min/projet).
+      // Une tranche en échec 1102 (isolate froid : signature du jeton) est
+      // réessayée 2 fois — la lecture est idempotente.
+      var SLICE_SIZES = { 'data-oct': 500, 'data-nov': 500, 'data-kool': 1000, 'details-kool': 1000 };
+      var SLICE_MAX_RETRIES = 2;
+      var SLICE_MIN_INTERVAL_MS = 250;
+      var _sliceLastCallMs = 0;
+      var _sliceQueue = Promise.resolve();
+      function yassirAppelerTranche(url) {
+        // File d'attente globale : au plus une tranche toutes les 250 ms,
+        // même quand deux synchros (Yassir + Kool) tournent en parallèle.
+        var task = _sliceQueue.then(function () {
+          var now = Date.now();
+          var wait = _sliceLastCallMs ? Math.max(0, SLICE_MIN_INTERVAL_MS - (now - _sliceLastCallMs)) : 0;
+          _sliceLastCallMs = now + wait;
+          return wait > 0 ? new Promise(function (r) { setTimeout(r, wait); }) : Promise.resolve();
+        }).then(function () {
+          return PulseAuth.call('GET', url);
+        });
+        _sliceQueue = task.catch(function () {});
+        return task;
+      }
+      // Fraîcheur d'une source (synchro auto seulement) : ne pas relire une
+      // grosse source synchronisée il y a moins de 30 min — l'archive
+      // IndexedDB fait foi entre-temps.
+      var SLICE_FRESH_MINUTES = 30;
+      function yassirSliceSyncRecente(source, brand) {
+        try {
+          var ts = Number(window.localStorage.getItem('yassir_slice_sync_' + source + '_' + brand) || 0);
+          return ts > 0 && (Date.now() - ts) < SLICE_FRESH_MINUTES * 60000;
+        } catch (e) { return false; }
+      }
+      function yassirNoterSliceSync(source, brand) {
+        try { window.localStorage.setItem('yassir_slice_sync_' + source + '_' + brand, String(Date.now())); } catch (e) {}
+      }
+      window.yassirSliceSyncRecente = yassirSliceSyncRecente;
+      function yassirAlignerLignesSurEnTetes(rows, fromHeaders, toHeaders) {
+        // Aligne les lignes d'un onglet sur les en-têtes de référence (par
+        // nom normalisé) — les onglets ont les mêmes colonnes, mais pas
+        // toujours dans le même ordre.
+        var norm = function (h) { return normalizeText(h).replace(/[_\-]+/g, ' ').trim(); };
+        var from = (fromHeaders || []).map(norm);
+        var to = (toHeaders || []).map(norm);
+        var used = {};
+        var colMap = to.map(function (th) {
+          for (var i = 0; i < from.length; i++) {
+            if (from[i] === th && !used[i]) { used[i] = true; return i; }
+          }
+          return from.indexOf(th);
+        });
+        return rows.map(function (row) {
+          var out = new Array(to.length).fill('');
+          for (var c = 0; c < to.length; c++) {
+            var s = colMap[c];
+            if (s !== -1 && s < row.length && row[s] !== null && row[s] !== undefined) out[c] = row[s];
+          }
+          return out;
+        });
+      }
+      // opts : { brand, fresh, onProgress(source, tab, slice, done, lignes),
+      //   onFirstSlices(rows) } — onFirstSlices est appelé après 2 tranches
+      //   (données récentes déjà là) pour un premier rendu rapide.
+      function yassirLireFeuilleViaApiTranches(source, opts) {
+        var o = opts || {};
+        var brand = o.brand === 'kool' ? 'kool' : 'yassir';
+        var sliceSize = SLICE_SIZES[source] || 500;
+        var onProgress = typeof o.onProgress === 'function' ? o.onProgress : null;
+        var onFirstSlices = typeof o.onFirstSlices === 'function' ? o.onFirstSlices : null;
+        var allRows = null; // [en-têtes de référence, ...lignes alignées]
+        var refHeaders = null;
+        var firstSlicesDone = false;
+        function callSlice(tab, slice, attempt) {
+          return yassirAppelerTranche('/api/sheets/' + encodeURIComponent(source) +
+            '?brand=' + brand + '&tab=' + encodeURIComponent(tab) +
+            '&slice=' + slice + '&sliceSize=' + sliceSize)
+            .catch(function (err) {
+              if (attempt < SLICE_MAX_RETRIES) return callSlice(tab, slice, attempt + 1);
+              throw err;
+            });
+        }
+        function lireOnglet(tab) {
+          var slice = 0;
+          function lireTranche() {
+            return callSlice(tab, slice, 0).then(function (data) {
+              if (!data || data.skipped) return false; // onglet ignoré
+              var rows = Array.isArray(data.rows) ? data.rows : [];
+              var headers = Array.isArray(data.headers) ? data.headers : [];
+              if (allRows === null) {
+                refHeaders = headers;
+                allRows = [headers].concat(rows);
+              } else if (rows.length > 0) {
+                allRows = allRows.concat(yassirAlignerLignesSurEnTetes(rows, headers, refHeaders));
+              }
+              if (onProgress) onProgress(source, tab, slice, !!data.done, allRows.length - 1);
+              slice += 1;
+              if (!firstSlicesDone && slice >= 2 && onFirstSlices) {
+                firstSlicesDone = true;
+                onFirstSlices(allRows);
+              }
+              // Garde-fous (bug vu en test le 2026-11-28 : la route Worker ne
+              // transmettait pas `slice`, la réponse historique n'avait pas
+              // de champ `done` et la boucle tournait indéfiniment) :
+              // on ne continue QUE si le Worker dit explicitement done=false,
+              // et jamais au-delà de 2000 tranches par onglet (la plus grosse
+              // source en demande ~300). Une réponse sans `done` s'arrête ici
+              // avec les lignes déjà reçues, jamais en boucle.
+              if (data.done !== false) return true;
+              if (slice >= 2000) return true;
+              return lireTranche();
+            });
+          }
+          return lireTranche();
+        }
+        return yassirAppelerTranche('/api/sheets/' + encodeURIComponent(source) +
+          '?brand=' + brand + '&tabs=1')
+          .then(function (t) {
+            var tabs = (t && Array.isArray(t.tabs)) ? t.tabs : [];
+            if (tabs.length === 0) return [];
+            var seq = Promise.resolve();
+            tabs.forEach(function (tab) { seq = seq.then(function () { return lireOnglet(tab); }); });
+            return seq.then(function () {
+              yassirNoterSliceSync(source, brand);
+              return allRows || [];
+            });
+          });
+      }
+      window.yassirLireFeuilleViaApiTranches = yassirLireFeuilleViaApiTranches;
 
       function isKnownSegmentLabel(val) {
         var n = normalizeText(val);
@@ -347,6 +492,11 @@
           { source: 'data-nov', label: (moisConfig[1] && moisConfig[1].label) || 'Novembre (Google Sheets)' }
         ];
         var promises = mois.map(function (m) {
+          // Synchro auto : source déjà synchronisée il y a moins de 30 min —
+          // on la saute (l'archive IndexedDB fait foi), sans la compter en échec.
+          if (!manualTrigger && yassirSliceSyncRecente(m.source, 'yassir')) {
+            return Promise.resolve({ label: m.label, rows: [], ok: true, skipped: true });
+          }
           return yassirLireFeuilleViaApi(m.source, { brand: 'yassir', fresh: !!(manualTrigger && isOwnerAdmin()) })
             .then(function (rows) {
               return { label: m.label, rows: rows, ok: true };
@@ -362,6 +512,10 @@
           var totalAddedRows = 0;
 
           results.forEach(function (res) {
+            if (res.skipped) {
+              loadedMonths.push(res.label.replace(' (Google Sheets)', '') + ' (à jour)');
+              return;
+            }
             if (res.ok && res.rows && res.rows.length > 1) {
               // Si ce mois est déjà présent dans storedFilesMeta, on le met à jour proprement
               var existingIdx = state.storedFilesMeta.findIndex(function (m) { return m.name === res.label; });

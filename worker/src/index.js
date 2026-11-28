@@ -442,11 +442,25 @@ export async function handle(request, env) {
     const page = Number(url.searchParams.get('page') || '0');
     const pageSize = Number(url.searchParams.get('pageSize') || '5000');
     const fresh = url.searchParams.get('fresh') === '1';
+    // Chemin par tranches (plan gratuit) : ?tabs=1 ou ?slice=N&sliceSize=S&tab=T.
+    // Sans ces paramètres, getSheetsData ignore le chemin tranches et
+    // renvoie le chemin historique (sans champ `done`) — le front bouclerait
+    // alors indéfiniment sur les tranches (vu en test le 2026-11-28).
+    const tabsParam = url.searchParams.get('tabs');
+    const sliceParam = url.searchParams.get('slice');
+    const sliceSizeParam = url.searchParams.get('sliceSize');
+    const tabParam = url.searchParams.get('tab');
     if (!Number.isInteger(page) || page < 0 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 10000) {
       return fail(400, 'Pagination invalide.');
     }
     try {
-      const data = await getSheetsData(env, me, source, brand, { page, pageSize, fresh });
+      const data = await getSheetsData(env, me, source, brand, {
+        page, pageSize, fresh,
+        tabs: tabsParam === '1' ? 1 : undefined,
+        slice: sliceParam === null ? undefined : Number(sliceParam),
+        sliceSize: sliceSizeParam === null ? undefined : Number(sliceSizeParam),
+        tab: tabParam === null ? undefined : tabParam
+      });
       return reply(data);
     } catch (e) {
       if (e && e.status === 400) return fail(400, e.message);

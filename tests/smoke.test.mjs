@@ -1983,24 +1983,41 @@ test('2025 Kool : le stockage validé stocke et compte, l\'invalide retourne 0 s
 // Les onglets journaliers sont fusionnés par /api/sheets/:source ; les tests
 // G3 plus bas couvrent la pagination, la garde manuelle et l'échec isolé.
 
-test('G3 : lecture paginée — toutes les pages fusionnées, en-têtes une seule fois', async () => {
+test('G3 : lecture par tranches — toutes les tranches fusionnées, en-têtes une seule fois', async () => {
   const w = bootKool();
   await login(w, 'proprio', 'Proprio-Test-123');
-  // Data Kool simulée : 5 commandes (1001-1005). pageSize=2 -> 3 pages.
+  // Data Kool simulée : 5 commandes (1001-1005). Grosses sources = tranches
+  // (plan gratuit, correctif 2026-11-28), plus de pages : ?tabs=1 puis
+  // ?slice=0&sliceSize=1000 — le Worker doit transmettre ces paramètres
+  // (route /api/sheets/:source) sinon la boucle ne termine jamais.
   const callsBefore = w.__sheetApiCalls.length;
-  const rows = await w.yassirLireFeuilleViaApi('data-kool', { brand: 'kool', pageSize: 2 });
+  const rows = await w.yassirLireFeuilleViaApi('data-kool', { brand: 'kool' });
   assert.equal(rows.length, 6, '1 en-tête + 5 lignes attendues, obtenu ' + rows.length);
   assert.equal(rows[0][4], 'N° commande', '1re ligne = en-têtes');
-  assert.equal(rows.filter((r) => String(r[4] || '') === 'N° commande').length, 1, 'en-têtes répétés entre les pages');
+  assert.equal(rows.filter((r) => String(r[4] || '') === 'N° commande').length, 1, 'en-têtes répétés entre les tranches');
   const oids = rows.slice(1).map((r) => String(r[4] || '').trim()).sort();
-  assert.deepEqual(oids, ['1001', '1002', '1003', '1004', '1005'], 'commandes fusionnées : ' + oids.join(','));
+  // Comparaison par join : les lignes alignées par le chemin tranches sont
+  // des tableaux du realm jsdom — deepEqual strict les rejetterait alors que
+  // le contenu est identique.
+  assert.equal(oids.join(','), '1001,1002,1003,1004,1005', 'commandes fusionnées : ' + oids.join(','));
   const newCalls = w.__sheetApiCalls.slice(callsBefore);
-  assert.ok(newCalls.some((u) => u.includes('/api/sheets/data-kool') && u.includes('page=0')), 'page 0 non appelée');
-  assert.ok(newCalls.some((u) => u.includes('page=1')), 'page 1 non appelée');
-  assert.ok(newCalls.some((u) => u.includes('page=2')), 'page 2 non appelée');
-  assert.ok(!newCalls.some((u) => u.includes('fresh=1')), 'lecture paginée sans fresh=1');
-  assert.ok(!sheetCalls.some((u) => u.includes('docs.google.com')), 'appel Google direct pendant la lecture paginée');
+  assert.ok(newCalls.some((u) => u.includes('/api/sheets/data-kool') && u.includes('tabs=1')), 'tabs=1 non appelé');
+  assert.ok(newCalls.some((u) => u.includes('/api/sheets/data-kool') && u.includes('slice=0')), 'tranche 0 non appelée');
+  assert.ok(!newCalls.some((u) => u.includes('page=')), 'le chemin tranches ne doit pas paginer');
+  assert.ok(!newCalls.some((u) => u.includes('fresh=1')), 'lecture par tranches sans fresh=1');
+  assert.ok(!sheetCalls.some((u) => u.includes('docs.google.com')), 'appel Google direct pendant la lecture par tranches');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+
+  // Chemin historique (petites sources) : la pagination est toujours en place.
+  // Commissions simulées : 2 lignes de données → pageSize=1 donne 2 pages
+  // (totalRows ne compte que les données, l'en-tête est répété sur chaque page).
+  const callsBefore2 = w.__sheetApiCalls.length;
+  const commRows = await w.yassirLireFeuilleViaApi('commissions', { brand: 'kool', pageSize: 1 });
+  assert.equal(commRows.length, 3, 'commissions : 1 en-tête + 2 lignes, obtenu ' + commRows.length);
+  assert.equal(commRows.filter((r) => String(r[0] || '') === 'Restaurant').length, 1, 'en-têtes commissions répétés');
+  const newCalls2 = w.__sheetApiCalls.slice(callsBefore2);
+  assert.ok(newCalls2.some((u) => u.includes('/api/sheets/commissions') && u.includes('page=0')), 'commissions page 0 non appelée');
+  assert.ok(newCalls2.some((u) => u.includes('page=1')), 'commissions page 1 non appelée');
 });
 
 test('G3 : garde synchro manuelle proprio + échec d’une source isolé des autres', async () => {

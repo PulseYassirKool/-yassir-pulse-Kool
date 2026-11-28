@@ -161,12 +161,18 @@
         var totalLines = 0;
         var minDateIso = '';
         var maxDateIso = '';
+        // Déduplication commande|article (le Worker ne la fait plus sur le
+        // chemin par tranches) : même normalisation que côté serveur.
+        var _seenOrderArticle = new Set();
         for (var r = 1; r < rows.length; r++) {
           var row = rows[r];
           if (!row) continue;
           var oid = String(row[idxOid] || '').trim();
           var art = String(row[idxArt] || '').trim();
           if (!oid && !art) continue;
+          var _dedupeKey = normalizeText(oid) + '|' + normalizeText(art);
+          if (_seenOrderArticle.has(_dedupeKey)) continue;
+          _seenOrderArticle.add(_dedupeKey);
           var oidLow = oid.toLowerCase();
           var restoStr = String(row[idxResto] || '').trim();
           var restoLow = restoStr.toLowerCase();
@@ -804,8 +810,12 @@
         var freshKool = !!(manualTrigger && isOwnerAdmin());
 
         // 1. Data Kool (tous les onglets, fusionnés côté Worker).
-        var pData = yassirLireFeuilleViaApi('data-kool', { brand: 'kool', fresh: freshKool })
-          .catch(function () { return []; });
+        // Synchro auto : source déjà synchronisée il y a moins de 30 min —
+        // on la saute (l'archive IndexedDB fait foi), sans la compter en échec.
+        var pData = (!manualTrigger && window.yassirSliceSyncRecente && window.yassirSliceSyncRecente('data-kool', 'kool'))
+          ? Promise.resolve([])
+          : yassirLireFeuilleViaApi('data-kool', { brand: 'kool', fresh: freshKool })
+            .catch(function () { return []; });
 
         // 2. Commission Kool (onglet « Commissions », filtre APP = Kool).
         var pComm = yassirLireFeuilleViaApi('commissions', { brand: 'kool', fresh: freshKool })
@@ -828,8 +838,10 @@
           .catch(function () { return []; });
 
         // 5. Détails des commandes Kool (Articles, Catégories, Quantités, Prix).
-        var pOrderItems = yassirLireFeuilleViaApi('details-kool', { brand: 'kool', fresh: freshKool })
-          .catch(function () { return []; });
+        var pOrderItems = (!manualTrigger && window.yassirSliceSyncRecente && window.yassirSliceSyncRecente('details-kool', 'kool'))
+          ? Promise.resolve([])
+          : yassirLireFeuilleViaApi('details-kool', { brand: 'kool', fresh: freshKool })
+            .catch(function () { return []; });
 
         // 6. Données 2025 Kool (onglet « 2025 Kool » du classeur fusionné, gid=14) :
         // lues en parallèle et stockées par marque (state.historical2025RowsKool).
