@@ -283,6 +283,18 @@ function boot() {
   return w;
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Attend une condition durable (plutôt qu'un délai fixe) : la synchro par
+// tranches (intervalle 1,5 s) rend les délais fixes fragiles — la donnée
+// n'est pas forcément là après 600/1200 ms.
+const waitFor = async (fn, timeoutMs = 20000, stepMs = 200) => {
+  const start = Date.now();
+  for (;;) {
+    if (fn()) return;
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor : condition jamais atteinte après ' + timeoutMs + ' ms');
+    await wait(stepMs);
+  }
+};
 const login = async (w, user, pwd) => {
   w.document.getElementById('loginUsername').value = user;
   w.document.getElementById('loginPassword').value = pwd;
@@ -1262,7 +1274,16 @@ test('Yassir : règle comptable — offre sans règle à 100 % restaurant (carte
   ];
   const dataFile = makeXlsxFile(dataAoa, 'Data exp', 'data-exp.xlsx');
   w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
-  await wait(1200);
+  // La synchro auto à la connexion charge les lignes mock par tranches
+  // (intervalle 1,5 s). Le GMV est filtré par la période courante : la
+  // synchro applique la semaine par défaut S47, qui exclut YAF-1 (octobre).
+  // On attend la semaine S47 (synchro terminée), puis on passe en période
+  // « Tout » pour compter toutes les livrées, et on attend le GMV complet.
+  // (Avant, l'assertion passait par une course : elle tombait avant que la
+  // semaine S47 ne soit appliquée.)
+  await waitFor(() => w.document.getElementById('filterWeekSelect').value.endsWith('|S47'));
+  w.yassirApplyDatePreset('ALL');
+  await waitFor(() => w.document.getElementById('kpiGmvLivrees').textContent === '490,00 TND');
 
   // Carte GMV (Export Offres, 2026-11-28) : GMV livrées = somme « item total »
   // (100 + 50 + 80 + 60 + 40 = 330 pour le fichier importé) + 160 des lignes
@@ -2919,7 +2940,9 @@ test('Cache de marque : bascule → synchro → la semaine est re-sauvegardée',
   // parseOrderDayToIsoDate, d'où le 26/11 et non début décembre.)
   const wY = boot();
   await login(wY, 'proprio', 'Proprio-Test-123');
-  await wait(600);
+  // La synchro auto à la connexion charge les données par tranches
+  // (intervalle 1,5 s) : on attend la semaine S47 plutôt qu'un délai fixe.
+  await waitFor(() => wY.document.getElementById('filterWeekSelect').value.endsWith('|S47'));
   assert.ok(wY.document.getElementById('filterWeekSelect').value.endsWith('|S47'), 'semaine Yassir = S47 avant données fraîches, pas ' + wY.document.getElementById('filterWeekSelect').value);
   setGoogleMockTabs(NOV, { 'Data exp': [TARGET_HEADERS_TEST.slice(), yassirRow('16/11/2026', 'YAF-2', 'Resto Yassir A', 60, 0, '', ''), yassirRow('26/11/2026', 'YAF-3', 'Resto Yassir A', 60, 0, '', '')] });
   await wY.yassirSyncHistoricalSheets(true);

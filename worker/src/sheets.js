@@ -861,11 +861,32 @@ function sliceFilterRows(dataRows, sctx, ctx) {
   return out;
 }
 
+// Cache des en-têtes par onglet (best-effort, TTL 10 min, par isolate) :
+// sans lui, chaque tranche > 0 relit les lignes 1-12 pour retrouver les
+// en-têtes — soit 2 lectures Sheets API par tranche. Avec le cache, une
+// tranche coûte 1 seule lecture (la tranche elle-même). Un cache manquant
+// ou expiré retombe sur la sonde : le comportement reste identique.
+// Quota Sheets : 60 lectures/min par COMPTE (le compte de service est un
+// seul compte) — c'est lui qui plafonne, pas les 300/min par projet.
+const _sliceHeadersCache = new Map();
+const SLICE_HEADERS_TTL_MS = 10 * 60 * 1000;
+export function clearSliceHeadersCache() { _sliceHeadersCache.clear(); }
+function sliceHeadersCacheGet(spreadsheetId, tabTitle) {
+  const e = _sliceHeadersCache.get(spreadsheetId + '|' + tabTitle);
+  if (!e || Date.now() - e.at > SLICE_HEADERS_TTL_MS) return null;
+  return e;
+}
+function sliceHeadersCacheSet(spreadsheetId, tabTitle, headers, headerRowIdx) {
+  _sliceHeadersCache.set(spreadsheetId + '|' + tabTitle, { headers: headers.slice(), headerRowIdx, at: Date.now() });
+}
+
 // Lit UNE tranche d'un onglet.
 // startRow/endRow : lignes 1-based de la feuille. Tranche 0 : startRow = 1
-// (en-tête à détecter dans le morceau). Tranches suivantes : les 12
-// premières lignes sont relues pour retrouver les en-têtes (le Worker est
-// sans état entre les appels) — 1 appel values.get minuscule en plus.
+// (en-tête à détecter dans le morceau). Tranches suivantes : les en-têtes
+// viennent du cache (rempli par la tranche 0 ou par la première sonde) ;
+// sans cache, les 12 premières lignes sont relues pour retrouver les
+// en-têtes (le Worker est sans état entre les appels) — 1 appel values.get
+// minuscule en plus.
 // Renvoie { headers, headerRowIdx, rows, done, skipped } ; rows = lignes de
 // DONNÉES brutes (non alignées, non dédupliquées : le front aligne par nom
 // d'en-tête et déduplique). done = la tranche est plus courte que demandé
@@ -877,17 +898,34 @@ async function loadTabSlice(env, plan, tabTitle, startRow, endRow, ctx) {
     const chunk = await readSheetRowsChunk(env, spreadsheetId, tabTitle, 1, endRow, fetchImpl);
     if (!chunk || chunk.length === 0) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: false, empty: true };
     const headerRowIdx = sliceFindHeader(chunk.slice(0, 12), ctx.validator);
-    if (headerRowIdx === -1) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+    if (headerRowIdx === -1) {
+      sliceHeadersCacheSet(spreadsheetId, tabTitle, [], -1);
+      return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+    }
     const headers = (chunk[headerRowIdx] || []).map((c) => (c === null || c === undefined ? '' : String(c)));
+    sliceHeadersCacheSet(spreadsheetId, tabTitle, headers, headerRowIdx);
     const sctx = sliceContextFromHeaders(headers);
     const rows = sliceFilterRows(chunk.slice(headerRowIdx + 1), sctx, ctx);
     return { headers, headerRowIdx, rows, done: chunk.length < endRow, skipped: false, empty: false };
   }
-  const probe = await readSheetRowsChunk(env, spreadsheetId, tabTitle, 1, 12, fetchImpl);
-  if (!probe || probe.length === 0) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
-  const headerRowIdx = sliceFindHeader(probe, ctx.validator);
-  if (headerRowIdx === -1) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
-  const headers = (probe[headerRowIdx] || []).map((c) => (c === null || c === undefined ? '' : String(c)));
+  const cached = sliceHeadersCacheGet(spreadsheetId, tabTitle);
+  let headers;
+  let headerRowIdx;
+  if (cached) {
+    if (cached.headerRowIdx === -1) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+    headers = cached.headers.slice();
+    headerRowIdx = cached.headerRowIdx;
+  } else {
+    const probe = await readSheetRowsChunk(env, spreadsheetId, tabTitle, 1, 12, fetchImpl);
+    if (!probe || probe.length === 0) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+    headerRowIdx = sliceFindHeader(probe, ctx.validator);
+    if (headerRowIdx === -1) {
+      sliceHeadersCacheSet(spreadsheetId, tabTitle, [], -1);
+      return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: false };
+    }
+    headers = (probe[headerRowIdx] || []).map((c) => (c === null || c === undefined ? '' : String(c)));
+    sliceHeadersCacheSet(spreadsheetId, tabTitle, headers, headerRowIdx);
+  }
   const sctx = sliceContextFromHeaders(headers);
   const chunk = await readSheetRowsChunk(env, spreadsheetId, tabTitle, startRow, endRow, fetchImpl);
   if (!chunk || chunk.length === 0) return { headers, headerRowIdx, rows: [], done: true, skipped: false, empty: false };

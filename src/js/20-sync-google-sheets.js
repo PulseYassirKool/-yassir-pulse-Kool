@@ -72,30 +72,34 @@
       // Le Worker ne fait ni déduplication ni alignement ici : le front s'en
       // charge (fusion par nom d'en-tête + déduplication par N° commande ;
       // détails : déduplication commande|article dans indexKoolOrderItemsRows).
-      // Débit bridé à 2 tranches/s (quota Sheets API : 300 lectures/min/projet).
-      // ATTENTION : chaque tranche > 0 coûte DEUX lectures (sonde d'en-têtes
-      // lignes 1-12 + tranche elle-même, côté Worker) — à 4 tranches/s on
-      // montait à ~480 lectures/min et Google répondait 429 (→ 502 côté
-      // Worker, source à 0). À 2 tranches/s on est à ~240/min, sous le quota.
+      // Débit bridé à 1 tranche / 1,5 s (quota Sheets API : 60 lectures/min
+      // par COMPTE — le compte de service est un seul compte — c'est lui
+      // qui plafonne, pas les 300/min par projet). Le correctif « 2/s »
+      // du 2026-11-28 ~12:35 visait les 300/min et restait à ~240 lectures
+      // /min : la sync Kool de 12:47 a encore échoué (details-kool 502,
+      // Commissions/Offres à 0 — le quota se vide en cours de synchro et
+      // les sources qui arrivent après prennent le 429).
+      // Le Worker met en cache les en-têtes par onglet (TTL 10 min) : une
+      // tranche coûte 1 seule lecture (au lieu de 2 : sonde + tranche).
+      // Tranches grosses = moins d'appels = moins de quota : data-oct/nov
+      // 1 000 lignes, data-kool/détails 2 000 (plafond Worker). À 1,5 s,
+      // une synchro Kool complète (~197 tranches) prend ~5 min pour
+      // ~40 lectures/min — sous les 60/min, avec marge pour les lectures
+      // historiques du début de synchro et les réessais.
+      // (Les tailles avaient été divisées par deux le 2026-11-28 par
+      // prudence CPU — mauvaise piste : les échecs étaient le quota, pas
+      // la taille ; les mesures locales donnent ~1,5-5,5 ms / 1 000 lignes.)
       // Une tranche en échec (429/1102, isolate froid : signature du jeton)
       // est réessayée 2 fois AVEC ATTENTE (2 s puis 5 s) — la lecture est
       // idempotente, et un réessai immédiat ne fait qu'aggraver un 429.
-      // Mesures locales (VM, /tmp/proto) : data-oct / data-nov 500 lignes
-      // ~5,5 ms, data-kool 1 000 lignes ~4,3 ms, details-kool 1 000 ~1,5 ms.
-      // MAIS le CPU d'un isolate Worker gratuit est plus cher que sur la VM
-      // (signature RS256 2-4 ms à froid + parsing JSON) : les tranches à ces
-      // tailles ont échoué en production le 2026-11-28 (sync Kool à 0, puis
-      // « Impossible de lire les feuilles Kool via le serveur »). Tailles
-      // divisées par deux par prudence : ~870 invocations par synchro
-      // complète, toujours très loin du quota gratuit (100 000/jour).
-      var SLICE_SIZES = { 'data-oct': 250, 'data-nov': 250, 'data-kool': 500, 'details-kool': 500 };
+      var SLICE_SIZES = { 'data-oct': 1000, 'data-nov': 1000, 'data-kool': 2000, 'details-kool': 2000 };
       var SLICE_MAX_RETRIES = 2;
-      var SLICE_MIN_INTERVAL_MS = 500;
+      var SLICE_MIN_INTERVAL_MS = 1500;
       var SLICE_RETRY_DELAYS_MS = [2000, 5000];
       var _sliceLastCallMs = 0;
       var _sliceQueue = Promise.resolve();
       function yassirAppelerTranche(url) {
-        // File d'attente globale : au plus une tranche toutes les 250 ms,
+        // File d'attente globale : au plus une tranche toutes les 1,5 s,
         // même quand deux synchros (Yassir + Kool) tournent en parallèle.
         var task = _sliceQueue.then(function () {
           var now = Date.now();

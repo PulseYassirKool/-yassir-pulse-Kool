@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { getSheetsSlice, getSheetsTabs, getSheetsData, SLICE_MAX_ROWS } from '../src/sheets.js';
+import { getSheetsSlice, getSheetsTabs, getSheetsData, SLICE_MAX_ROWS, clearSliceHeadersCache } from '../src/sheets.js';
 import { clearGoogleTokenCache } from '../src/google-sheets.js';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -152,4 +152,42 @@ test('tranches : chemin historique (pages) inchangé', async () => {
   const p = await getSheetsData(env, OWNER, 'portfolios', 'kool', { page: 0, pageSize: 100 }, fetchImpl);
   assert.equal(p.totalRows, 2);
   assert.equal(p.rows.length, 3); // en-têtes + 2 lignes
+});
+
+test('tranches : cache des en-têtes — la tranche 0 remplit le cache, les suivantes ne sondent plus (1 lecture/tranche)', async () => {
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const { env, fetchImpl } = makeEnv(CONFIG, cannedTabs());
+  await env.PULSE_KV.put('config', JSON.stringify(CONFIG));
+  let valuesCalls = 0;
+  const countingFetch = async (url) => {
+    if (String(url).includes('/values/')) valuesCalls++;
+    return fetchImpl(url);
+  };
+  const s0 = await getSheetsSlice(env, OWNER, 'details-kool', 'kool', { tab: 'Feuille 3', slice: 0, sliceSize: 1000 }, countingFetch);
+  assert.equal(s0.rows.length, 999);
+  assert.equal(valuesCalls, 1); // tranche 0 : le morceau lui-même, pas de sonde
+  const s1 = await getSheetsSlice(env, OWNER, 'details-kool', 'kool', { tab: 'Feuille 3', slice: 1, sliceSize: 1000 }, countingFetch);
+  assert.equal(s1.rows.length, 1000);
+  assert.deepEqual(s1.headers, HEADERS);
+  assert.equal(valuesCalls, 2); // tranche 1 : le morceau seul, en-têtes depuis le cache
+  const s2 = await getSheetsSlice(env, OWNER, 'details-kool', 'kool', { tab: 'Feuille 3', slice: 2, sliceSize: 1000 }, countingFetch);
+  assert.equal(s2.rows.length, 501);
+  assert.equal(valuesCalls, 3); // tranche 2 : idem — sans cache ce serait 5
+});
+
+test('tranches : cache des en-têtes — sans cache, la sonde a lieu (repli)', async () => {
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const { env, fetchImpl } = makeEnv(CONFIG, cannedTabs());
+  await env.PULSE_KV.put('config', JSON.stringify(CONFIG));
+  let valuesCalls = 0;
+  const countingFetch = async (url) => {
+    if (String(url).includes('/values/')) valuesCalls++;
+    return fetchImpl(url);
+  };
+  // Tranche 1 seule, cache vide : sonde (lignes 1-12) + morceau = 2 lectures.
+  const s1 = await getSheetsSlice(env, OWNER, 'details-kool', 'kool', { tab: 'Feuille 3', slice: 1, sliceSize: 1000 }, countingFetch);
+  assert.equal(s1.rows.length, 1000);
+  assert.equal(valuesCalls, 2);
 });
