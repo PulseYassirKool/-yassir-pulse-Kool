@@ -248,6 +248,15 @@
               if (!data || data.skipped) return false; // onglet ignoré
               var rows = Array.isArray(data.rows) ? data.rows : [];
               var headers = Array.isArray(data.headers) ? data.headers : [];
+              // Un onglet vide (aucun en-tête) ne doit pas fixer les
+              // en-têtes de référence : sinon refHeaders=[] et
+              // l'alignement vide TOUTES les lignes des autres onglets —
+              // détails à 0 sans aucune erreur (diagnostic 2026-11-28 :
+              // premier onglet vide dans ?tabs=1). On ignore l'onglet.
+              if (headers.length === 0) {
+                try { console.warn('[Sync] onglet ignoré (sans en-tête) : ' + tab); } catch (e) {}
+                return false;
+              }
               if (allRows === null) {
                 refHeaders = headers;
                 allRows = [headers].concat(rows);

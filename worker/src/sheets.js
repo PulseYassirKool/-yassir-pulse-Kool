@@ -905,7 +905,11 @@ async function loadTabSlice(env, plan, tabTitle, startRow, endRow, ctx) {
   const fetchImpl = ctx.fetchImpl;
   if (startRow === 1) {
     const chunk = await readSheetRowsChunk(env, spreadsheetId, tabTitle, 1, endRow, fetchImpl);
-    if (!chunk || chunk.length === 0) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: false, empty: true };
+    // Onglet vide : il ne contribue à rien — le marquer « ignoré » pour
+    // que le front ne s'en serve pas (sinon, premier onglet vide, ses
+    // en-têtes [] deviendraient la référence et l'alignement viderait
+    // toutes les lignes des autres onglets — diagnostic 2026-11-28).
+    if (!chunk || chunk.length === 0) return { headers: [], headerRowIdx: -1, rows: [], done: true, skipped: true, empty: true };
     const headerRowIdx = sliceFindHeader(chunk.slice(0, 12), ctx.validator);
     if (headerRowIdx === -1) {
       sliceHeadersCacheSet(spreadsheetId, tabTitle, [], -1);

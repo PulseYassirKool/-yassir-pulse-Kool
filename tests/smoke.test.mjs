@@ -651,6 +651,37 @@ test('Kool : tranches — un 429 quota (Google) est attendu puis réessayé, les
   }
 });
 
+test('Kool : tranches — un premier onglet vide ne doit pas vider les détails (refHeaders)', async () => {
+  // Diagnostic 2026-11-28 : après le correctif quota, la synchro Kool ne
+  // renvoie plus d'erreur Worker (ni 502 ni 429) mais les détails restent
+  // à 0. Cause : le premier onglet renvoyé par ?tabs=1 est vide ; sa
+  // tranche 0 répond skipped:false + headers:[] (empty:true) et le front
+  // en fait les en-têtes de référence (refHeaders=[]) — ensuite
+  // yassirAlignerLignesSurEnTetes aligne TOUTES les lignes des autres
+  // onglets sur [] et les vide ; l'indexation les ignore (order id et
+  // article vides) → 0 ligne, sans aucune erreur.
+  const w = bootKool();
+  // Détails réels : plusieurs onglets, le premier vide (ex. « Feuille 1 »).
+  const itemsRows = csvToRows(koolCsvItems);
+  const moreRows = [
+    ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+    ['2001', '20/11/2026', 'Resto Alpha', 'Pizza', 'Pizza 4 Fromages', 1, 14, 0, 14, 'Food'],
+    ['2002', '21/11/2026', 'Resto Beta', 'Burger', 'Burger Poulet', 2, 10, 0, 10, 'Food']
+  ];
+  googleSheetsData[DETAILS] = {
+    'Feuille 1': [],
+    'Articles': itemsRows,
+    'Feuille 3': moreRows
+  };
+  await login(w, 'proprio', 'Proprio-Test-123');
+  const rows = await w.yassirLireFeuilleViaApiTranches('details-kool', { brand: 'kool' });
+  assert.ok(Array.isArray(rows) && rows.length > 1, 'détails vides avec un premier onglet vide : ' + JSON.stringify(rows && rows.slice(0, 3)));
+  const dataRows = rows.slice(1);
+  assert.ok(dataRows.some((r) => String(r[0] || '').trim() === '1001'), 'ligne 1001 (Articles) absente après alignement : ' + JSON.stringify(dataRows.slice(0, 3)));
+  assert.ok(dataRows.some((r) => String(r[0] || '').trim() === '2001'), 'ligne 2001 (Feuille 3) absente après alignement');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 test('page de connexion : carte compacte, sélecteur Kool (un seul Kool + point noir), bascule de marque', () => {
   const w = boot();
   const card = w.document.getElementById('loginCard');

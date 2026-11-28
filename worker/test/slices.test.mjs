@@ -112,6 +112,30 @@ test('tranches : enchaînement complet d\u2019un onglet (2500 lignes, tranche 10
   assert.equal(s2.rows[s2.rows.length - 1][0], 'ORD-03499');
 });
 
+test('tranches : un onglet vide en premier est ignoré (skipped:true), les autres se chargent', async () => {
+  // Diagnostic 2026-11-28 : la synchro Kool ne renvoyait plus d'erreur
+  // Worker mais les détails restaient à 0. Cause : le premier onglet de
+  // ?tabs=1 était vide ; sa tranche 0 répondait skipped:false +
+  // headers:[] et le front en faisait les en-têtes de référence — ensuite
+  // l'alignement vidait toutes les lignes des autres onglets. Un onglet
+  // vide doit être marqué ignoré.
+  clearGoogleTokenCache();
+  clearSliceHeadersCache();
+  const tabs = cannedTabs();
+  tabs[DETAILS] = { 'Feuille 1': [], 'Articles': tabs[DETAILS]['Articles'], 'Feuille 3': tabs[DETAILS]['Feuille 3'] };
+  const { env, fetchImpl } = makeEnv(CONFIG, tabs);
+  await env.PULSE_KV.put('config', JSON.stringify(CONFIG));
+  const t = await getSheetsTabs(env, OWNER, 'details-kool', 'kool', fetchImpl);
+  assert.deepEqual(t.tabs, ['Feuille 1', 'Articles', 'Feuille 3']);
+  const sEmpty = await getSheetsSlice(env, OWNER, 'details-kool', 'kool', { tab: 'Feuille 1', slice: 0, sliceSize: 1000 }, fetchImpl);
+  assert.equal(sEmpty.skipped, true, 'onglet vide doit être ignoré');
+  assert.equal(sEmpty.rows.length, 0);
+  const s0 = await getSheetsSlice(env, OWNER, 'details-kool', 'kool', { tab: 'Articles', slice: 0, sliceSize: 1000 }, fetchImpl);
+  assert.equal(s0.skipped, false);
+  assert.deepEqual(s0.headers, HEADERS);
+  assert.ok(s0.rows.length > 0, 'Articles doit se charger après un onglet vide');
+});
+
 test('tranches : sliceSize plafonné à SLICE_MAX_ROWS ; onglet manquant -> 400', async () => {
   clearGoogleTokenCache();
   const { env, fetchImpl } = makeEnv(CONFIG, cannedTabs());
