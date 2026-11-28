@@ -673,6 +673,22 @@
         return normalizeText(s).replace(/\s+/g, ' ').trim();
       }
 
+      // Nettoyage pour la correspondance : enlève ce qui n'identifie pas
+      // l'article (quantité en tête « 1 box crunchy », suffixe « = ... offert »,
+      // « acheté / offert » final) — sinon « 1 box crunchy » ne match jamais
+      // « Box Crunchy = Box crunchy offert » (Chihia Chicken, 2026-11-28).
+      function nettoyerNomArticlePourMatch(s) {
+        var t = normalizeNomArticle(s || '');
+        // Quantité en tête : « 1 box crunchy » -> « box crunchy ».
+        t = t.replace(/^\d+\s*x?\s+/, '');
+        // Suffixe « = ... » : « box crunchy = box crunchy offert » -> « box crunchy ».
+        var eq = t.indexOf(' = ');
+        if (eq >= 0) t = t.slice(0, eq);
+        // Mot final « acheté / offert » : « poulet rôti acheté » -> « poulet rôti ».
+        t = t.replace(/\s+(achete|achetee|achetes|offert|offerte|offerts)$/, '');
+        return t.trim();
+      }
+
       // Correspondance BIDIRECTIONNELLE article ↔ règle (correctif
       // 2026-11-28) : le nom d'article du détail porte souvent du texte en
       // plus (« Box Crunchy = Extra ») alors que la règle dit « Box Crunchy » :
@@ -681,12 +697,22 @@
       // l'article), avec deux gardes : aucune des deux chaînes ne doit être
       // vide, et la plus courte doit faire ≥ 4 caractères (évite qu'un libellé
       // d'1-3 lettres rattache n'importe quel article). L'égalité exacte reste
-      // un cas particulier de l'inclusion.
+      // un cas particulier de l'inclusion. Repli nettoyé (2026-11-28, Chihia
+      // Chicken) : si la comparaison brute échoue, on compare les noms
+      // nettoyés (sans quantité, sans suffixe « = ... », sans « acheté/offert »
+      // final) — « 1 box crunchy » et « Box Crunchy = Box crunchy offert »
+      // deviennent tous deux « box crunchy ».
       function articleCorrespond(a, b) {
         if (!a || !b) return false;
         if (a === b) return true;
         if (Math.min(a.length, b.length) < 4) return false;
-        return a.includes(b) || b.includes(a);
+        if (a.includes(b) || b.includes(a)) return true;
+        var ca = nettoyerNomArticlePourMatch(a);
+        var cb = nettoyerNomArticlePourMatch(b);
+        if (!ca || !cb) return false;
+        if (ca === cb) return true;
+        if (Math.min(ca.length, cb.length) < 4) return false;
+        return ca.includes(cb) || cb.includes(ca);
       }
 
       // Exposé pour la section Participation (vue « Par article » Kool) et les tests.

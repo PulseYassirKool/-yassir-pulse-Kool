@@ -3394,6 +3394,40 @@ test('Bogof : un article détail plus long que la règle se rattache (bidirectio
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Correctif 2026-11-28 (soir) : matching Bogof Chihia Chicken ----
+// Cas réel (captures utilisateur, feuille « Détails articles Kool » Feuille 3
+// + onglet « Bogof », 26/11/2026) : la règle dit « 1 box crunchy » (participation
+// 2ème article = 3) quand le détail dit « Box Crunchy = Box crunchy offert »,
+// et « poulet rôti acheté » (participation 3) quand le détail dit
+// « Poulet rôti = Poulet rôti ». Ni l'une ni l'autre n'est une sous-chaîne de
+// l'autre (préfixe « 1 », suffixe « = ... offert », mot « acheté ») → le
+// matching bidirectionnel simple ne rattachait rien : Chihia Chicken (le plus
+// gros vendeur Bogof, ~280 lignes) n'apparaissait qu'avec 27 offres / 8,40 TND
+// et plateforme 0,00, le reste partait en « non attribuées ». Le repli nettoyé
+// (sans quantité, sans suffixe « = ... », sans « acheté/offert » final) rattache
+// les deux.
+test('Bogof Chihia Chicken : « 1 box crunchy » et « poulet rôti acheté » se rattachent (repli nettoyé)', () => {
+  const w = boot();
+  w.koolOrderItemsByOrderId = new Map([
+    ['ywg-7443', [
+      { article: 'Box Crunchy = Box crunchy offert', category: 'Buy 1 get 1 free', restaurant: 'Chihia Chicken', quantity: 1, unitPrice: 24, originalPrice: 48, discountPrice: 24 },
+      { article: 'Poulet rôti = Poulet rôti', category: 'Buy 1 get 1 free', restaurant: 'Chihia Chicken', quantity: 1, unitPrice: 22.9, originalPrice: 45.8, discountPrice: 22.9 }
+    ]]
+  ]);
+  const bogofRules = [
+    { restaurant: 'Chihia Chicken', restaurantNorm: 'chihia chicken', article: '1 box crunchy', articleNorm: '1 box crunchy', participation2eme: 3 },
+    { restaurant: 'Chihia Chicken', restaurantNorm: 'chihia chicken', article: 'poulet rôti acheté', articleNorm: 'poulet roti achete', participation2eme: 3 }
+  ];
+  // Box Crunchy : remise 48 − 24 = 24 ; plateforme min(3, 24) = 3 ; restaurant 21.
+  // Poulet rôti : remise 45,8 − 22,9 = 22,9 ; plateforme min(3, 22,9) = 3 ; restaurant 19,9.
+  const res = w.yassirCalculerParticipationArticlesKool('yWg-7443', [], bogofRules);
+  assert.equal(res.matchedItemsCount, 2, 'les 2 Bogof Chihia Chicken doivent être rattachés : ' + JSON.stringify(res.breakdown));
+  assert.equal(res.discountTotalTnd, 46.9, 'remise totale Bogof Chihia : ' + res.discountTotalTnd);
+  assert.equal(res.costTnd, 40.9, 'part restaurant Bogof Chihia : ' + res.costTnd);
+  assert.equal(res.unattributedTnd, 0, 'rien de non attribué sur yWg-7443');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // Passe 2 Pack/BOGOF : même bidirectionnalité pour les règles articles —
 // le libellé de la règle (« Makloub Escalope ») est contenu dans le nom
 // d'article du détail (« Makloub Escalope XL »).
