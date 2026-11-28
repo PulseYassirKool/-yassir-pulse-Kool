@@ -386,6 +386,8 @@
         } else {
           mettreAJourInterface();
         }
+        // Assistant IA (Gemini) : le bouton flottant apparaît après connexion.
+        if (typeof window.yassirAssistantAfficherBouton === 'function') { try { window.yassirAssistantAfficherBouton(); } catch (e) {} }
       }
 
       window.yassirTogglePwd = function () {

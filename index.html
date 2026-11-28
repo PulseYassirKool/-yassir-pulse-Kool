@@ -760,6 +760,32 @@
 
       <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-md w-full pointer-events-none px-4 sm:px-0"></div>
 
+      <!-- Assistant IA (Gemini) : bouton flottant + panneau de chat, visibles après connexion uniquement -->
+      <button id="btnAssistantIA" type="button" class="hidden fixed bottom-5 right-5 z-40 w-14 h-14 rounded-full bg-[#1A1A2E] text-white shadow-xl items-center justify-center hover:bg-[#6C2BD9] transition" title="Assistant IA" aria-label="Ouvrir l'assistant IA">
+        <i class="fa-solid fa-microphone text-lg"></i>
+      </button>
+      <div id="assistantIAPanel" class="hidden fixed bottom-24 right-5 z-50 w-[92vw] max-w-sm bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 flex flex-col overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 bg-[#1A1A2E] text-white">
+          <div>
+            <div class="font-extrabold text-sm">Assistant Pulse</div>
+            <div id="assistantIABrand" class="text-[11px] opacity-70">Yassir</div>
+          </div>
+          <button id="assistantIAFermer" type="button" class="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center" aria-label="Fermer l'assistant">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div id="assistantIAMessages" class="flex-1 overflow-y-auto px-4 py-3 space-y-2 min-h-[180px] max-h-[50vh] text-sm"></div>
+        <div class="flex items-center gap-2 px-3 py-3 border-t border-slate-100 dark:border-slate-700">
+          <button id="assistantIAMic" type="button" class="w-10 h-10 shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center" aria-label="Parler">
+            <i class="fa-solid fa-microphone"></i>
+          </button>
+          <input id="assistantIAInput" type="text" placeholder="Posez votre question…" class="flex-1 min-w-0 px-3 py-2 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm outline-none" autocomplete="off">
+          <button id="assistantIAEnvoyer" type="button" class="w-10 h-10 shrink-0 rounded-full bg-[#6C2BD9] text-white flex items-center justify-center" aria-label="Envoyer">
+            <i class="fa-solid fa-paper-plane"></i>
+          </button>
+        </div>
+      </div>
+
       <main class="flex-1 w-full px-3 sm:px-6 lg:px-8 py-6 space-y-6">
 
       <!-- ========================================================================

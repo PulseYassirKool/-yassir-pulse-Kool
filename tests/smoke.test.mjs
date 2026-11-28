@@ -3203,3 +3203,120 @@ test('BOGOF classé offre article (2026-11-27, simulation Participation)', () =>
 // classeur n'existe plus : le Worker lit les feuilles et sert les pages via
 // /api/sheets/:source (cache KV 5 min côté serveur). Remplacé par les tests
 // G3 (lecture paginée, garde manuelle, échec isolé, Budget) plus haut.
+
+// ---- Assistant IA (Gemini) dans le site ----
+// Dates relatives à aujourd'hui (jamais figées) : mardi le plus récent,
+// lundi de la semaine en cours, lundi de la semaine précédente.
+const _asstDdmmyyyy = (d) => String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+const _asstIso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const _asstPlusJours = (d, n) => { const c = new Date(d); c.setDate(c.getDate() + n); return c; };
+const _asstSemaineCle = (d) => {
+  const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
+  const annee = dt.getUTCFullYear();
+  const debut = new Date(Date.UTC(annee, 0, 1));
+  return annee + '-S' + String(Math.ceil((((dt - debut) / 86400000) + 1) / 7)).padStart(2, '0');
+};
+const _asstDates = () => {
+  const auj = new Date();
+  const mardi = _asstPlusJours(auj, -((auj.getDay() + 5) % 7));
+  const lundiSem = _asstPlusJours(auj, -((auj.getDay() + 6) % 7));
+  const lundiPrec = _asstPlusJours(lundiSem, -7);
+  return { auj, mardi, lundiSem, lundiPrec };
+};
+
+test('Assistant IA : contexte — Babke mardi (jour) et Oishi semaine vs semaine dernière', async () => {
+  const w = boot();
+  await login(w, 'proprio', 'Proprio-Test-123');
+  const { mardi, lundiSem, lundiPrec } = _asstDates();
+  const makeXlsxFile = (aoa, sheetName, fileName) => {
+    const wb = w.XLSX.utils.book_new();
+    w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(aoa), sheetName);
+    const buf = w.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    return new w.File([buf], fileName, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  };
+  // Babke : 3 commandes mardi (100 + 50 + 30), 1 lundi ; Oishi : 5 cette
+  // semaine (lundi), 2 la semaine dernière (lundi) ; un resto témoin mardi.
+  const dataAoa = [TARGET_HEADERS_TEST.slice(),
+    yassirRow(_asstDdmmyyyy(mardi), 'YAF-9001', 'Babke Kebab Sousse', 100, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(mardi), 'YAF-9002', 'Babke Kebab Sousse', 50, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(mardi), 'YAF-9003', 'Babke Kebab Sousse', 30, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiSem), 'YAF-9004', 'Babke Kebab Sousse', 40, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiSem), 'YAF-9011', 'Oishi', 20, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiSem), 'YAF-9012', 'Oishi', 20, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiSem), 'YAF-9013', 'Oishi', 20, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiSem), 'YAF-9014', 'Oishi', 20, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiSem), 'YAF-9015', 'Oishi', 20, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiPrec), 'YAF-9021', 'Oishi', 20, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(lundiPrec), 'YAF-9022', 'Oishi', 20, 0, '', ''),
+    yassirRow(_asstDdmmyyyy(mardi), 'YAF-9031', 'Resto Temoin', 10, 0, '', '')
+  ];
+  w.yassirOnMainFileChange({ target: { files: [makeXlsxFile(dataAoa, 'Data exp', 'data-exp.xlsx')], value: 'x' } });
+  await wait(1200);
+
+  // Question 1 (cas de test utilisateur) : Babke mardi.
+  const ctxBabke = w.yassirConstruireContexteAssistant('restaurant Babke, 9adech amal men commande nhar ethleth ?', Date.now());
+  assert.ok(ctxBabke.includes('Babke'), 'Babke absent du contexte');
+  assert.ok(ctxBabke.includes(_asstIso(mardi) + ' (mardi) : 3 reçues, 3 livrées, CA 180.00 TND'), 'ligne mardi de Babke inattendue : ' + ctxBabke);
+  // Le resto témoin n'est pas détaillé quand on demande Babke (il peut
+  // apparaître au TOP 10, jamais dans « RESTAURANTS DEMANDÉS »).
+  const apresDemandes = ctxBabke.split('RESTAURANTS DEMANDÉS :')[1] || '';
+  assert.ok(!apresDemandes.includes('Resto Temoin'), 'le resto témoin ne doit pas être détaillé pour Babke');
+  // Contexte borné (jamais de lignes brutes).
+  assert.ok(ctxBabke.length < 12000, 'contexte trop grand : ' + ctxBabke.length);
+
+  // Question 2 (cas de test utilisateur) : Oishi, cette semaine vs la dernière.
+  const ctxOishi = w.yassirConstruireContexteAssistant('restaurant Oishi, 9adech amal e jem3a hethi par rapport e jem3a elli fetet ?', Date.now());
+  const semCour = _asstSemaineCle(lundiSem);
+  const semPrec = _asstSemaineCle(lundiPrec);
+  assert.ok(ctxOishi.includes('Oishi'), 'Oishi absent du contexte');
+  assert.ok(ctxOishi.includes(semCour + ' : 5 reçues, 5 livrées, CA 100.00 TND'), 'semaine en cours d\'Oishi inattendue : ' + ctxOishi);
+  assert.ok(ctxOishi.includes(semPrec + ' : 2 reçues, 2 livrées, CA 40.00 TND'), 'semaine précédente d\'Oishi inattendue : ' + ctxOishi);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+test('Assistant IA : panneau — bouton après connexion, envoi, réponse insérée en texte (XSS impossible)', async () => {
+  const w = boot();
+  // Avant connexion : bouton caché.
+  assert.equal(w.document.getElementById('btnAssistantIA').classList.contains('hidden'), true);
+  await login(w, 'proprio', 'Proprio-Test-123');
+  // Après connexion : bouton visible.
+  const btn = w.document.getElementById('btnAssistantIA');
+  assert.equal(btn.classList.contains('hidden'), false, 'bouton assistant caché après connexion');
+  // Micro absent sous jsdom (pas de SpeechRecognition) : bouton micro caché à l'ouverture.
+  btn.click();
+  await wait(200);
+  const panel = w.document.getElementById('assistantIAPanel');
+  assert.equal(panel.classList.contains('hidden'), false, 'panneau non ouvert');
+  assert.ok(w.document.getElementById('assistantIABrand').textContent.includes('Yassir'), 'marque active absente de l\'en-tête');
+  assert.equal(w.document.getElementById('assistantIAMic').classList.contains('hidden'), true, 'micro visible sans SpeechRecognition');
+
+  // Gemini simulé : la réponse contient une balise piégée.
+  // Clé Gemini de test : sans elle, le Worker répond 503 (comportement
+  // voulu en production). La vraie clé n'est jamais écrite ici.
+  // On utilise l'env du fichier (ligne 111), celui que le harnais passe
+  // à handle() — worker/src/index.js n'exporte pas `env`.
+  env.GEMINI_API_KEY = 'CLE_TEST_SIMULEE';
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('generativelanguage.googleapis.com')) {
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Babke a fait 3 commandes mardi. <img src=x onerror=alert(1)>' }] } }] }) };
+    }
+    return prevFetch(url, opts);
+  };
+  try {
+    w.document.getElementById('assistantIAInput').value = 'Babke, combien de commandes mardi ?';
+    w.document.getElementById('assistantIAEnvoyer').click();
+    await wait(800);
+    const zone = w.document.getElementById('assistantIAMessages');
+    assert.ok(zone.textContent.includes('Babke a fait 3 commandes mardi.'), 'réponse absente : ' + zone.textContent);
+    // La balise piégée est du TEXTE, jamais un élément : aucune img créée, aucune erreur.
+    assert.equal(zone.querySelectorAll('img').length, 0, 'la réponse Gemini a créé un élément img (XSS)');
+    assert.ok(zone.textContent.includes('<img src=x onerror=alert(1)>'), 'la réponse doit rester du texte littéral');
+    assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+  } finally {
+    globalThis.fetch = prevFetch;
+    delete env.GEMINI_API_KEY;
+  }
+});
