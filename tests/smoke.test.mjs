@@ -966,7 +966,7 @@ test('Kool : Bogof — participation telle quelle depuis la feuille Bogof (vue P
 // resto 1,50). 2003 (Beta) : Burger seul (remise 3, plateforme 1,50, resto 1,50).
 // Vue « Par article » : 3 offres / 21.00 / resto 10.50 / plateforme 10.50.
 // Vue « Bogof » : 1 offre / 12.00 / resto 6.00 / plateforme 6.00 (Alpha seul).
-// Tableau Offres : Alpha Bogof 12.00, Beta Bogof 0.00.
+// Tableau Offres : Alpha BOGOF 1 (nombre), DISCOUNT 1 ; Beta BOGOF 0, DISCOUNT 1.
 const koolCsvDataBogofView = toCsv([
   ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
   ['', '', '', '17/11/2026', '2001', '', 'Resto Alpha', '', '', '12.00', '3', '15'],
@@ -1020,20 +1020,89 @@ test('Kool : vue Bogof Participation + colonne Bogof Offres (ne compte que les l
   assert.ok(bodyBogof.includes('Resto Alpha'), 'Resto Alpha absent en vue Bogof');
   assert.ok(!bodyBogof.includes('Resto Beta'), 'Resto Beta ne doit pas apparaître en vue Bogof (pas de Bogof)');
 
-  // Tableau Offres : colonne « Bogof » — Alpha 12.00, Beta 0.00.
+  // Tableau Offres : colonne « Bogof » = NOMBRE d'offres Bogof (2026-11-28),
+  // et les Bogof ne comptent plus dans « Discount Article » (exclusivité).
+  // Resto Alpha : 2001 Bogof + 2002 article non-Bogof → TOTAL 2, DISCOUNT 1, BOGOF 1.
+  // Resto Beta : 2003 article non-Bogof → TOTAL 1, DISCOUNT 1, BOGOF 0.
+  // Identité : DISCOUNT ARTICLE + PROMO RESTAURANT + BOGOF = TOTAL OFFRES.
   w.yassirSwitchTab('offres');
   await wait(600);
   assert.equal(w.document.getElementById('previewTableHead').textContent.includes('Bogof'), true, 'colonne Bogof absente du tableau Offres');
   var offRows = w.document.querySelectorAll('#previewTableBody tr');
-  var bogofByResto = {};
+  var offresByResto = {};
   for (var ri = 0; ri < offRows.length; ri++) {
     var tds = offRows[ri].querySelectorAll('td');
     if (tds.length < 8) continue;
     var resto = tds[3].textContent.trim();
-    bogofByResto[resto] = tds[tds.length - 1].textContent.trim();
+    offresByResto[resto] = { total: tds[4].textContent.trim(), discount: tds[5].textContent.trim(), promoResto: tds[6].textContent.trim(), bogof: tds[7].textContent.trim() };
   }
-  assert.equal(bogofByResto['Resto Alpha'], '12.00', 'colonne Bogof Resto Alpha : ' + JSON.stringify(bogofByResto));
-  assert.equal(bogofByResto['Resto Beta'], '0.00', 'colonne Bogof Resto Beta : ' + JSON.stringify(bogofByResto));
+  assert.deepEqual(offresByResto['Resto Alpha'], { total: '2', discount: '1', promoResto: '0', bogof: '1' }, 'Resto Alpha Offres : ' + JSON.stringify(offresByResto));
+  assert.deepEqual(offresByResto['Resto Beta'], { total: '1', discount: '1', promoResto: '0', bogof: '0' }, 'Resto Beta Offres : ' + JSON.stringify(offresByResto));
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Correctif 2026-11-28 : colonne « Bogof » = NOMBRE, pas montant ----
+// La colonne « Bogof » du tableau Offres affichait le montant de la remise
+// Bogof (TND) et les Bogof étaient aussi comptées dans « Discount Article »
+// (double comptage : The Hood Menzah TOTAL 973 = DISCOUNT 399 + PROMO 574,
+// avec BOGOF 6439.68 en montant à côté). Désormais : BOGOF = nombre d'offres
+// Bogof, DISCOUNT ARTICLE = articles NON Bogof uniquement, et DISCOUNT
+// ARTICLE + PROMO RESTAURANT + BOGOF = TOTAL OFFRES (colonnes exclusives,
+// précédence Bogof > Article > Restaurant).
+// Cas simulé : Resto Gamma, 4 commandes — 3001 + 3002 Bogof (Pizza Polo),
+// 3003 article non-Bogof (Burger Classic Super Promo), 3004 promo restaurant
+// (règle « Discount » toute la carte, sans ligne détail). Attendu : TOTAL 4,
+// DISCOUNT ARTICLE 1, PROMO RESTAURANT 1, BOGOF 2.
+const koolCsvDataBogofCount = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '17/11/2026', '3001', '', 'Resto Gamma', '', '', '12.00', '3', '12'],
+  ['', '', '', '17/11/2026', '3002', '', 'Resto Gamma', '', '', '12.00', '3', '12'],
+  ['', '', '', '17/11/2026', '3003', '', 'Resto Gamma', '', '', '15.00', '3', '3'],
+  ['', '', '', '17/11/2026', '3004', '', 'Resto Gamma', '', '', '20.00', '3', '5']
+]);
+const koolCsvItemsBogofCount = toCsv([
+  ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+  ['3001', '17/11/2026', 'Resto Gamma', 'Buy 1 Get 1 Free', 'Pizza Polo', 1, 12, 0, 12, 'Food'],
+  ['3002', '17/11/2026', 'Resto Gamma', 'Buy 1 Get 1 Free', 'Pizza Polo', 1, 12, 0, 12, 'Food'],
+  ['3003', '17/11/2026', 'Resto Gamma', 'Super Promo', 'Burger Classic', 1, 15, 12, 15, 'Food']
+]);
+const koolCsvOffreBogofCount = toCsv([
+  ['Restaurant', 'Participation', 'Tag', 'Période'],
+  ['Resto Gamma', '10', 'Super Promo', '01/11/2026 - 30/11/2026'],
+  ['Resto Gamma', '10', 'Discount', '01/11/2026 - 30/11/2026']
+]);
+const koolCsvBogofCount = toCsv([
+  ['Area', 'Restaurant', 'Responsable AM', 'C%', 'C% Globale', 'Article', 'Prix article', '2ème Article (prix)', 'Participation 2ème article', 'Spécificité', "Détails de l'offre", 'Start Date', 'End Date', 'Période'],
+  ['Tunis', 'Resto Gamma', 'Omar Beldi', '20', '', 'Pizza Polo', '25', '12', '6', '', 'Buy 1 Get 1 Free', '', '', '']
+]);
+
+test('Kool : colonne Bogof = nombre et Discount Article exclut les Bogof (somme = Total)', async () => {
+  const w = bootKool({ data: koolCsvDataBogofCount, items: koolCsvItemsBogofCount, offre: koolCsvOffreBogofCount, bogof: koolCsvBogofCount });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+
+  w.yassirSwitchTab('offres');
+  await wait(600);
+  var offRows = w.document.querySelectorAll('#previewTableBody tr');
+  var rowGamma = null;
+  for (var ri = 0; ri < offRows.length; ri++) {
+    var tds = offRows[ri].querySelectorAll('td');
+    if (tds.length < 8) continue;
+    if (tds[3].textContent.trim() === 'Resto Gamma') {
+      rowGamma = { total: tds[4].textContent.trim(), discount: tds[5].textContent.trim(), promoResto: tds[6].textContent.trim(), bogof: tds[7].textContent.trim() };
+    }
+  }
+  assert.ok(rowGamma, 'Resto Gamma absent du tableau Offres');
+  assert.equal(rowGamma.total, '4', 'Total Offres Resto Gamma : ' + JSON.stringify(rowGamma));
+  assert.equal(rowGamma.bogof, '2', 'Bogof = nombre (2), pas le montant : ' + JSON.stringify(rowGamma));
+  assert.equal(rowGamma.discount, '1', 'Discount Article = articles NON Bogof uniquement : ' + JSON.stringify(rowGamma));
+  assert.equal(rowGamma.promoResto, '1', 'Promo Restaurant : ' + JSON.stringify(rowGamma));
+  assert.equal(Number(rowGamma.discount) + Number(rowGamma.promoResto) + Number(rowGamma.bogof), Number(rowGamma.total), 'DISCOUNT + PROMO RESTO + BOGOF = TOTAL : ' + JSON.stringify(rowGamma));
 
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

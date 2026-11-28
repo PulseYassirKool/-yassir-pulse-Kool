@@ -64,17 +64,20 @@
           var isPromoArticle = 0;
           var isPromoRestaurant = 0;
           var isPromoAdmin = 0;
-          // Remise Bogof de la commande (TND) — Kool uniquement, 0 pour Yassir.
-          var bogofTndOrder = 0;
+          // Nombre d'offres Bogof de la commande — Kool uniquement, 0 pour Yassir.
+          // Colonnes mutuellement exclusives (Kool) : une commande Bogof ne compte
+          // plus dans « Discount Article » ; DISCOUNT ARTICLE + PROMO RESTAURANT
+          // + BOGOF = TOTAL OFFRES. Précédence : Bogof > Article > Restaurant > Admin.
+          var isBogofOrder = 0;
 
           if (typeof currentBrand !== 'undefined' && currentBrand === 'kool') {
             var idxOrderDayOff = headers.indexOf('order day') !== -1 ? headers.indexOf('order day') : 6;
             var evOffKool = evaluerOffreKoolPourCommande(rawResto, row[idxOrderDayOff], idxOrderIdOff !== -1 ? row[idxOrderIdOff] : '');
             if (!evOffKool) continue;
-            isPromoArticle = evOffKool.isPromoArticle;
-            isPromoRestaurant = evOffKool.isPromoRestaurant;
-            isPromoAdmin = evOffKool.isPromoAdmin;
-            bogofTndOrder = evOffKool.bogofDiscountTnd || 0;
+            isBogofOrder = evOffKool.isPromoBogof ? 1 : 0;
+            isPromoArticle = (evOffKool.isPromoArticle && !isBogofOrder) ? 1 : 0;
+            isPromoRestaurant = (evOffKool.isPromoRestaurant && !isBogofOrder && !isPromoArticle) ? 1 : 0;
+            isPromoAdmin = (evOffKool.isPromoAdmin && !isBogofOrder && !isPromoArticle && !isPromoRestaurant) ? 1 : 0;
           } else {
             // 2. Promo article : Food Category contient "Super Promo" / "super promo" / "Super promo"
             var valFoodCat = (idxFoodCat < row.length && row[idxFoodCat] !== null && row[idxFoodCat] !== undefined)
@@ -119,7 +122,7 @@
               discountArticle: 0,
               promoAdmin: 0,
               promoRestaurant: 0,
-              bogofTnd: 0
+              bogofCount: 0
             });
           }
 
@@ -128,7 +131,7 @@
           entry.discountArticle += isPromoArticle;
           entry.promoAdmin += isPromoAdmin;
           entry.promoRestaurant += isPromoRestaurant;
-          entry.bogofTnd += bogofTndOrder;
+          entry.bogofCount += isBogofOrder;
         }
 
         return Array.from(groupedMap.values())
@@ -138,7 +141,7 @@
           .map(function (item) {
             return {
               am: item.am,
-              cells: [item.am, item.area, item.resto, item.totalOffres, item.discountArticle, item.promoAdmin, item.promoRestaurant, Number(item.bogofTnd.toFixed(2))]
+              cells: [item.am, item.area, item.resto, item.totalOffres, item.discountArticle, item.promoAdmin, item.promoRestaurant, item.bogofCount]
             };
           });
       }

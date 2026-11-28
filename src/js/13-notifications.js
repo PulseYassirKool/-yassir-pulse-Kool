@@ -1016,9 +1016,9 @@
                 : '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#F3EBFF] text-[#6C2BD9]">' + escapeHtml(row[0]) + '</span>';
               var metricCells = offresVisibleMetricIdx.map(function (oi) {
                 var vNum = Number(row[oi] || 0);
-                // « Bogof » est un montant (TND) : 2 décimales. Les autres
-                // métriques sont des compteurs (entiers).
-                var vTxt = (oi === OFFRES_BOGOF_IDX) ? vNum.toFixed(2) : String(vNum);
+                // Toutes les métriques sont des compteurs (entiers) — la
+                // colonne « Bogof » compte les offres Bogof, pas un montant.
+                var vTxt = String(vNum);
                 return '<td class="' + offresMetricStyles[oi] + '">' + vTxt + '</td>';
               }).join('');
 
