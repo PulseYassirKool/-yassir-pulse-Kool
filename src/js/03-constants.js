@@ -66,7 +66,8 @@
         'Total Offres',
         'Discount Article',
         'Promo Admin',
-        'Promo Restaurant'
+        'Promo Restaurant',
+        'Bogof'
       ];
 
       // Colonnes exactes de la formule VSTACK / QUERY Stat

@@ -790,6 +790,32 @@
           }
         }
 
+        // Agrégats BOGOF uniquement (vue « Bogof » de Participation + colonne
+        // « Bogof » du tableau Offres) : calculés sur les lignes du breakdown
+        // avec bogof: true (remise = prix original − prix payé, plateforme =
+        // « Participation 2ème article » telle quelle, restaurant = remise −
+        // plateforme). Les lignes Bogof sans règle sont les lignes « non
+        // attribuées » dont la catégorie est « Buy 1 Get 1 Free ».
+        var bogofDiscTnd = 0, bogofRestoTnd = 0, bogofPlatTnd = 0, bogofLinesCount = 0;
+        var bogofUnattrTnd = 0, bogofUnattrCount = 0;
+        for (var bI2 = 0; bI2 < (articleEval.breakdown || []).length; bI2++) {
+          var bl = articleEval.breakdown[bI2];
+          if (bl && bl.bogof) {
+            bogofDiscTnd += bl.discountTnd || 0;
+            bogofRestoTnd += bl.partTnd || 0;
+            bogofPlatTnd += bl.participationTnd || 0;
+            bogofLinesCount += bl.quantity || 1;
+          }
+        }
+        for (var uI2 = 0; uI2 < (articleEval.unattributedBreakdown || []).length; uI2++) {
+          var ul = articleEval.unattributedBreakdown[uI2];
+          var uCat = normalizeText(ul && ul.category ? ul.category : '');
+          if (uCat.includes('buy 1 get 1') || uCat.includes('bogof')) {
+            bogofUnattrTnd += ul.discountTnd || 0;
+            bogofUnattrCount += ul.quantity || 1;
+          }
+        }
+
         var resObj = {
           rule: best,
           allMatched: matchedTouteLaCarte.concat(matchedArticleRules),
@@ -802,6 +828,12 @@
           articleBreakdown: articleEval.breakdown,
           articleUnattributedTnd: articleEval.unattributedTnd || 0,
           articleUnattributedCount: articleEval.unattributedCount || 0,
+          isPromoBogof: bogofLinesCount > 0 ? 1 : 0,
+          bogofDiscountTnd: Number(bogofDiscTnd.toFixed(3)),
+          bogofPartTnd: Number(bogofRestoTnd.toFixed(3)),
+          bogofPlateformeTnd: Number(bogofPlatTnd.toFixed(3)),
+          bogofUnattributedTnd: Number(bogofUnattrTnd.toFixed(3)),
+          bogofUnattributedCount: bogofUnattrCount,
           label: formaterLibelleOffreKool(best) || bogofLabel
         };
         if (_koolRulesIndex.evalCache.size > 50000) _koolRulesIndex.evalCache.clear();

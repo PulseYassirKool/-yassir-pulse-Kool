@@ -64,6 +64,8 @@
           var isPromoArticle = 0;
           var isPromoRestaurant = 0;
           var isPromoAdmin = 0;
+          // Remise Bogof de la commande (TND) — Kool uniquement, 0 pour Yassir.
+          var bogofTndOrder = 0;
 
           if (typeof currentBrand !== 'undefined' && currentBrand === 'kool') {
             var idxOrderDayOff = headers.indexOf('order day') !== -1 ? headers.indexOf('order day') : 6;
@@ -72,6 +74,7 @@
             isPromoArticle = evOffKool.isPromoArticle;
             isPromoRestaurant = evOffKool.isPromoRestaurant;
             isPromoAdmin = evOffKool.isPromoAdmin;
+            bogofTndOrder = evOffKool.bogofDiscountTnd || 0;
           } else {
             // 2. Promo article : Food Category contient "Super Promo" / "super promo" / "Super promo"
             var valFoodCat = (idxFoodCat < row.length && row[idxFoodCat] !== null && row[idxFoodCat] !== undefined)
@@ -115,7 +118,8 @@
               totalOffres: 0,
               discountArticle: 0,
               promoAdmin: 0,
-              promoRestaurant: 0
+              promoRestaurant: 0,
+              bogofTnd: 0
             });
           }
 
@@ -124,6 +128,7 @@
           entry.discountArticle += isPromoArticle;
           entry.promoAdmin += isPromoAdmin;
           entry.promoRestaurant += isPromoRestaurant;
+          entry.bogofTnd += bogofTndOrder;
         }
 
         return Array.from(groupedMap.values())
@@ -133,7 +138,7 @@
           .map(function (item) {
             return {
               am: item.am,
-              cells: [item.am, item.area, item.resto, item.totalOffres, item.discountArticle, item.promoAdmin, item.promoRestaurant]
+              cells: [item.am, item.area, item.resto, item.totalOffres, item.discountArticle, item.promoAdmin, item.promoRestaurant, Number(item.bogofTnd.toFixed(2))]
             };
           });
       }
@@ -209,7 +214,7 @@
       //   ci-dessous) — l'offre reste comptée (Total Offres, remise, budgets).
       function calculerParticipationParRestaurant(viewMode) {
         var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
-        var view = viewMode === 'article' ? 'article' : 'carte';
+        var view = (viewMode === 'article' || viewMode === 'bogof') ? viewMode : 'carte';
         var idxResto = TARGET_HEADERS.indexOf('restaurant name');
         var idxStatus = TARGET_HEADERS.indexOf('status');
         var idxOrderDay = TARGET_HEADERS.indexOf('order day');
@@ -274,6 +279,37 @@
                 e1.partPlateformeTnd += partPlatCarte;
               }
               // Sans règle « Toute la carte » : commande ignorée (remise non comptable).
+            } else if (view === 'bogof') {
+              // Vue « Bogof » (Kool uniquement) : UNIQUEMENT les lignes Bogof
+              // attribuées (breakdown bogof: true). Le split est celui en place :
+              // plateforme = « Participation 2ème article » telle quelle,
+              // restaurant = remise − plateforme. Les lignes Bogof sans règle
+              // vont dans les « non attribuées » de cette vue.
+              if (evK) {
+                totals.unattributedTnd += (evK.bogofUnattributedTnd || 0);
+                totals.unattributedCount += (evK.bogofUnattributedCount || 0);
+                if (evK.isPromoBogof) {
+                  var eB = getEntry(rec.am, rawArea, rawResto);
+                  eB.totalOffres += 1;
+                  eB.remiseTnd += evK.bogofDiscountTnd || 0;
+                  eB.partRestoTnd += evK.bogofPartTnd || 0;
+                  eB.partPlateformeTnd += evK.bogofPlateformeTnd || 0;
+                }
+              } else if (dAmt > 0) {
+                // Aucune règle pour cette commande : on évalue les lignes sans
+                // règle pour mesurer les Bogof non attribués (catégorie
+                // « Buy 1 Get 1 Free » sans règle Bogof correspondante).
+                var unattrB = calculerParticipationArticlesCommandeKool(c[idxOrderId], []);
+                var unattrBBreak = unattrB.unattributedBreakdown || [];
+                for (var ub = 0; ub < unattrBBreak.length; ub++) {
+                  var ubCat = normalizeText(unattrBBreak[ub].category || '');
+                  if (ubCat.includes('buy 1 get 1') || ubCat.includes('bogof')) {
+                    totals.unattributedTnd += unattrBBreak[ub].discountTnd || 0;
+                    totals.unattributedCount += unattrBBreak[ub].quantity || 1;
+                  }
+                }
+              }
+              // Sans ligne Bogof attribuée : commande ignorée dans cette vue.
             } else {
               // Articles remisés sans règle correspondante = « non attribués »
               // (audit 2026-11-27, item 5a) : comptés à part dans les totaux,
@@ -302,6 +338,8 @@
               // Sans règle article : lignes remisées ignorées (remise non comptable).
             }
           } else {
+            // Vue « Bogof » : Kool uniquement — Yassir n'a pas de Bogof.
+            if (view === 'bogof') continue;
             var dTypeLower = String(c[idxDiscType] || '').toLowerCase();
             var fCatLower = String(c[idxFoodCat] || '').toLowerCase();
             var hasOffer = dAmt > 0 || /(percentage|pourcentage|pack|discount)/i.test(dTypeLower) || /super\s*promo/i.test(fCatLower);
@@ -356,11 +394,12 @@
         // Kool sans aucune ligne alors que des commandes livrées existent sur la période.
         var note = '';
         var hasData = (state.marketRows.length + state.foodRows.length) > 0;
+        var bogofRulesCount = (state.bogofRules || []).length;
         if (!hasData) {
           note = 'no_data';
-        } else if (rulesCount === 0) {
+        } else if (rulesCount === 0 && !(isKool && view === 'bogof' && bogofRulesCount > 0)) {
           note = 'no_rules';
-        } else if (isKool && view === 'article' && rows.length === 0 && deliveredCount > 0) {
+        } else if (isKool && (view === 'article' || view === 'bogof') && rows.length === 0 && deliveredCount > 0) {
           if (!window.koolOrderItemsByOrderId || window.koolOrderItemsByOrderId.size === 0) {
             note = 'no_items_loaded';
           } else {
@@ -368,7 +407,7 @@
             var covMax = window.koolOrderItemsMaxDate || '';
             var outOfCoverage = (state.dateStart && covMax && state.dateStart > covMax) ||
               (state.dateEnd && covMin && state.dateEnd < covMin);
-            note = outOfCoverage ? 'items_out_of_coverage' : 'no_article_offer';
+            note = outOfCoverage ? 'items_out_of_coverage' : (view === 'bogof' ? 'no_bogof_offer' : 'no_article_offer');
           }
         }
 
@@ -379,16 +418,20 @@
       // pour Kool (evaluerOffreKoolPourCommande renvoie isPromoAdmin: 0), la colonne
       // est donc masquée en mode Kool uniquement (elle reste pour Yassir).
       var OFFRES_PROMO_ADMIN_IDX = OFFRES_HEADERS.indexOf('Promo Admin');
+      var OFFRES_BOGOF_IDX = OFFRES_HEADERS.indexOf('Bogof');
       function getOffresVisibleHeaders() {
         var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        // Kool : « Promo Admin » masquée (toujours 0). Yassir : « Bogof »
+        // masquée (le Bogof n'existe pas côté Yassir).
         return isKool
           ? OFFRES_HEADERS.filter(function (h) { return h !== 'Promo Admin'; })
-          : OFFRES_HEADERS.slice();
+          : OFFRES_HEADERS.filter(function (h) { return h !== 'Bogof'; });
       }
       function filtrerCellulesOffresVisibles(cells) {
         var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
-        if (!isKool || !cells) return cells;
-        return cells.filter(function (c, idx) { return idx !== OFFRES_PROMO_ADMIN_IDX; });
+        if (!cells) return cells;
+        if (isKool) return cells.filter(function (c, idx) { return idx !== OFFRES_PROMO_ADMIN_IDX; });
+        return cells.filter(function (c, idx) { return idx !== OFFRES_BOGOF_IDX; });
       }
       window.yassirGetOffresVisibleHeaders = getOffresVisibleHeaders;
 
@@ -407,6 +450,9 @@
 
       function renderParticipationPanel() {
         var isKool = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+        // Vue « Bogof » : Kool uniquement — si on bascule sur Yassir en étant
+        // en vue Bogof, on revient sur « Toute la carte ».
+        if (!isKool && participationViewMode === 'bogof') participationViewMode = 'carte';
         var cacheKey = String(state._calcRevision || 0) + '|' + (currentBrand || 'yassir') + '|' + participationViewMode + '|' + getEffectiveAmFilter() + '|' + getPolygonFilterKey() + '|' + state.marketRows.length + '|' + state.foodRows.length;
         if (_participationCache.key !== cacheKey) {
           _participationCache = { key: cacheKey, result: calculerParticipationParRestaurant(participationViewMode) };
@@ -417,15 +463,22 @@
 
         var btnCarte = document.getElementById('partViewCarteBtn');
         var btnArticle = document.getElementById('partViewArticleBtn');
+        var btnBogof = document.getElementById('partViewBogofBtn');
         var activeCls = 'px-3.5 py-1.5 rounded-full text-xs font-bold bg-[#6C2BD9] text-white shadow-sm transition cursor-pointer';
         var idleCls = 'px-3.5 py-1.5 rounded-full text-xs font-bold text-[#6C2BD9] hover:text-[#5521B5] transition cursor-pointer';
         if (btnCarte) btnCarte.className = res.view === 'carte' ? activeCls : idleCls;
         if (btnArticle) btnArticle.className = res.view === 'article' ? activeCls : idleCls;
+        if (btnBogof) {
+          btnBogof.className = res.view === 'bogof' ? activeCls : idleCls;
+          btnBogof.classList.toggle('hidden', !isKool);
+        }
 
         var viewLabel = document.getElementById('partViewLabel');
         if (viewLabel) {
-          viewLabel.textContent = (res.view === 'carte' ? 'Vue : Toute la carte' : 'Vue : Par article') + ' • Période : ' + getParticipationPeriodLabel() +
-            (res.view === 'article' && !isKool ? ' • Montants au niveau commande (pas de détail par article pour Yassir)' : '');
+          var viewName = res.view === 'carte' ? 'Toute la carte' : (res.view === 'bogof' ? 'Bogof' : 'Par article');
+          viewLabel.textContent = 'Vue : ' + viewName + ' • Période : ' + getParticipationPeriodLabel() +
+            (res.view === 'article' && !isKool ? ' • Montants au niveau commande (pas de détail par article pour Yassir)' : '') +
+            (res.view === 'bogof' ? ' • Offres Buy 1 Get 1 Free uniquement' : '');
         }
 
         var elOffres = document.getElementById('partKpiOffres');
@@ -451,6 +504,7 @@
               ? 'Aucun détail article pour cette période : la feuille « détails articles » Kool s’arrête au ' + covMax.split('-').reverse().join('/') + '. Ajoutez les lignes manquantes pour voir la participation par article.'
               : 'Aucun détail article pour cette période : la feuille « détails articles » Kool ne couvre pas ces commandes.';
           } else if (res.note === 'no_article_offer') msg = 'Aucune participation sur articles pour cette période : les détails articles couvrent bien la période, mais aucune commande livrée n’a d’offre article avec participation.';
+          else if (res.note === 'no_bogof_offer') msg = 'Aucune participation Bogof pour cette période : les détails articles couvrent bien la période, mais aucune commande livrée n’a d’offre « Buy 1 Get 1 Free » avec règle Bogof.';
           if (msg) {
             banner.textContent = msg;
             banner.classList.remove('hidden');
@@ -461,11 +515,17 @@
 
         // Bandeau « remises non attribuées » (audit 2026-11-27, item 5a) : visible
         // en vue « Par article » Kool quand des remises n'ont aucune règle.
+        // En vue « Bogof », il ne porte que sur les lignes « Buy 1 Get 1 Free »
+        // sans règle Bogof correspondante (feuille « Bogof »).
         var unattrBanner = document.getElementById('partUnattributedBanner');
         if (unattrBanner) {
           var unattrTnd = Number(res.totals.unattributedTnd || 0);
-          if (isKool && res.view === 'article' && unattrTnd > 0) {
-            unattrBanner.textContent = 'Remises non attribuées : ' + unattrTnd.toFixed(2) + ' TND (' + Number(res.totals.unattributedCount || 0).toLocaleString('fr-FR') + ' article(s)) sans règle correspondante dans la feuille « Offre Participation » — elles ne sont comptées ni à la charge du restaurant, ni à celle de la plateforme. Ajoutez la règle dans la feuille puis refaites « Sync Kool ».';
+          if (isKool && (res.view === 'article' || res.view === 'bogof') && unattrTnd > 0) {
+            if (res.view === 'bogof') {
+              unattrBanner.textContent = 'Remises Bogof non attribuées : ' + unattrTnd.toFixed(2) + ' TND (' + Number(res.totals.unattributedCount || 0).toLocaleString('fr-FR') + ' article(s)) « Buy 1 Get 1 Free » sans règle Bogof correspondante dans la feuille « Bogof » — elles ne sont comptées ni à la charge du restaurant, ni à celle de la plateforme. Ajoutez la règle dans la feuille « Bogof » puis refaites « Sync Kool ».';
+            } else {
+              unattrBanner.textContent = 'Remises non attribuées : ' + unattrTnd.toFixed(2) + ' TND (' + Number(res.totals.unattributedCount || 0).toLocaleString('fr-FR') + ' article(s)) sans règle correspondante dans la feuille « Offre Participation » — elles ne sont comptées ni à la charge du restaurant, ni à celle de la plateforme. Ajoutez la règle dans la feuille puis refaites « Sync Kool ».';
+            }
             unattrBanner.classList.remove('hidden');
           } else {
             unattrBanner.classList.add('hidden');
@@ -488,7 +548,7 @@
       }
 
       window.yassirSetParticipationView = function (view) {
-        if (view !== 'carte' && view !== 'article') return;
+        if (view !== 'carte' && view !== 'article' && view !== 'bogof') return;
         if (participationViewMode === view) return;
         participationViewMode = view;
         renderParticipationPanel();

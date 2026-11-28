@@ -784,10 +784,11 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   const headTxt = w.document.getElementById('previewTableHead').textContent;
   assert.equal(headTxt.includes('Promo Admin'), false, 'colonne Promo Admin encore affichée en mode Kool : ' + headTxt);
   assert.equal(headTxt.includes('Promo Restaurant'), true, 'colonne Promo Restaurant absente en mode Kool');
-  assert.equal(w.document.querySelectorAll('#previewTableBody tr td').length, 21, 'trois lignes Offres Kool (Alpha, Gamma, Delta) × 7 cellules (sans Promo Admin)');
+  assert.equal(headTxt.includes('Bogof'), true, 'colonne Bogof absente en mode Kool : ' + headTxt);
+  assert.equal(w.document.querySelectorAll('#previewTableBody tr td').length, 24, 'trois lignes Offres Kool (Alpha, Gamma, Delta) × 8 cellules (sans Promo Admin, avec Bogof)');
   assert.ok(w.document.getElementById('previewTableBody').textContent.includes('Resto Gamma'), 'Resto Gamma (règle à 0 %) absent du tableau Offres');
-  assert.deepEqual([...w.yassirGetOffresVisibleHeaders()], ['Portefeuille AM', 'Area', 'Nom du restaurant', 'Total Offres', 'Discount Article', 'Promo Restaurant']);
-  // En mode Yassir, la colonne est toujours là.
+  assert.deepEqual([...w.yassirGetOffresVisibleHeaders()], ['Portefeuille AM', 'Area', 'Nom du restaurant', 'Total Offres', 'Discount Article', 'Promo Restaurant', 'Bogof']);
+  // En mode Yassir, la colonne Promo Admin est toujours là et « Bogof » est masquée.
   w.yassirSwitchBrand('yassir');
   assert.deepEqual([...w.yassirGetOffresVisibleHeaders()], ['Portefeuille AM', 'Area', 'Nom du restaurant', 'Total Offres', 'Discount Article', 'Promo Admin', 'Promo Restaurant']);
   w.yassirSwitchBrand('kool');
@@ -950,6 +951,89 @@ test('Kool : Bogof — participation telle quelle depuis la feuille Bogof (vue P
   w.yassirSetParticipationView('carte');
   assert.equal(w.document.getElementById('partKpiOffres').textContent, '0', 'Total Offres Bogof (carte — doit être 0)');
   assert.equal(w.document.getElementById('partKpiRemise').textContent, '0.00 TND', 'Remise Bogof (carte — doit être 0)');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Vue « Bogof » de Participation + colonne « Bogof » du tableau Offres (2026-11-28) ----
+// Une commande avec 1 ligne Bogof + 1 ligne offre normale (Super Promo) :
+// la vue « Bogof » ne compte QUE la ligne Bogof, la vue « Par article »
+// compte les deux. La colonne « Bogof » du tableau Offres montre la remise
+// Bogof (TND) — 0,00 pour un restaurant sans Bogof.
+// 2001 (Alpha) : Pizza Polo Bogof (remise 12, participation 6 → plateforme 6,
+// resto 6) + Burger Super Promo (remise 3, partPct 10 % → plateforme 1,50,
+// resto 1,50). 2002 (Alpha) : Burger seul (remise 3, plateforme 1,50,
+// resto 1,50). 2003 (Beta) : Burger seul (remise 3, plateforme 1,50, resto 1,50).
+// Vue « Par article » : 3 offres / 21.00 / resto 10.50 / plateforme 10.50.
+// Vue « Bogof » : 1 offre / 12.00 / resto 6.00 / plateforme 6.00 (Alpha seul).
+// Tableau Offres : Alpha Bogof 12.00, Beta Bogof 0.00.
+const koolCsvDataBogofView = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '17/11/2026', '2001', '', 'Resto Alpha', '', '', '12.00', '3', '15'],
+  ['', '', '', '17/11/2026', '2002', '', 'Resto Alpha', '', '', '12.00', '3', '3'],
+  ['', '', '', '17/11/2026', '2003', '', 'Resto Beta', '', '', '12.00', '3', '3']
+]);
+const koolCsvItemsBogofView = toCsv([
+  ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+  ['2001', '17/11/2026', 'Resto Alpha', 'Buy 1 Get 1 Free', 'Pizza Polo', 1, 12, 0, 12, 'Food'],
+  ['2001', '17/11/2026', 'Resto Alpha', 'Super Promo', 'Burger Classic', 1, 15, 12, 15, 'Food'],
+  ['2002', '17/11/2026', 'Resto Alpha', 'Super Promo', 'Burger Classic', 1, 15, 12, 15, 'Food'],
+  ['2003', '17/11/2026', 'Resto Beta', 'Super Promo', 'Burger Classic', 1, 15, 12, 15, 'Food']
+]);
+const koolCsvOffreBogofView = toCsv([
+  ['Restaurant', 'Participation', 'Tag', 'Période'],
+  ['Resto Alpha', '10', 'Super Promo', '01/11/2026 - 30/11/2026'],
+  ['Resto Beta', '10', 'Super Promo', '01/11/2026 - 30/11/2026']
+]);
+const koolCsvBogofView = toCsv([
+  ['Area', 'Restaurant', 'Responsable AM', 'C%', 'C% Globale', 'Article', 'Prix article', '2ème Article (prix)', 'Participation 2ème article', 'Spécificité', "Détails de l'offre", 'Start Date', 'End Date', 'Période'],
+  ['Tunis', 'Resto Alpha', 'Omar Beldi', '20', '', 'Pizza Polo', '25', '12', '6', '', 'Buy 1 Get 1 Free', '', '', '']
+]);
+
+test('Kool : vue Bogof Participation + colonne Bogof Offres (ne compte que les lignes Bogof)', async () => {
+  const w = bootKool({ data: koolCsvDataBogofView, items: koolCsvItemsBogofView, offre: koolCsvOffreBogofView, bogof: koolCsvBogofView });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+
+  // Vue « Par article » (témoin) : 3 offres / 21.00 / resto 10.50 / plateforme 10.50.
+  w.yassirSwitchTab('participation');
+  await wait(600);
+  w.yassirSetParticipationView('article');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '3', 'Total Offres (article)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '21.00 TND', 'Remise (article)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '10.50 TND', 'Participation restaurant (article)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '10.50 TND', 'Participation plateforme (article)');
+
+  // Vue « Bogof » : seule la ligne Pizza Polo de 2001 compte.
+  // 1 offre / 12.00 / resto 6.00 / plateforme 6.00 ; Resto Beta absent.
+  w.yassirSetParticipationView('bogof');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '1', 'Total Offres (bogof)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '12.00 TND', 'Remise (bogof)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '6.00 TND', 'Participation restaurant (bogof)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '6.00 TND', 'Participation plateforme (bogof)');
+  assert.equal(w.document.getElementById('partViewLabel').textContent.includes('Bogof'), true, 'label de vue Bogof : ' + w.document.getElementById('partViewLabel').textContent);
+  var bodyBogof = w.document.getElementById('partTableBody').textContent;
+  assert.ok(bodyBogof.includes('Resto Alpha'), 'Resto Alpha absent en vue Bogof');
+  assert.ok(!bodyBogof.includes('Resto Beta'), 'Resto Beta ne doit pas apparaître en vue Bogof (pas de Bogof)');
+
+  // Tableau Offres : colonne « Bogof » — Alpha 12.00, Beta 0.00.
+  w.yassirSwitchTab('offres');
+  await wait(600);
+  assert.equal(w.document.getElementById('previewTableHead').textContent.includes('Bogof'), true, 'colonne Bogof absente du tableau Offres');
+  var offRows = w.document.querySelectorAll('#previewTableBody tr');
+  var bogofByResto = {};
+  for (var ri = 0; ri < offRows.length; ri++) {
+    var tds = offRows[ri].querySelectorAll('td');
+    if (tds.length < 8) continue;
+    var resto = tds[3].textContent.trim();
+    bogofByResto[resto] = tds[tds.length - 1].textContent.trim();
+  }
+  assert.equal(bogofByResto['Resto Alpha'], '12.00', 'colonne Bogof Resto Alpha : ' + JSON.stringify(bogofByResto));
+  assert.equal(bogofByResto['Resto Beta'], '0.00', 'colonne Bogof Resto Beta : ' + JSON.stringify(bogofByResto));
 
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });

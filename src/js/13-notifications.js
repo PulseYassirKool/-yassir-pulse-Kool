@@ -998,9 +998,16 @@
               3: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-extrabold bg-pink-50/70 text-[#FF2A6D]',
               4: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#1A1A2E]',
               5: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#00897B]',
-              6: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#6C2BD9]'
+              6: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#F3EBFF]/55 text-[#6C2BD9]',
+              7: 'px-4 py-2.5 whitespace-nowrap text-right font-mono font-bold bg-[#FFF7E6] text-[#B45309]'
             };
-            var offresVisibleMetricIdx = [3, 4, 5, 6].filter(function (oi) { return oi !== OFFRES_PROMO_ADMIN_IDX || (typeof currentBrand === 'undefined' || currentBrand !== 'kool'); });
+            // Kool : « Promo Admin » (5) masquée ; Yassir : « Bogof » (7) masquée.
+            var isKoolOffres = (typeof currentBrand !== 'undefined' && currentBrand === 'kool');
+            var offresVisibleMetricIdx = [3, 4, 5, 6, 7].filter(function (oi) {
+              if (oi === OFFRES_PROMO_ADMIN_IDX && isKoolOffres) return false;
+              if (oi === OFFRES_BOGOF_IDX && !isKoolOffres) return false;
+              return true;
+            });
             tbody.innerHTML = pageRecords.map(function (rec, rOffset) {
               var num = startIdx + rOffset + 1;
               var row = rec.cells;
@@ -1008,7 +1015,11 @@
                 ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">Non attribué</span>'
                 : '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#F3EBFF] text-[#6C2BD9]">' + escapeHtml(row[0]) + '</span>';
               var metricCells = offresVisibleMetricIdx.map(function (oi) {
-                return '<td class="' + offresMetricStyles[oi] + '">' + Number(row[oi] || 0) + '</td>';
+                var vNum = Number(row[oi] || 0);
+                // « Bogof » est un montant (TND) : 2 décimales. Les autres
+                // métriques sont des compteurs (entiers).
+                var vTxt = (oi === OFFRES_BOGOF_IDX) ? vNum.toFixed(2) : String(vNum);
+                return '<td class="' + offresMetricStyles[oi] + '">' + vTxt + '</td>';
               }).join('');
 
               return '<tr class="hover:bg-[#F3EBFF]/40 transition-colors">' +
