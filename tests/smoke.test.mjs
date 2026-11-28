@@ -2729,7 +2729,13 @@ test('I2 : import de fichier avec bibliothèques pas encore chargées — attend
   }, 50));
   w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
   await wait(1200);
-  assert.ok(w.document.getElementById('mainFileName').textContent.includes('fichier(s) enregistré(s)'), 'import non effectué après attente des libs : ' + w.document.getElementById('mainFileName').textContent);
+  // L'import est confirmé par son propre toast (durable), pas par mainFileName :
+  // la synchro automatique (déclenchée à la connexion) écrit aussi mainFileName
+  // à sa fin, et son ordre d'arrivée dépend du débit des tranches (2/s depuis
+  // le correctif quota 2026-11-28) — le libellé est donc une course, pas une
+  // preuve de l'import. Le toast, lui, n'est jamais écrasé par la synchro.
+  assert.ok(w.document.getElementById('toastContainer').textContent.includes('nouvelles lignes'), 'toast d\'import absent : ' + w.document.getElementById('toastContainer').textContent);
+  assert.ok(w.document.getElementById('toastContainer').textContent.includes('enregistrées automatiquement'), 'import non effectué après attente des libs');
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 

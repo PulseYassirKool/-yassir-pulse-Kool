@@ -72,9 +72,14 @@
       // Le Worker ne fait ni déduplication ni alignement ici : le front s'en
       // charge (fusion par nom d'en-tête + déduplication par N° commande ;
       // détails : déduplication commande|article dans indexKoolOrderItemsRows).
-      // Débit bridé à 4 tranches/s (quota Sheets API : 300 lectures/min/projet).
-      // Une tranche en échec 1102 (isolate froid : signature du jeton) est
-      // réessayée 2 fois — la lecture est idempotente.
+      // Débit bridé à 2 tranches/s (quota Sheets API : 300 lectures/min/projet).
+      // ATTENTION : chaque tranche > 0 coûte DEUX lectures (sonde d'en-têtes
+      // lignes 1-12 + tranche elle-même, côté Worker) — à 4 tranches/s on
+      // montait à ~480 lectures/min et Google répondait 429 (→ 502 côté
+      // Worker, source à 0). À 2 tranches/s on est à ~240/min, sous le quota.
+      // Une tranche en échec (429/1102, isolate froid : signature du jeton)
+      // est réessayée 2 fois AVEC ATTENTE (2 s puis 5 s) — la lecture est
+      // idempotente, et un réessai immédiat ne fait qu'aggraver un 429.
       // Mesures locales (VM, /tmp/proto) : data-oct / data-nov 500 lignes
       // ~5,5 ms, data-kool 1 000 lignes ~4,3 ms, details-kool 1 000 ~1,5 ms.
       // MAIS le CPU d'un isolate Worker gratuit est plus cher que sur la VM
@@ -85,7 +90,8 @@
       // complète, toujours très loin du quota gratuit (100 000/jour).
       var SLICE_SIZES = { 'data-oct': 250, 'data-nov': 250, 'data-kool': 500, 'details-kool': 500 };
       var SLICE_MAX_RETRIES = 2;
-      var SLICE_MIN_INTERVAL_MS = 250;
+      var SLICE_MIN_INTERVAL_MS = 500;
+      var SLICE_RETRY_DELAYS_MS = [2000, 5000];
       var _sliceLastCallMs = 0;
       var _sliceQueue = Promise.resolve();
       function yassirAppelerTranche(url) {
@@ -156,7 +162,11 @@
             '?brand=' + brand + '&tab=' + encodeURIComponent(tab) +
             '&slice=' + slice + '&sliceSize=' + sliceSize)
             .catch(function (err) {
-              if (attempt < SLICE_MAX_RETRIES) return callSlice(tab, slice, attempt + 1);
+              if (attempt < SLICE_MAX_RETRIES) {
+                var delay = SLICE_RETRY_DELAYS_MS[attempt] || 5000;
+                return new Promise(function (r) { setTimeout(r, delay); })
+                  .then(function () { return callSlice(tab, slice, attempt + 1); });
+              }
               throw err;
             });
         }
