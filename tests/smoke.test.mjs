@@ -3840,3 +3840,36 @@ test('Assistant IA : panneau — bouton après connexion, envoi, réponse insér
     delete env.GEMINI_API_KEY;
   }
 });
+
+// ---- Correctif 2026-11-28 : Sync Kool qui EFFACE la Data (« Kool OK (0 cmd) ») ----
+// Cas réel : hard reload → auto-sync + clic manuel = 2 synchros en parallèle →
+// quota Google dépassé (429) → la source Data échoue et renvoie []. La synchro
+// affichait alors « Kool OK (0 cmd) » (addedDataCount = 0 mais commissions /
+// portefeuilles > 0) et comptait cela comme un succès, alors que l'utilisateur
+// n'avait plus aucune donnée. Le correctif : (a) on ne retire les anciennes
+// lignes Data que si les nouvelles sont non vides ; (b) un drapeau global
+// empêche 2 synchros en parallèle ; (c) un sync vide n'est plus marqué
+// « récent ». Ce test prouve (a) : une Data en échec ne vide pas le cache.
+test('Sync Kool : une Data en échec ne vide pas le cache existant (pas de « Kool OK (0 cmd) »)', async () => {
+  const w = bootKool({ data: koolCsvDataPart, comm: koolCsvCommDeck, port: koolCsvPortDeck });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  // 1re synchro : le cache se remplit (7 commandes Data).
+  await w.yassirSyncKoolSheets(true);
+  const label = w.document.getElementById('labelSyncKoolSheets');
+  assert.equal(label.textContent, 'Kool OK (7 cmd)', 'libellé après 1re synchro : ' + label.textContent);
+  // 2e synchro : la Data échoue (onglet « Data » illisible, comme un quota/403),
+  // les autres sources répondent. On vérifie que la 2e synchro a bien tenté
+  // de lire la Data (pas bloquée par la garde anti-parallèle).
+  const callsBefore = w.__sheetApiCalls.length;
+  googleFailTabs.add('Data');
+  try {
+    await w.yassirSyncKoolSheets(true);
+  } finally {
+    googleFailTabs.delete('Data');
+  }
+  const newCalls = w.__sheetApiCalls.slice(callsBefore);
+  assert.ok(newCalls.some(function (u) { return u.includes('/api/sheets/data-kool'); }), 'la 2e synchro n\'a pas tenté de lire la Data (garde anti-parallèle bloquante ?)');
+  // Le cache est préservé : le libellé montre toujours le TOTAL (7), pas 0.
+  assert.equal(label.textContent, 'Kool OK (7 cmd)', 'le cache Data a été vidé par la synchro en échec : ' + label.textContent);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});

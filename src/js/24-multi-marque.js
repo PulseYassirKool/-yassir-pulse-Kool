@@ -813,6 +813,15 @@
           showToast('La synchronisation Kool est réservée au Propriétaire Admin.', 'error');
           return;
         }
+        // Correctif 2026-11-28 (Data Kool effacée, « Kool OK (0 cmd) ») : une
+        // synchro auto (au chargement / bascule de marque) + un clic manuel
+        // faisaient tourner DEUX synchros en parallèle et dépassaient le quota
+        // Google (60 lectures/min) → 429 → sources vides. On refuse la 2e.
+        if (window.yassirSyncKoolEnCours) {
+          showToast('Synchronisation Kool déjà en cours…', 'info');
+          return;
+        }
+        window.yassirSyncKoolEnCours = true;
         var icon = document.getElementById('iconSyncKoolSheets');
         var label = document.getElementById('labelSyncKoolSheets');
         if (icon) icon.classList.add('fa-spin');
@@ -832,7 +841,10 @@
         // 1. Data Kool (tous les onglets, fusionnés côté Worker).
         // Synchro auto : source déjà synchronisée il y a moins de 30 min —
         // on la saute (l'archive IndexedDB fait foi), sans la compter en échec.
-        var pData = (!manualTrigger && window.yassirSliceSyncRecente && window.yassirSliceSyncRecente('data-kool', 'kool'))
+        // (Correctif 2026-11-28 : on mémorise le saut pour ne pas confondre
+        // « sautée par récence » et « en échec » dans le statut final.)
+        var dataSkippedByRecency = (!manualTrigger && window.yassirSliceSyncRecente && window.yassirSliceSyncRecente('data-kool', 'kool'));
+        var pData = dataSkippedByRecency
           ? Promise.resolve([])
           : yassirLireFeuilleViaApi('data-kool', { brand: 'kool', fresh: freshKool })
             .catch(function () { return []; });
@@ -951,6 +963,10 @@
           var addedDataCount = 0;
           if (rawDataRows && rawDataRows.length > 1) {
             var normalizedData = filterOutMarketRowsForKool(normaliserLignesDataKool(rawDataRows));
+            // Correctif 2026-11-28 (Data Kool effacée) : on ne retire les
+            // anciennes lignes Data que si les nouvelles sont non vides.
+            // Sinon (normalisation vide), on garde l'ancien cache tel quel.
+            if (normalizedData && normalizedData.length > 1) {
             var sheetLabel = 'Data Kool (Octobre & Novembre)';
             var existingIdx = state.storedFilesMeta.findIndex(function (m) { return m.name === sheetLabel; });
             if (existingIdx !== -1 && state.rawSourceRows && state.rawSourceRows.length > 1) {
@@ -971,6 +987,7 @@
               detecterBornesDatesSource(state.rawSourceRows);
               saveArchiveToIndexedDb();
               brandArchives.kool.syncedFromSheet = true;
+            }
             }
           }
           saveCurrentStateToBrandCache('kool');
@@ -1007,15 +1024,29 @@
             }
           }
 
+          // Correctif 2026-11-28 (Data Kool effacée, « Kool OK (0 cmd) ») :
+          // le libellé montrait les lignes AJOUTÉES par cette synchro, pas le
+          // total présent — « 0 cmd » alors que l'archive a 113 184 lignes est
+          // trompeur, et un 0 ne doit jamais compter comme un succès. On
+          // affiche le TOTAL présent dans le cache Kool, et on ne dit « OK »
+          // que si des données sont réellement là.
+          var koolArchiveRows = (brandArchives.kool && brandArchives.kool.rawSourceRows) || [];
+          var totalDataRows = (koolArchiveRows.length > 1) ? (koolArchiveRows.length - 1) : 0;
+          // Data tentée mais en échec (ni sautée par récence, ni lue) ?
+          var dataFailed = !dataSkippedByRecency && !(rawDataRows && rawDataRows.length > 1);
+
           if (label) {
-            label.textContent = (addedDataCount > 0 || commCount > 0 || portCount > 0)
-              ? ('Kool OK (' + addedDataCount + ' cmd)')
+            label.textContent = (totalDataRows > 0)
+              ? ('Kool OK (' + totalDataRows + ' cmd)')
               : 'Sync Kool (Oct, Nov & Comm.)';
           }
 
           // Échec ou réussite de la synchro Kool : enregistré pour l'alerte
           // « Synchro en échec » (épinglée tant que la synchro ne réussit pas).
           var koolSyncOk = addedDataCount > 0 || commCount > 0 || portCount > 0 || koolOffreRules.length > 0;
+          // Une Data tentée mais en échec, sans aucune donnée en cache, n'est
+          // PAS un succès : on signale l'échec au lieu d'afficher « OK ».
+          if (dataFailed && totalDataRows === 0) koolSyncOk = false;
           noterStatutSynchro('Kool', koolSyncOk);
           if (typeof window.yassirEffacerEchecSynchro === 'function' && typeof window.yassirEnregistrerEchecSynchro === 'function') {
             if (koolSyncOk) window.yassirEffacerEchecSynchro('kool');
@@ -1023,10 +1054,10 @@
           }
 
           if (manualTrigger) {
-            if (addedDataCount > 0 || commCount > 0 || portCount > 0 || koolOffreRules.length > 0) {
+            if (koolSyncOk) {
               showToast(
                 '<strong>Synchronisation Kool réussie !</strong><br/>' +
-                '• Data Oct & Nov : <strong>' + addedDataCount + '</strong> commandes.<br/>' +
+                '• Data Oct & Nov : <strong>' + totalDataRows + '</strong> commandes.<br/>' +
                 '• Commissions Kool : <strong>' + commCount + '</strong> taux.<br/>' +
                 '• Portefeuilles Kool : <strong>' + portCount + '</strong> restos • Offres : <strong>' + koolOffreRules.length + '</strong> règles • Bogof : <strong>' + koolBogofRules.length + '</strong> règles • Détails articles : <strong>' + orderItemsCount + '</strong> lignes.' +
                 (hist2025KoolCount > 0 ? '<br/>• Données 2025 Kool : <strong>' + hist2025KoolCount + '</strong> lignes.' : ''),
@@ -1039,6 +1070,11 @@
               );
             }
           }
+          // Fin de synchro : on libère le drapeau anti-parallèle.
+          window.yassirSyncKoolEnCours = false;
+        }).catch(function (err) {
+          window.yassirSyncKoolEnCours = false;
+          try { console.error('[Sync Kool] erreur inattendue :', err); } catch (e) {}
         });
       };
 

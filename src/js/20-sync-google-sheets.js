@@ -320,7 +320,12 @@
               });
             });
             return seq.then(function () {
-              yassirNoterSliceSync(source, brand);
+              // Correctif 2026-11-28 (Data Kool effacée) : on ne marque « récent »
+              // que si des lignes ont VRAIMENT été chargées. Un sync vide/échoué
+              // (tous les onglets en 429) marquait la source comme récente et
+              // bloquait le rechargement pendant 30 min — l'utilisateur restait
+              // avec 0 donnée sans que l'auto-sync ne réessaie.
+              if (allRows && allRows.length > 1) yassirNoterSliceSync(source, brand);
               try { window.yassirLastSliceFailedTabs = failedTabs.slice(); } catch (e) {}
               return allRows || [];
             });
