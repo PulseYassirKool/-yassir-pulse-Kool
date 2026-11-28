@@ -546,7 +546,9 @@
               var rbResto = String(rb.restaurant || '').trim().toLowerCase();
               if (rbResto && restoLow && rbResto !== restoLow) continue;
               var rbArt = rb.articleNorm || normalizeNomArticle(rb.article || '');
-              if (artNorm === rbArt || rbArt.includes(artNorm)) { bogofRule = rb; break; }
+              // Bidirectionnel (correctif 2026-11-28) : le détail dit souvent
+              // « Box Crunchy = Extra » quand la règle dit « Box Crunchy ».
+              if (articleCorrespond(artNorm, rbArt)) { bogofRule = rb; break; }
             }
           }
           if (bogofRule) {
@@ -599,17 +601,21 @@
           // au nom de l'article — en octobre, 0 TND rattaché, 100 %
           // « non attribué ». Pour une règle Pack/BOGOF, on rattache l'article
           // quand son nom normalisé est CONTENU dans le libellé normalisé de
-          // la règle (détails ou tag). La passe 1 exacte reste la règle pour
-          // tout le reste ; jamais de repli sur la première règle : sans
-          // rattachement, l'article reste « non attribué ». La garde artNorm
-          // non vide est obligatoire (''.includes() est toujours vrai).
+          // la règle (détails ou tag). Correctif 2026-11-28 : la correspondance
+          // est BIDIRECTIONNELLE — le nom du détail porte parfois du texte en
+          // plus (« Makloub Escalope XL ») quand le libellé dit « Makloub
+          // Escalope » : le libellé est alors contenu dans l'article.
+          // La passe 1 exacte reste la règle pour tout le reste ; jamais de
+          // repli sur la première règle : sans rattachement, l'article reste
+          // « non attribué ». La garde artNorm non vide est obligatoire
+          // (''.includes() est toujours vrai).
           if (!appliedRule && artNorm) {
             for (var j2 = 0; j2 < articleRules.length; j2++) {
               var rl2 = articleRules[j2];
               var det2 = normalizeNomArticle(rl2.details || '');
               var tag2 = normalizeNomArticle(rl2.tag || '');
               if ((det2.includes('pack') || det2.includes('bogof') || tag2.includes('pack') || tag2.includes('bogof'))
-                && (det2.includes(artNorm) || tag2.includes(artNorm))) {
+                && (articleCorrespond(artNorm, det2) || articleCorrespond(artNorm, tag2))) {
                 appliedRule = rl2;
                 break;
               }
@@ -665,6 +671,22 @@
       // multiples réduits à un seul espace.
       function normalizeNomArticle(s) {
         return normalizeText(s).replace(/\s+/g, ' ').trim();
+      }
+
+      // Correspondance BIDIRECTIONNELLE article ↔ règle (correctif
+      // 2026-11-28) : le nom d'article du détail porte souvent du texte en
+      // plus (« Box Crunchy = Extra ») alors que la règle dit « Box Crunchy » :
+      // la règle est CONTENUE dans l'article, pas l'inverse. On accepte les
+      // deux sens (l'article contient la règle, ou la règle contient
+      // l'article), avec deux gardes : aucune des deux chaînes ne doit être
+      // vide, et la plus courte doit faire ≥ 4 caractères (évite qu'un libellé
+      // d'1-3 lettres rattache n'importe quel article). L'égalité exacte reste
+      // un cas particulier de l'inclusion.
+      function articleCorrespond(a, b) {
+        if (!a || !b) return false;
+        if (a === b) return true;
+        if (Math.min(a.length, b.length) < 4) return false;
+        return a.includes(b) || b.includes(a);
       }
 
       // Exposé pour la section Participation (vue « Par article » Kool) et les tests.

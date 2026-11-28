@@ -833,6 +833,80 @@ test('Kool : Bogof — participation telle quelle depuis la feuille Bogof (vue P
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Correctif 2026-11-28 : Bogof bout en bout avec les vraies données ----
+// Cas réel (feuille « Détails articles Kool », onglet Feuille 4, 28/11/2026) :
+// en-têtes exacts « Order_id | date | Restaurant | Category | Article |
+// Quantity | Unit price | Discount Price | Original Price | Type », lignes
+// BOGOF « Box Crunchy = Extra » (Chihia Chicken, Original 48, payé 24) et
+// « Makloub Escalope » (Marsois, Original 22, payé 11). Le matching
+// unidirectionnel ne rattachait rien → vue « Par article » = 0 malgré des
+// règles Bogof chargées. Attendu : 2 offres / remise 35.00 / resto 24.00 /
+// plateforme 11.00 ; « Toute la carte » reste à 0.
+const koolCsvDataBogofLong = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '28/11/2026', 'JGAJ-6099', '', 'Chihia Chicken', '', '', '24.00', '3', '24'],
+  ['', '', '', '28/11/2026', 'zNAj-3684', '', 'Marsois', '', '', '11.00', '3', '11']
+]);
+const koolCsvItemsBogofLong = toCsv([
+  ['Order_id', 'date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit price', 'Discount Price', 'Original Price', 'Type'],
+  ['JGAJ-6099', '28/11/2026', 'Chihia Chicken', 'Buy 1 get 1 free', 'Box Crunchy = Extra', 1, 24, 24, 48, 'Food'],
+  ['JGAJ-6099', '28/11/2026', 'Chihia Chicken', 'Frites', 'Fries Crinkle', 1, 4.7, '', 4.7, 'Food'],
+  ['zNAj-3684', '28/11/2026', 'Marsois', 'Buy 1 Get 1 Free', 'Makloub Escalope', 1, 11, 11, 22, 'Food'],
+  ['zNAj-3684', '28/11/2026', 'Marsois', 'Buy 1 Get 1 Free', 'Ketchup (Makloub)', 1, 0, '', 0, 'Extra']
+]);
+const koolCsvOffreBogofLong = toCsv([
+  ['Restaurant', 'Participation', 'Tag', 'Période']
+]);
+const koolCsvBogofLong = toCsv([
+  ['Area', 'Restaurant', 'Responsable AM', 'C%', 'C% Globale', 'Article', 'Prix article', '2ème Article (prix)', 'Participation 2ème article', 'Spécificité', "Détails de l'offre", 'Start Date', 'End Date', 'Période'],
+  ['Tunis', 'Chihia Chicken', 'Ilyes Kammoun', '20', '', 'Box Crunchy', '24', '24', '6', '', 'Buy 1 Get 1 Free', '', '', ''],
+  ['Sfax', 'Marsois', 'Ilyes Kammoun', '20', '', 'Makloub Escalope', '11', '11', '5', '', 'Buy 1 Get 1 Free', '', '', '']
+]);
+const koolCsvPortBogofLong = toCsv([
+  ['Restaurant', 'Ville', 'AM'],
+  ['Chihia Chicken', 'Tunis', 'Ilyes Kammoun'],
+  ['Marsois', 'Sfax', 'Ilyes Kammoun']
+]);
+
+test('Kool : Bogof bout en bout — article détail plus long que la règle (Feuille 4 réelle)', async () => {
+  const w = bootKool({ data: koolCsvDataBogofLong, items: koolCsvItemsBogofLong, offre: koolCsvOffreBogofLong, bogof: koolCsvBogofLong, port: koolCsvPortBogofLong });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+
+  // La synchro Kool a chargé les 2 règles Bogof et indexé les détails (en-têtes Feuille 4).
+  assert.equal(w.yassirGetBogofRules().length, 2, 'règles Bogof chargées');
+  assert.ok(w.koolOrderItemsByOrderId.has('jgaj-6099'), 'commande JGAJ-6099 absente des détails articles');
+  assert.ok(w.koolOrderItemsByOrderId.has('znaj-3684'), 'commande zNAj-3684 absente des détails articles');
+
+  // Carte GMV : item total des livrées = (24 + 24) + (11 + 11) = 70,00 TND.
+  assert.equal(w.document.getElementById('kpiGmvLivrees').textContent, '70,00 TND', 'GMV Kool Bogof (cas réel)');
+
+  // Vue « Par article » : 2 offres / remise 35.00 / resto 24.00 / plateforme 11.00.
+  w.yassirSwitchTab('participation');
+  await wait(600);
+  w.yassirSetParticipationView('article');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '2', 'Total Offres Bogof (article, cas réel)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '35.00 TND', 'Remise Bogof (article, cas réel)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '24.00 TND', 'Participation restaurant Bogof (article, cas réel)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '11.00 TND', 'Participation plateforme Bogof (article, cas réel)');
+  const bodyTxt = w.document.getElementById('partTableBody').textContent;
+  assert.ok(bodyTxt.includes('Chihia Chicken'), 'Chihia Chicken absent en vue article Bogof');
+  assert.ok(bodyTxt.includes('Marsois'), 'Marsois absent en vue article Bogof');
+  // KPI budget « Participation Offres » (coût restaurant) : 18 + 6 = 24.
+  assert.equal(w.yassirCalculerCoutParticipationOffresLivrees(w.yassirGetDeliveredRecords()), 24, 'KPI Participation Offres Bogof (cas réel)');
+
+  // Vue « Toute la carte » : aucune règle carte → 0 offre (le Bogof ne fuit pas).
+  w.yassirSetParticipationView('carte');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '0', 'Total Offres Bogof (carte — doit être 0)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '0.00 TND', 'Remise Bogof (carte — doit être 0)');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Correctif 1 (diagnostic 2026-11-27) : partPct Kool lu 100 fois trop petit ----
 // La feuille « Offre Participation » écrit la participation « 0,1 » (= 10 %) ;
 // la synchro Kool lit la feuille en CSV (chaînes) et parsePercentNumber ne
@@ -3158,6 +3232,69 @@ test('Pack/BOGOF : un article se rattache quand son nom est contenu dans le libe
   assert.equal(res2.matchedItemsCount, 0, 'la règle Pack Burger a attrapé des articles par repli');
   assert.equal(res2.unattributedTnd, 17, 'tout doit être non attribué : ' + res2.unattributedTnd);
   assert.equal(res2.unattributedCount, 3, 'tous les articles doivent être non attribués');
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// ---- Correctif 2026-11-28 : matching article ↔ règle BIDIRECTIONNEL ----
+// Cas réel (feuille « Détails articles Kool », onglet Feuille 4, 28/11/2026) :
+// le nom d'article du détail porte du texte en plus (« Box Crunchy = Extra »)
+// alors que la règle Bogof dit « Box Crunchy » : la règle est CONTENUE dans
+// l'article, pas l'inverse. Le matching unidirectionnel (règle contient
+// article) ne matchait rien → « Par article » = 0, DISCOUNT ARTICLE = 0,
+// Top des ventes = 0, Bogof absent du site malgré 52 règles chargées.
+test('Bogof : un article détail plus long que la règle se rattache (bidirectionnel)', () => {
+  const w = boot();
+  w.koolOrderItemsByOrderId = new Map([
+    ['jgaj-6099', [
+      { article: 'Box Crunchy = Extra', category: 'Buy 1 get 1 free', restaurant: 'Chihia Chicken', quantity: 1, unitPrice: 24, originalPrice: 48, discountPrice: 24 },
+      { article: 'Fries Crinkle', category: 'Frites', restaurant: 'Chihia Chicken', quantity: 1, unitPrice: 4.7, originalPrice: 4.7, discountPrice: 0 }
+    ]],
+    ['znaj-3684', [
+      { article: 'Makloub Escalope', category: 'Buy 1 Get 1 Free', restaurant: 'Marsois', quantity: 1, unitPrice: 11, originalPrice: 22, discountPrice: 11 }
+    ]]
+  ]);
+  const bogofRules = [
+    { restaurant: 'Chihia Chicken', restaurantNorm: 'chihia chicken', article: 'Box Crunchy', articleNorm: 'box crunchy', participation2eme: 6 },
+    { restaurant: 'Marsois', restaurantNorm: 'marsois', article: 'Makloub Escalope', articleNorm: 'makloub escalope', participation2eme: 5 }
+  ];
+  // JGAJ-6099 : « Box Crunchy = Extra » contient la règle « Box Crunchy ».
+  // Remise 48 − 24 = 24 ; plateforme min(6, 24) = 6 ; restaurant 24 − 6 = 18.
+  const res = w.yassirCalculerParticipationArticlesKool('JGAJ-6099', [], bogofRules);
+  assert.equal(res.matchedItemsCount, 1, 'Box Crunchy doit être rattaché : ' + JSON.stringify(res.breakdown));
+  assert.equal(res.costTnd, 18, 'part restaurant Box Crunchy : ' + res.costTnd);
+  assert.equal(res.discountTotalTnd, 24, 'remise Box Crunchy : ' + res.discountTotalTnd);
+  assert.equal(res.unattributedTnd, 0, 'rien de non attribué sur JGAJ-6099');
+  // zNAj-3684 : nom exact (« Makloub Escalope ») — déjà couvert avant le correctif (témoin).
+  // Remise 22 − 11 = 11 ; plateforme min(5, 11) = 5 ; restaurant 11 − 5 = 6.
+  const res2 = w.yassirCalculerParticipationArticlesKool('zNAj-3684', [], bogofRules);
+  assert.equal(res2.matchedItemsCount, 1, 'Makloub Escalope doit être rattaché : ' + JSON.stringify(res2.breakdown));
+  assert.equal(res2.costTnd, 6, 'part restaurant Makloub : ' + res2.costTnd);
+  assert.equal(res2.discountTotalTnd, 11, 'remise Makloub : ' + res2.discountTotalTnd);
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
+// Passe 2 Pack/BOGOF : même bidirectionnalité pour les règles articles —
+// le libellé de la règle (« Makloub Escalope ») est contenu dans le nom
+// d'article du détail (« Makloub Escalope XL »).
+test('Pack/BOGOF (passe 2) : un article détail plus long que le libellé de la règle se rattache', () => {
+  const w = boot();
+  w.koolOrderItemsByOrderId = new Map([
+    ['cmd-3', [
+      { article: 'Makloub Escalope XL', category: 'Sandwich', quantity: 1, unitPrice: 22, originalPrice: 22, discountPrice: 11 },
+      { article: 'Tacos Poulet', category: 'Tacos', quantity: 1, unitPrice: 9, originalPrice: 9, discountPrice: 8 }
+    ]]
+  ]);
+  const regles = [
+    { restaurant: 'Resto Test', details: 'Makloub Escalope', tag: 'BOGOF', partPct: 10 }
+  ];
+  const res = w.yassirCalculerParticipationArticlesKool('CMD-3', regles);
+  // Makloub Escalope XL : rattaché (remise 11, plateforme 10 % × 22 = 2,2, resto 8,8).
+  assert.equal(res.matchedItemsCount, 1, 'articles rattachés : ' + JSON.stringify(res.breakdown));
+  assert.equal(res.costTnd, 8.8, 'part restaurant : ' + res.costTnd);
+  assert.equal(res.discountTotalTnd, 11, 'remise rattachée : ' + res.discountTotalTnd);
+  // Tacos Poulet : aucun libellé ne le contient → « non attribué ».
+  assert.equal(res.unattributedTnd, 1, 'montant non attribué : ' + res.unattributedTnd);
+  assert.equal(res.unattributedCount, 1, 'articles non attribués : ' + res.unattributedCount);
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
