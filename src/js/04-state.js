@@ -28,6 +28,10 @@
         restoStatuses: {},
         crmComments: {},
         offreParticipationRules: [],
+        // Règles Bogof Kool (onglet « Bogof » du classeur unique) : la
+        // participation est une somme en DT (« Participation 2ème article »),
+        // jamais un % ; la date vient de la ligne détail, jamais de la feuille.
+        bogofRules: [],
         offrePartSheetId: '',
         historical2025Rows: [],
         historical2025RowsKool: [],
@@ -253,6 +257,107 @@
       }
       window.yassirParseOffreParticipationRows = parseOffreParticipationRows;
 
+      // ---------------------------------------------------------------------------
+      // Règles Bogof Kool (onglet « Bogof » du classeur unique, offres
+      // buy-one-get-one). Colonnes : Area, Restaurant, Responsable AM, C%,
+      // C% Globale, Article, Prix article, 2ème Article (prix),
+      // Participation 2ème article, Spécificité, Détails de l'offre,
+      // Start Date, End Date, Période.
+      // RÈGLE 1 (utilisateur, 2026-11-28) : la participation est prise TELLE QUELLE
+      // depuis « Participation 2ème article » (DT) — jamais calculée ni dérivée
+      // (ni moitié du prix, ni % : purgerNombre, PAS parsePercentNumber).
+      // RÈGLE 2 : la date NE vient PAS de cette feuille — elle est dans la ligne
+      // détail (Catégorie « Buy 1 Get 1 Free ») ; Start/End sont lues mais ne
+      // servent JAMAIS à filtrer.
+      // ---------------------------------------------------------------------------
+      function parseBogofRows(rows) {
+        if (!Array.isArray(rows) || rows.length === 0) return [];
+        var hi = -1;
+        for (var h = 0; h < Math.min(rows.length, 5); h++) {
+          var hs = (rows[h] || []).map(function (c) { return normalizeText(c); });
+          if (hs.some(function (x) { return x.includes('restaurant'); }) && hs.some(function (x) { return x.includes('article'); })) { hi = h; break; }
+        }
+        if (hi === -1) return [];
+        var headers = (rows[hi] || []).map(function (c) { return normalizeText(c); });
+        function findCol(pred, exact) {
+          var idx = -1;
+          for (var i = 0; i < headers.length; i++) {
+            if (pred(headers[i], i)) { idx = i; if (exact) break; }
+          }
+          return idx;
+        }
+        var ci = {
+          area: findCol(function (h) { return h === 'area'; }, true),
+          resto: findCol(function (h) { return h === 'restaurant' || h === 'restaurant name'; }, true),
+          am: findCol(function (h) { return h.includes('responsable') || h === 'am' || h.includes('account manager'); }, true),
+          cPct: findCol(function (h) { return h === 'c %' || h === 'c%'; }, true),
+          article: findCol(function (h) { return h === 'article'; }, true),
+          prixArticle: findCol(function (h) { return h === 'prix article'; }, true),
+          prix2eme: findCol(function (h) { return h.includes('2eme article'); }, true),
+          // « Participation 2ème article » : chercher d'abord l'en-tête complet,
+          // sinon le premier en-tête « participation » (la feuille n'a qu'une
+          // colonne de participation).
+          participation: findCol(function (h) { return h.includes('participation 2eme article'); }, true),
+          details: findCol(function (h) { return h.includes('details de l'); }, true),
+          startDate: findCol(function (h) { return h.includes('start date'); }, true),
+          endDate: findCol(function (h) { return h.includes('end date'); }, true)
+        };
+        if (ci.participation === -1) ci.participation = findCol(function (h) { return h.includes('participation'); }, true);
+        if (ci.resto === -1 || ci.article === -1 || ci.participation === -1) return [];
+        var rules = [];
+        for (var i = hi + 1; i < rows.length; i++) {
+          var row = rows[i] || [];
+          var name = String(row[ci.resto] || '').trim();
+          var article = String(row[ci.article] || '').trim();
+          if (!name || !article) continue;
+          var part = purgerNombre(row[ci.participation]);
+          if (!(part > 0)) continue; // sans participation, la règle ne sert à rien
+          rules.push({
+            area: ci.area >= 0 ? String(row[ci.area] || '').trim() : '',
+            restaurant: name,
+            restaurantNorm: normalizeText(name),
+            am: ci.am >= 0 ? (matchAgentFromText(String(row[ci.am] || '')) || String(row[ci.am] || '').trim()) : '',
+            cPct: ci.cPct >= 0 ? parsePercentNumber(row[ci.cPct]) : 0,
+            article: article,
+            articleNorm: normalizeNomArticle(article),
+            prixArticle: ci.prixArticle >= 0 ? purgerNombre(row[ci.prixArticle]) : 0,
+            prix2emeArticle: ci.prix2eme >= 0 ? purgerNombre(row[ci.prix2eme]) : 0,
+            participation2eme: part,
+            details: ci.details >= 0 ? String(row[ci.details] || '').trim() : '',
+            startDate: ci.startDate >= 0 ? parseOrderDayToIsoDate(row[ci.startDate]) : '',
+            endDate: ci.endDate >= 0 ? parseOrderDayToIsoDate(row[ci.endDate]) : ''
+          });
+        }
+        return rules;
+      }
+      if (typeof window !== 'undefined') window.yassirParseBogofRows = parseBogofRows;
+
+      // Index des règles Bogof par restaurant (normalisé), reconstruit quand le
+      // tableau change — même motif que getKoolRulesByRestoMap.
+      var _bogofRulesIndex = { rulesRef: null, len: 0, map: new Map() };
+      // Référence des règles Bogof vue par l'évaluateur : quand elle change,
+      // le cache d'évaluation Kool est invalidé (voir evaluerOffreKoolPourCommande).
+      var _bogofEvalRef = null;
+      var _bogofEvalLen = 0;
+      function getBogofRulesByRestoMap() {
+        var rules = state.bogofRules || [];
+        if (_bogofRulesIndex.rulesRef === rules && _bogofRulesIndex.len === rules.length) return _bogofRulesIndex.map;
+        var m = new Map();
+        rules.forEach(function (r) {
+          var k = String(r.restaurant || '').trim().toLowerCase();
+          if (!k) return;
+          if (!m.has(k)) m.set(k, []);
+          m.get(k).push(r);
+          var kn = normalizeText(r.restaurant || '');
+          if (kn && kn !== k) {
+            if (!m.has(kn)) m.set(kn, []);
+            m.get(kn).push(r);
+          }
+        });
+        _bogofRulesIndex = { rulesRef: rules, len: rules.length, map: m };
+        return m;
+      }
+
       window.yassirOnOffrePartFileChange = async function (e) {
         if (!isOwnerAdmin()) return;
         var file = e.target.files && e.target.files[0];
@@ -394,11 +499,12 @@
       }
 
       // Calcul de participation d'offre sur les articles d'une commande Kool (détails Sheet 15D9KM6G...)
-      function calculerParticipationArticlesCommandeKool(orderId, articleRules) {
+      function calculerParticipationArticlesCommandeKool(orderId, articleRules, bogofRules) {
         if (!orderId || !window.koolOrderItemsByOrderId) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [], unattributedTnd: 0, unattributedCount: 0, unattributedBreakdown: [] };
         var oidKey = String(orderId).trim().toLowerCase();
         var items = window.koolOrderItemsByOrderId.get(oidKey);
         if (!items || items.length === 0) return { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [], unattributedTnd: 0, unattributedCount: 0, unattributedBreakdown: [] };
+        var bogofRulesList = Array.isArray(bogofRules) ? bogofRules : (state.bogofRules || []);
 
         var costTnd = 0;
         var discountTotalTnd = 0;
@@ -421,6 +527,49 @@
             ? it.discountPrice
             : (it.unitPrice || it.originalPrice || 0);
           var lineDiscountTnd = Math.max(0, (origLineTotal - effUnitPrice * (it.quantity || 1)));
+
+          // BOGOF Kool (onglet « Bogof ») : la ligne détail porte
+          // Catégorie = « Buy 1 Get 1 Free » ; on matche l'article (+ restaurant)
+          // avec la feuille Bogof. La participation est la valeur TELLE QUELLE
+          // de « Participation 2ème article » (DT), jamais calculée ; la date
+          // vient de la ligne détail elle-même, jamais de la feuille Bogof.
+          // La remise de la ligne = prix original − prix payé (0 quand le
+          // 2ème article est offert — Discount Price = 0 ne veut PAS dire
+          // « pas de remise » ici). Split (interprétation énoncée à
+          // l'utilisateur, non confirmée explicitement) : plateforme =
+          // participation, restaurant = remise − participation.
+          var bogofRule = null;
+          if (bogofRulesList.length > 0 && (catNorm.includes('buy 1 get 1') || catNorm.includes('bogof')) && artNorm) {
+            var restoLow = String(it.restaurant || '').trim().toLowerCase();
+            for (var jB = 0; jB < bogofRulesList.length; jB++) {
+              var rb = bogofRulesList[jB];
+              var rbResto = String(rb.restaurant || '').trim().toLowerCase();
+              if (rbResto && restoLow && rbResto !== restoLow) continue;
+              var rbArt = rb.articleNorm || normalizeNomArticle(rb.article || '');
+              if (artNorm === rbArt || rbArt.includes(artNorm)) { bogofRule = rb; break; }
+            }
+          }
+          if (bogofRule) {
+            var paidUnit = (it.discountPrice > 0) ? it.discountPrice : 0; // 0 = 2ème article offert
+            var bogofDiscount = Math.max(0, origLineTotal - paidUnit * (it.quantity || 1));
+            var partPlateformeBogof = Math.min(bogofRule.participation2eme * (it.quantity || 1), bogofDiscount);
+            var partRestoBogof = Math.max(0, bogofDiscount - partPlateformeBogof);
+            costTnd += partRestoBogof;
+            discountTotalTnd += bogofDiscount;
+            matchedItemsCount += (it.quantity || 1);
+            breakdown.push({
+              article: it.article,
+              category: it.category,
+              quantity: it.quantity || 1,
+              originalTotal: origLineTotal,
+              discountTnd: Number(bogofDiscount.toFixed(3)),
+              partPct: 0,
+              partTnd: Number(partRestoBogof.toFixed(3)),
+              bogof: true,
+              participationTnd: Number(partPlateformeBogof.toFixed(3))
+            });
+            continue;
+          }
 
           // Correspondance EXACTE (audit 2026-11-27, item 5a) : le nom de l'article
           // normalisé doit être ÉGAL au libellé de la règle (détails + tag), jamais
@@ -520,15 +669,27 @@
 
       // Exposé pour la section Participation (vue « Par article » Kool) et les tests.
       window.yassirCalculerParticipationArticlesKool = calculerParticipationArticlesCommandeKool;
+      // Exposé pour les tests : règles Bogof Kool chargées (onglet « Bogof »).
+      window.yassirGetBogofRules = function () { return state.bogofRules || []; };
       // Exposé pour les tests (audit 2026-11-27, item 5c).
       window.yassirPurgerNombre = purgerNombre;
 
       // Évaluation ultra-rapide des offres & participation Kool (Toute la carte + Offres sur articles)
       function evaluerOffreKoolPourCommande(restoName, orderDayVal, orderIdVal) {
         var rulesMap = getKoolRulesByRestoMap();
-        if (rulesMap.size === 0 || !restoName) return null;
+        var bogofMap = getBogofRulesByRestoMap();
+        // Les règles Bogof seules suffisent (une commande BOGOF sans règle
+        // « Offre Participation » doit quand même être évaluée).
+        if ((rulesMap.size === 0 && bogofMap.size === 0) || !restoName) return null;
         var rawLow = String(restoName).trim().toLowerCase();
         if (!rawLow) return null;
+        // Les règles Bogof ont changé (nouvelle synchro) : le cache d'évaluation
+        // ne tient pas compte des règles, il faut l'invalider.
+        if (_bogofEvalRef !== _bogofRulesIndex.rulesRef || _bogofEvalLen !== _bogofRulesIndex.len) {
+          _bogofEvalRef = _bogofRulesIndex.rulesRef;
+          _bogofEvalLen = _bogofRulesIndex.len;
+          _koolRulesIndex.evalCache.clear();
+        }
 
         var orderIso = parseOrderDayToIsoDate(orderDayVal);
         var oidStr = orderIdVal ? String(orderIdVal).trim() : '';
@@ -538,14 +699,15 @@
         }
 
         var candList = rulesMap.get(rawLow) || rulesMap.get(normalizeText(rawLow));
-        if (!candList || candList.length === 0) {
+        var bogofList = bogofMap.get(rawLow) || bogofMap.get(normalizeText(rawLow)) || [];
+        if ((!candList || candList.length === 0) && bogofList.length === 0) {
           _koolRulesIndex.evalCache.set(cacheKey, null);
           return null;
         }
 
         var matchedTouteLaCarte = [];
         var matchedArticleRules = [];
-        for (var i = 0; i < candList.length; i++) {
+        for (var i = 0; candList && i < candList.length; i++) {
           var rl = candList[i];
           if (orderIso) {
             if (rl.startDate && orderIso < rl.startDate) continue;
@@ -558,8 +720,8 @@
           }
         }
 
-        var articleEval = (oidStr && matchedArticleRules.length > 0)
-          ? calculerParticipationArticlesCommandeKool(oidStr, matchedArticleRules)
+        var articleEval = (oidStr && (matchedArticleRules.length > 0 || bogofList.length > 0))
+          ? calculerParticipationArticlesCommandeKool(oidStr, matchedArticleRules, bogofList)
           : { costTnd: 0, discountTotalTnd: 0, matchedItemsCount: 0, breakdown: [] };
 
         if (matchedTouteLaCarte.length === 0 && articleEval.matchedItemsCount === 0) {
@@ -571,6 +733,14 @@
         // prend toute l'offre), pas une absence de participation — pas de préférence
         // pour les règles à partPct > 0.
         var best = matchedTouteLaCarte.length > 0 ? matchedTouteLaCarte[0] : matchedArticleRules[0];
+        // BOGOF sans règle « Offre Participation » : libellé depuis la ligne
+        // détail matchée (la règle Bogof n'a pas de libellé d'offre).
+        var bogofLabel = '';
+        if (!best) {
+          for (var bI = 0; bI < articleEval.breakdown.length; bI++) {
+            if (articleEval.breakdown[bI].bogof) { bogofLabel = 'BOGOF — ' + articleEval.breakdown[bI].article; break; }
+          }
+        }
 
         var resObj = {
           rule: best,
@@ -584,7 +754,7 @@
           articleBreakdown: articleEval.breakdown,
           articleUnattributedTnd: articleEval.unattributedTnd || 0,
           articleUnattributedCount: articleEval.unattributedCount || 0,
-          label: formaterLibelleOffreKool(best)
+          label: formaterLibelleOffreKool(best) || bogofLabel
         };
         if (_koolRulesIndex.evalCache.size > 50000) _koolRulesIndex.evalCache.clear();
         _koolRulesIndex.evalCache.set(cacheKey, resObj);
@@ -594,7 +764,9 @@
       function calculerCoutParticipationOffresLivrees(deliveredRecords) {
         if (!deliveredRecords || deliveredRecords.length === 0) return 0;
         var rules = state.offreParticipationRules || [];
-        if (rules.length === 0) return 0;
+        // Les règles Bogof seules suffisent : une commande BOGOF compte dans
+        // le budget même si la feuille « Offre Participation » est vide.
+        if (rules.length === 0 && (state.bogofRules || []).length === 0) return 0;
 
         // Règles comptables (2026-11-26) : pour Kool, seules les offres de la feuille
         // « Offre Participation » comptent — sans règle, la commande est exclue

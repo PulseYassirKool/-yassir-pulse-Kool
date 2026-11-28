@@ -52,6 +52,14 @@ function cannedSheets() {
         ['Tunis', 'Resto Omar Kool', '20', 'Discount', 'Omar Beldi', '10', 'Kool'],
         ['Tunis', 'Resto Eya 1', '25', 'Discount', 'Eya Majdoub', '10', 'Yassir']
       ],
+      // Bogof Kool : la participation est une somme en DT (colonne
+      // « Participation 2ème article »), jamais un % ; la date ne vient
+      // pas de cette feuille (elle est dans la ligne détail).
+      Bogof: [
+        ['Area', 'Restaurant', 'Responsable AM', 'C%', 'C% Globale', 'Article', 'Prix article', '2ème Article (prix)', 'Participation 2ème article', 'Spécificité', "Détails de l'offre", 'Start Date', 'End Date', 'Période'],
+        ['Tunis', 'Resto Omar Kool', 'Omar Beldi', '20', '', 'Pizza Polo', '25', '12', '6', '', 'Buy 1 Get 1 Free', '', '', ''],
+        ['Tunis', 'Resto Eya Kool', 'Eya Majdoub', '20', '', 'Pizza Polo', '25', '12', '4', '', 'Buy 1 Get 1 Free', '', '', '']
+      ],
       Budget: [
         ['AM', 'Budget', 'APP'],
         ['Omar Beldi', '100000', 'Yassir'],
@@ -125,7 +133,7 @@ function cannedSheets() {
   };
 }
 const GIDS = {
-  [UNIQUE]: { omar: 1, Nour: 2, Eya: 3, Aziza: 4, Commissions: 9, 'Offre Participation': 10, Budget: 11, Statuts: 12, '2025 Yassir': 13, '2025 Kool': 14 },
+  [UNIQUE]: { omar: 1, Nour: 2, Eya: 3, Aziza: 4, Commissions: 9, 'Offre Participation': 10, Budget: 11, Statuts: 12, '2025 Yassir': 13, '2025 Kool': 14, Bogof: 15 },
   [OCT]: { 'Data exp': 0, 'Data 02-10': 5 },
   [NOV]: { 'Data exp': 1826888592 },
   [DATA_KOOL]: { Data: 0, 'Data 02-11': 6 },
@@ -350,6 +358,25 @@ test('commissions / offres / budget / statuts : filtrage par portefeuille et par
     const statutsKool = await call('GET', '/api/sheets/statuts?brand=kool', null, omar);
     assert.equal(statutsKool.json.totalRows, 0);
     assert.equal(statutsKool.json.access, 'none');
+  } finally { restoreFetch(originalFetch); }
+});
+
+test('bogof : onglet « Bogof » du classeur unique, filtré par portefeuille AM (Kool)', async () => {
+  const originalFetch = globalThis.fetch;
+  installMock();
+  try {
+    const owner = await login('proprio', 'Secret-Proprio-1');
+    const omar = await login('omar.beldi', 'Omar-Password-2');
+    // Proprio : les 2 règles Bogof (Omar Kool + Eya Kool).
+    const all = await call('GET', '/api/sheets/bogof?brand=kool', null, owner);
+    assert.equal(all.json.totalRows, 2);
+    assert.equal(all.json.rows[1][1], 'Resto Omar Kool');
+    assert.equal(all.json.rows[1][8], '6'); // Participation 2ème article, telle quelle
+    // Omar (AM) : uniquement sa règle (Resto Omar Kool), jamais celle d'Eya.
+    const mine = await call('GET', '/api/sheets/bogof?brand=kool', null, omar);
+    assert.equal(mine.json.totalRows, 1);
+    assert.equal(mine.json.rows[1][1], 'Resto Omar Kool');
+    assert.ok(!JSON.stringify(mine.json.rows).includes('Resto Eya Kool'));
   } finally { restoreFetch(originalFetch); }
 });
 

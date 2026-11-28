@@ -67,7 +67,7 @@ test('assistant : la clé Gemini n\'est jamais exposée (en-tête seulement, jam
     assert.equal(r.status, 200);
     assert.equal(r.json.answer, 'Réponse simulée.');
     const last = globalThis.__geminiLastCall;
-    assert.ok(String(last.url).includes('gemini-2.5-flash:generateContent'), 'mauvais modèle/URL : ' + last.url);
+    assert.ok(String(last.url).includes('gemini-3.5-flash:generateContent'), 'mauvais modèle/URL : ' + last.url);
     assert.equal(last.opts.headers['x-goog-api-key'], 'CLE_TEST_SIMULEE_JAMAIS_UNE_VRAIE_CLE');
     assert.ok(!String(last.url).includes('CLE_TEST'), 'la clé ne doit jamais être dans l\'URL');
     assert.ok(!String(last.opts.body).includes('CLE_TEST'), 'la clé ne doit jamais être dans le corps');

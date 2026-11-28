@@ -198,7 +198,10 @@ function buildGoogleMockData(overrides) {
       ],
       // 2025 Kool : pas de données par défaut (les tests existants supposent
       // « aucune donnée Kool 2025 ») ; seul un override explicite en fournit.
-      '2025 Kool': ov.hist2025 ? csvToRows(ov.hist2025) : [['', 'W 45', 'W 46', 'W 47']]
+      '2025 Kool': ov.hist2025 ? csvToRows(ov.hist2025) : [['', 'W 45', 'W 46', 'W 47']],
+      // Bogof Kool : en-têtes seuls par défaut (aucune règle) ; un override
+      // explicite fournit les règles des tests Bogof.
+      Bogof: ov.bogof ? csvToRows(ov.bogof) : [['Area', 'Restaurant', 'Responsable AM', 'C%', 'C% Globale', 'Article', 'Prix article', '2ème Article (prix)', 'Participation 2ème article', 'Spécificité', "Détails de l'offre", 'Start Date', 'End Date', 'Période']]
     },
     [OCT]: { 'Data exp': [TARGET_HEADERS_TEST.slice(), yassirRow('16/10/2026', 'YAF-1', 'Resto Yassir A', 100, 0, '', '')] },
     [NOV]: { 'Data exp': [TARGET_HEADERS_TEST.slice(), yassirRow('16/11/2026', 'YAF-2', 'Resto Yassir A', 60, 0, '', '')] },
@@ -740,6 +743,84 @@ test('Kool : section Participation (toute la carte / par article) et colonne Pro
   assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
 });
 
+// ---- Bogof Kool (onglet « Bogof », 2026-11-28) ----
+// RÈGLE 1 : la participation est prise TELLE QUELLE depuis « Participation
+// 2ème article » (DT), jamais calculée ni dérivée. RÈGLE 2 : la date vient
+// de la ligne détail (Catégorie « Buy 1 Get 1 Free »), jamais de la feuille
+// Bogof (les dates de la feuille sont ignorées — ici absentes).
+// Split (interprétation à confirmer par l'utilisateur) : plateforme =
+// participation, restaurant = remise − participation.
+// 1008 (Alpha, Pizza Polo, 2ème article 12, participation 6) : remise 12,
+// plateforme 6, resto 6. 1009 (Alpha, Sandwich A76, 2ème article 9,
+// participation 2,5 — PAS la moitié calculée, la valeur telle quelle) :
+// remise 9, plateforme 2,50, resto 6,50. 1010 (Beta, Pizza Polo, 2ème
+// article 12, participation 4 — autre restaurant, autre règle) : remise 12,
+// plateforme 4, resto 8. Totaux vue article : 3 / 33.00 / 20.50 / 12.50.
+// La règle « Super Promo » d'Alpha ne doit PAS s'appliquer aux lignes BOGOF
+// (catégorie différente, pas de Pack/BOGOF dans le libellé).
+const koolCsvDataBogof = toCsv([
+  ['Annulé', '', 'Raison annulation', 'Date', 'N° commande', '', 'Restaurant', '', '', 'Montant HT', 'Frais livraison', 'Remise'],
+  ['', '', '', '17/11/2026', '1008', '', 'Resto Alpha', '', '', '12.00', '3', '12'],
+  ['', '', '', '17/11/2026', '1009', '', 'Resto Alpha', '', '', '9.00', '3', '9'],
+  ['', '', '', '17/11/2026', '1010', '', 'Resto Beta', '', '', '12.00', '3', '12']
+]);
+const koolCsvItemsBogof = toCsv([
+  ['Order ID', 'Date', 'Restaurant', 'Category', 'Article', 'Quantity', 'Unit Price', 'Discount Price', 'Original Price', 'Type'],
+  ['1008', '17/11/2026', 'Resto Alpha', 'Buy 1 Get 1 Free', 'Pizza Polo', 1, 12, 0, 12, 'Food'],
+  ['1009', '17/11/2026', 'Resto Alpha', 'Buy 1 Get 1 Free', 'Sandwich A76', 1, 9, 0, 9, 'Food'],
+  ['1010', '17/11/2026', 'Resto Beta', 'Buy 1 Get 1 Free', 'Pizza Polo', 1, 12, 0, 12, 'Food']
+]);
+const koolCsvOffreBogof = toCsv([
+  ['Restaurant', 'Participation', 'Tag', 'Période'],
+  ['Resto Alpha', '10', 'Super Promo', '01/11/2026 - 30/11/2026']
+]);
+const koolCsvBogof = toCsv([
+  ['Area', 'Restaurant', 'Responsable AM', 'C%', 'C% Globale', 'Article', 'Prix article', '2ème Article (prix)', 'Participation 2ème article', 'Spécificité', "Détails de l'offre", 'Start Date', 'End Date', 'Période'],
+  ['Tunis', 'Resto Alpha', 'Omar Beldi', '20', '', 'Pizza Polo', '25', '12', '6', '', 'Buy 1 Get 1 Free', '', '', ''],
+  ['Tunis', 'Resto Alpha', 'Omar Beldi', '20', '', 'Sandwich A76', '14,5', '9', '2,5', '', 'Buy 1 Get 1 Free', '', '', ''],
+  ['Ariana', 'Resto Beta', 'Nour Ali', '20', '', 'Pizza Polo', '25', '12', '4', '', 'Buy 1 Get 1 Free', '', '', '']
+]);
+
+test('Kool : Bogof — participation telle quelle depuis la feuille Bogof (vue Par article)', async () => {
+  const w = bootKool({ data: koolCsvDataBogof, items: koolCsvItemsBogof, offre: koolCsvOffreBogof, bogof: koolCsvBogof });
+  await login(w, 'proprio', 'Proprio-Test-123');
+  await w.yassirSyncKoolSheets(true);
+  w.yassirSwitchBrand('kool');
+  await wait(600);
+  w.yassirApplyDatePreset('ALL');
+  await wait(600);
+
+  // La synchro Kool a chargé les 3 règles Bogof (onglet « Bogof »).
+  assert.equal(w.yassirGetBogofRules().length, 3, 'règles Bogof chargées');
+  assert.equal(w.yassirGetBogofRules()[0].participation2eme, 6, 'participation telle quelle (6 DT, pas un %)');
+  assert.equal(w.yassirGetBogofRules()[1].participation2eme, 2.5, 'participation 2,5 telle quelle (pas la moitié de 9)');
+
+  // Carte GMV : item total des livrées = 24 + 18 + 24 = 66,00 TND.
+  assert.equal(w.document.getElementById('kpiGmvLivrees').textContent, '66,00 TND', 'GMV Kool Bogof');
+
+  // Vue « Par article » : 3 offres / remise 33.00 / resto 20.50 / plateforme 12.50.
+  w.yassirSwitchTab('participation');
+  await wait(600);
+  w.yassirSetParticipationView('article');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '3', 'Total Offres Bogof (article)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '33.00 TND', 'Remise Bogof (article)');
+  assert.equal(w.document.getElementById('partKpiResto').textContent, '20.50 TND', 'Participation restaurant Bogof (article)');
+  assert.equal(w.document.getElementById('partKpiPlateforme').textContent, '12.50 TND', 'Participation plateforme Bogof (article)');
+  const bodyTxt = w.document.getElementById('partTableBody').textContent;
+  assert.ok(bodyTxt.includes('Resto Alpha'), 'Resto Alpha absent en vue article Bogof');
+  assert.ok(bodyTxt.includes('Resto Beta'), 'Resto Beta absent en vue article Bogof');
+  // KPI budget « Participation Offres » (coût restaurant) : 6 + 6,50 + 8 = 20,50.
+  assert.equal(w.yassirCalculerCoutParticipationOffresLivrees(w.yassirGetDeliveredRecords()), 20.5, 'KPI Participation Offres Bogof (coût restaurant)');
+
+  // Vue « Toute la carte » : aucune règle carte pour Alpha/Beta → 0 offre.
+  // Le Bogof ne doit PAS fuiter dans la vue carte.
+  w.yassirSetParticipationView('carte');
+  assert.equal(w.document.getElementById('partKpiOffres').textContent, '0', 'Total Offres Bogof (carte — doit être 0)');
+  assert.equal(w.document.getElementById('partKpiRemise').textContent, '0.00 TND', 'Remise Bogof (carte — doit être 0)');
+
+  assert.equal(errors.length, 0, 'erreurs JS : ' + JSON.stringify(errors));
+});
+
 // ---- Correctif 1 (diagnostic 2026-11-27) : partPct Kool lu 100 fois trop petit ----
 // La feuille « Offre Participation » écrit la participation « 0,1 » (= 10 %) ;
 // la synchro Kool lit la feuille en CSV (chaînes) et parsePercentNumber ne
@@ -1182,6 +1263,13 @@ test('Yassir : règle comptable — offre sans règle à 100 % restaurant (carte
   const dataFile = makeXlsxFile(dataAoa, 'Data exp', 'data-exp.xlsx');
   w.yassirOnMainFileChange({ target: { files: [dataFile], value: 'x' } });
   await wait(1200);
+
+  // Carte GMV (Export Offres, 2026-11-28) : GMV livrées = somme « item total »
+  // (100 + 50 + 80 + 60 + 40 = 330 pour le fichier importé) + 160 des lignes
+  // mock YAF-1 (100) et YAF-2 (60) chargées par la synchro auto à la connexion
+  // — le GMV compte toutes les livrées, pas seulement les offres (YAF-1/YAF-2
+  // n'ont ni remise ni Discount Type, donc la Participation ne les compte pas).
+  assert.equal(w.document.getElementById('kpiGmvLivrees').textContent, '490,00 TND', 'GMV Yassir (item total livrées)');
 
   // Vue « Toute la carte » : A (règle 10 % : plateforme 10, resto 0), B (sans règle :
   // resto 5, plateforme 0), C (règle 0 % : resto 8, plateforme 0). D (règle article)
@@ -2889,17 +2977,21 @@ test('KPI : les cartes suivent la semaine choisie (S47 puis S43), jamais le glob
   // Toute la période : 6 commandes, CA 105,00 TND (20 % × 525).
   assert.equal(kpi('kpiTotalOrders'), '6', 'total global');
   assert.equal(kpi('kpiTotalCa'), '105,00 TND', 'CA global');
+  // GMV livrées (item total = Montant HT + Remise, Remise 0 ici) : 525,00.
+  assert.equal(kpi('kpiGmvLivrees'), '525,00 TND', 'GMV global');
   // S47 (16→22 nov.) : 4 commandes, CA 75,00 TND.
   w.yassirOnWeekSelectChange('2026-11-16|2026-11-22|S47');
   await wait(300);
   assert.equal(kpi('kpiTotalOrders'), '4', 'total S47');
   assert.equal(kpi('kpiFoodOrders'), '4', 'food S47');
   assert.equal(kpi('kpiTotalCa'), '75,00 TND', 'CA S47');
+  assert.equal(kpi('kpiGmvLivrees'), '375,00 TND', 'GMV S47');
   // S43 (19→25 oct.) : 2 commandes, CA 30,00 TND.
   w.yassirOnWeekSelectChange('2026-10-19|2026-10-25|S43');
   await wait(300);
   assert.equal(kpi('kpiTotalOrders'), '2', 'total S43');
   assert.equal(kpi('kpiTotalCa'), '30,00 TND', 'CA S43');
+  assert.equal(kpi('kpiGmvLivrees'), '150,00 TND', 'GMV S43');
   // Semaine vide (S47 2027, choisie par erreur — le libellé n'affiche pas
   // l'année) : plus aucun chiffre figé du global, la section se masque et
   // les compteurs sont à 0.
@@ -2908,11 +3000,13 @@ test('KPI : les cartes suivent la semaine choisie (S47 puis S43), jamais le glob
   assert.ok(w.document.getElementById('kpiSection').classList.contains('hidden'), 'la section KPI doit se masquer sur une période vide');
   assert.equal(kpi('kpiTotalOrders'), '0', 'total période vide (global figé !)');
   assert.equal(kpi('kpiTotalCa'), '0,00 TND', 'CA période vide (global figé !)');
+  assert.equal(kpi('kpiGmvLivrees'), '0,00 TND', 'GMV période vide (global figé !)');
   // Retour à toute la période : les totaux globaux reviennent.
   w.yassirOnWeekSelectChange('');
   await wait(300);
   assert.equal(kpi('kpiTotalOrders'), '6', 'total global après retour');
   assert.equal(kpi('kpiTotalCa'), '105,00 TND', 'CA global après retour');
+  assert.equal(kpi('kpiGmvLivrees'), '525,00 TND', 'GMV global après retour');
   assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
 });
 
@@ -2925,6 +3019,7 @@ test('KPI : les cartes suivent un changement de date jour par jour et les prér�
   await wait(600);
   const kpi = (id) => w.document.getElementById(id).textContent;
   assert.equal(kpi('kpiTotalOrders'), '6', 'total global');
+  assert.equal(kpi('kpiGmvLivrees'), '525,00 TND', 'GMV global');
   // Un seul jour (16/11) : 2 commandes, CA 60,00 TND (20 % × 300).
   w.document.getElementById('filterDateStart').value = '2026-11-16';
   w.document.getElementById('filterDateEnd').value = '2026-11-16';
@@ -2932,16 +3027,19 @@ test('KPI : les cartes suivent un changement de date jour par jour et les prér�
   await wait(300);
   assert.equal(kpi('kpiTotalOrders'), '2', 'total 16/11');
   assert.equal(kpi('kpiTotalCa'), '60,00 TND', 'CA 16/11');
+  assert.equal(kpi('kpiGmvLivrees'), '300,00 TND', 'GMV 16/11');
   // Préréglage 7 jours (depuis la date max 22/11 → 16→22/11) : 4 commandes, CA 75,00 TND.
   w.yassirApplyDatePreset('LAST_7');
   await wait(300);
   assert.equal(kpi('kpiTotalOrders'), '4', 'total 7 derniers jours');
   assert.equal(kpi('kpiTotalCa'), '75,00 TND', 'CA 7 derniers jours');
+  assert.equal(kpi('kpiGmvLivrees'), '375,00 TND', 'GMV 7 derniers jours');
   // Préréglage Tout : retour au global.
   w.yassirApplyDatePreset('ALL');
   await wait(300);
   assert.equal(kpi('kpiTotalOrders'), '6', 'total global après Tout');
   assert.equal(kpi('kpiTotalCa'), '105,00 TND', 'CA global après Tout');
+  assert.equal(kpi('kpiGmvLivrees'), '525,00 TND', 'GMV global après Tout');
   assert.equal(errors.length, 0, 'erreurs JS inattendues : ' + errors.join(' | '));
 });
 

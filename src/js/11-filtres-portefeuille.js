@@ -92,6 +92,7 @@
         }
         var idxStatus = TARGET_HEADERS.indexOf('status');
         var idxCA = TARGET_HEADERS.indexOf('CA');
+        var idxItemTotal = TARGET_HEADERS.indexOf('item total');
         var idxLrLg = TARGET_HEADERS.indexOf('à payer réduits');
         var idxOrigDelivAm = TARGET_HEADERS.indexOf('original delivery amount');
         var idxDelivAmt = TARGET_HEADERS.indexOf('delivery amount');
@@ -115,6 +116,14 @@
                         fDel.reduce(function (acc, r) { return acc + purgerNombre(r.cells[idxCA]); }, 0);
         var caRecues = mList.reduce(function (acc, r) { return acc + purgerNombre(r.cells[idxCA]); }, 0) +
                        fList.reduce(function (acc, r) { return acc + purgerNombre(r.cells[idxCA]); }, 0);
+        // GMV livrées (brut avant remise) : somme « item total » des livrées —
+        // même définition que la Synthèse Globale (05-synthese-globale.js).
+        // Kool : item total = J + L (Montant HT + Remise) ; Yassir : item total
+        // de la Data. Si la colonne est absente, 0 (jamais un faux chiffre).
+        var gmvLivrees = (idxItemTotal !== -1)
+          ? mDel.reduce(function (acc, r) { return acc + purgerNombre(r.cells[idxItemTotal]); }, 0) +
+            fDel.reduce(function (acc, r) { return acc + purgerNombre(r.cells[idxItemTotal]); }, 0)
+          : 0;
 
         var allDelivForScope = mDel.concat(fDel);
         var lrLgTnd = allDelivForScope.reduce(function (acc, r) {
@@ -177,6 +186,7 @@
           restosOffreCount: restosOffreSet.size,
           caLivrees: caLivrees,
           caRecues: caRecues,
+          gmvLivrees: gmvLivrees,
           lrLgTnd: lrLgTnd,
           offerPartTnd: offerPartTnd,
           totalBudgetUsedTnd: totalBudgetUsedTnd,

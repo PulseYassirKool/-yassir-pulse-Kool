@@ -331,6 +331,11 @@
         document.getElementById('kpiTotalCa').textContent = currentStats.caLivrees.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' TND';
         document.getElementById('kpiCaBreakdown').textContent = 'Total reçues : ' + currentStats.caRecues.toFixed(2) + ' TND';
 
+        // Carte GMV (Export Offres, 2026-11-28) : GMV brut avant remise des
+        // livrées (item total), même définition que la Synthèse Globale.
+        document.getElementById('kpiGmvLivrees').textContent = (currentStats.gmvLivrees || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' TND';
+        document.getElementById('kpiGmvBreakdown').textContent = 'Brut avant remise (Item total) • Livrées : ' + currentStats.totalLivrees.toLocaleString('fr-FR');
+
         // Mise à jour de l'encart Profil AM (LR/LG & Budget du périmètre).
         // Le budget affiché est toujours celui du périmètre des dépenses :
         // budget de l'AM du périmètre, ou budget global (proprio / lecture)

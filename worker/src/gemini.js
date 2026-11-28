@@ -1,8 +1,14 @@
-// Appel à l'API Gemini (modèle gemini-2.5-flash) pour l'assistant IA du site.
+// Appel à l'API Gemini (modèle gemini-3.5-flash) pour l'assistant IA du site.
+// Historique des modèles (2026-11-28) : gemini-2.5-flash retiré par Google
+// (404 « no longer available to new users ») ; gemini-3.8-flash (recommandé
+// par Google) saturé (503 « high demand » répété) ; gemini-3.7-flash saturé
+// aussi ; gemini-3.5-flash et gemini-3.6-flash répondent (test réel 02:24 :
+// « 12 commandes (dont 11 livrées) » pour Babke mardi). Retenu : 3.5-flash,
+// le plus ancien stable de la génération 3.x, donc le moins saturé.
 // La clé ne vit que dans le secret Worker GEMINI_API_KEY (env) : elle n'est
 // jamais mise dans un fichier, un log, une URL ou une réponse. `fetchImpl`
 // est injectable pour les tests (par défaut le fetch global du Worker).
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-3.5-flash';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
 
 // Consigne système envoyée à Gemini à chaque question : l'assistant ne

@@ -51,7 +51,7 @@ export const MAX_PAGE_SIZE = 10000;
 // Sources servies. `kind` : 'named' (un onglet désigné) ou 'multi' (tous les
 // onglets valides du classeur). `dedupe` : clé de déduplication entre onglets.
 export const SHEET_SOURCES = [
-  'portfolios', 'commissions', 'offres', 'budget', 'statuts', 'hist2025',
+  'portfolios', 'commissions', 'offres', 'bogof', 'budget', 'statuts', 'hist2025',
   'data-oct', 'data-nov', 'data-kool', 'details-kool'
 ];
 
@@ -199,6 +199,13 @@ export function resolveSourcePlan(config, source, brand) {
       return { spreadsheetId: brand === 'kool' ? (kool.COMMISSION_SHEET_ID || uniqueId) : (live.COMMISSIONS_SHEET_ID || uniqueId), kind: 'named', tab: brand === 'kool' ? (kool.COMMISSION_TAB || 'Commissions') : (live.COMMISSIONS_TAB || 'Commissions'), altTabs: brand === 'kool' ? (kool.COMMISSION_ALT_TABS || []) : [], gid: brand === 'kool' ? kool.COMMISSION_GID : live.COMMISSIONS_GID };
     case 'offres':
       return { spreadsheetId: live.OFFRE_PARTICIPATION_SHEET_ID || uniqueId, kind: 'named', tab: 'Offre Participation', altTabs: ['Offre Participation', 'Offres'], gid: live.OFFRE_PARTICIPATION_GID };
+    // Bogof Kool (onglet « Bogof » du classeur unique) : offres buy-one-get-one
+    // Kool. Participation = valeur TELLE QUELLE de la colonne
+    // « Participation 2ème article » (DT), jamais calculée ; la date vient
+    // de la ligne détail (Catégorie « Buy 1 Get 1 Free »), jamais de la
+    // feuille Bogof. Filtrage AM par restaurant comme « offres ».
+    case 'bogof':
+      return { spreadsheetId: live.OFFRE_PARTICIPATION_SHEET_ID || uniqueId, kind: 'named', tab: 'Bogof', altTabs: ['Bogof'], gid: live.BOGOF_GID };
     case 'budget':
       return { spreadsheetId: live.BUDGET_SHEET_ID || uniqueId, kind: 'named', tab: live.BUDGET_TAB || 'Budget', altTabs: ['Budget'], gid: live.BUDGET_GID };
     case 'statuts':

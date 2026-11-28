@@ -272,6 +272,7 @@
           customCommissions: null,
           amPortfolios: null,
           offreParticipationRules: null,
+          bogofRules: null,
           budgetByAm: {},
           dateStart: '',
           dateEnd: '',
@@ -295,6 +296,19 @@
 
       function loadKoolStoredOffreParticipation() {
         var raw = safeGet('kool_vf_offre_participation_v1');
+        if (raw) {
+          try {
+            var p = JSON.parse(raw);
+            if (Array.isArray(p) && p.length > 0) return p;
+          } catch (e) {}
+        }
+        return [];
+      }
+
+      // Règles Bogof Kool (onglet « Bogof » du classeur unique) : même clé de
+      // stockage que les règles « Offre Participation », en parallèle.
+      function loadKoolStoredBogof() {
+        var raw = safeGet('kool_vf_bogof_v1');
         if (raw) {
           try {
             var p = JSON.parse(raw);
@@ -399,6 +413,12 @@
             state.offreParticipationRules = getDefaultOffreParticipationRules();
             state.offreRulesSource = 'secours';
           }
+        }
+        // Règles Bogof Kool : archive de marque, sinon localStorage.
+        if (brandKey === 'kool') {
+          state.bogofRules = (b.bogofRules && b.bogofRules.length > 0) ? b.bogofRules : loadKoolStoredBogof();
+        } else {
+          state.bogofRules = [];
         }
         // Budgets par marque : la carte de la marque active (Kool = lignes APP Kool
         // de l'onglet Budget, Yassir = lignes APP Yassir / sans APP).
@@ -837,6 +857,10 @@
         var pOffrePart = yassirLireFeuilleViaApi('offres', { brand: 'kool', fresh: freshKool })
           .catch(function () { return []; });
 
+        // 4b. Bogof Kool (onglet « Bogof » du classeur unique).
+        var pBogof = yassirLireFeuilleViaApi('bogof', { brand: 'kool', fresh: freshKool })
+          .catch(function () { return []; });
+
         // 5. Détails des commandes Kool (Articles, Catégories, Quantités, Prix).
         var pOrderItems = (!manualTrigger && window.yassirSliceSyncRecente && window.yassirSliceSyncRecente('details-kool', 'kool'))
           ? Promise.resolve([])
@@ -850,15 +874,16 @@
           return window.yassirSync2025KoolSheet(false);
         }).catch(function () { return 0; });
 
-        return Promise.all([pData, pComm, pPortfolios, pOffrePart, pOrderItems, pHist2025Kool]).then(function (results) {
+        return Promise.all([pData, pComm, pPortfolios, pOffrePart, pBogof, pOrderItems, pHist2025Kool]).then(function (results) {
           if (icon) icon.classList.remove('fa-spin');
 
           var rawDataRows = results[0];
           var commRows = results[1];
           var koolPortfoliosMap = results[2] || {};
           var offrePartRows = results[3];
-          var orderItemsRows = results[4];
-          var hist2025KoolCount = results[5] || 0;
+          var bogofRows = results[4];
+          var orderItemsRows = results[5];
+          var hist2025KoolCount = results[6] || 0;
 
           var orderItemsCount = 0;
           if (orderItemsRows && orderItemsRows.length > 1) {
@@ -890,6 +915,14 @@
             brandArchives.kool.offreParticipationRules = koolOffreRules.slice();
           }
 
+          // C2. Bogof Kool (onglet « Bogof ») : participation telle quelle
+          // (« Participation 2ème article », DT) ; la date vient de la ligne détail.
+          var koolBogofRules = (bogofRows && bogofRows.length > 1 && typeof parseBogofRows === 'function') ? parseBogofRows(bogofRows) : [];
+          if (koolBogofRules.length > 0) {
+            safeSet('kool_vf_bogof_v1', JSON.stringify(koolBogofRules));
+            brandArchives.kool.bogofRules = koolBogofRules.slice();
+          }
+
           // D. Data Kool (onglet unique Octobre & Novembre, colonnes adaptées dynamiquement)
           var wasBrand = currentBrand;
           if (wasBrand !== 'kool') {
@@ -900,6 +933,7 @@
             if (commCount > 0) state.customCommissions = Object.assign({}, koolCommMap);
             if (portCount > 0) state.amPortfolios = Object.assign({}, koolPortfoliosMap);
             if (koolOffreRules.length > 0) state.offreParticipationRules = koolOffreRules.slice();
+            if (koolBogofRules.length > 0) state.bogofRules = koolBogofRules.slice();
           }
 
           // Purger toute éventuelle source Yassir de l'archive Kool
@@ -994,7 +1028,7 @@
                 '<strong>Synchronisation Kool réussie !</strong><br/>' +
                 '• Data Oct & Nov : <strong>' + addedDataCount + '</strong> commandes.<br/>' +
                 '• Commissions Kool : <strong>' + commCount + '</strong> taux.<br/>' +
-                '• Portefeuilles Kool : <strong>' + portCount + '</strong> restos • Offres : <strong>' + koolOffreRules.length + '</strong> règles • Détails articles : <strong>' + orderItemsCount + '</strong> lignes.' +
+                '• Portefeuilles Kool : <strong>' + portCount + '</strong> restos • Offres : <strong>' + koolOffreRules.length + '</strong> règles • Bogof : <strong>' + koolBogofRules.length + '</strong> règles • Détails articles : <strong>' + orderItemsCount + '</strong> lignes.' +
                 (hist2025KoolCount > 0 ? '<br/>• Données 2025 Kool : <strong>' + hist2025KoolCount + '</strong> lignes.' : ''),
                 'success'
               );

@@ -96,6 +96,8 @@
           if (Object.keys(kp).length > 0) state.amPortfolios = kp;
           var ko = loadKoolStoredOffreParticipation();
           if (ko.length > 0) { state.offreParticipationRules = ko; state.offreRulesSource = 'feuille'; }
+          var kb = (typeof loadKoolStoredBogof === 'function') ? loadKoolStoredBogof() : [];
+          if (kb.length > 0) state.bogofRules = kb;
           state.budgetByAm = loadKoolStoredBudget().byAm || {};
           state.budgetGlobal = Object.values(state.budgetByAm).reduce(function (a, v) { return a + (Number(v) || 0); }, 0);
         } else {
