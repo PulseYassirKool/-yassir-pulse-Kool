@@ -5,6 +5,7 @@
 
 import { readSheetRange } from './google-sheets.js';
 import { getSheetsData, SHEET_SOURCES } from './sheets.js';
+import { askGemini } from './gemini.js';
 import { appendActivity, listActivity, clearActivity, ACTIVITY_MAX_PER_HOUR, ACTIVITY_TYPES } from './activity-log.js';
 
 const ROLES = ['owner', 'viewer_all', 'am', 'market_am'];
@@ -329,6 +330,31 @@ export async function handle(request, env) {
   if ((claims.rv || 0) !== revGen) return fail(401, 'Session expirée.');
 
   if (path === '/api/me' && method === 'GET') return reply({ user: publicUser(me) });
+
+  // ---------- Assistant IA (Gemini) ----------
+  // POST /api/assistant { question, context } -> { answer }. Le contexte
+  // vient du front (qui ne voit que les données de l'utilisateur connecté) :
+  // le Worker ne l'élargit jamais — il le transmet tel quel à Gemini avec
+  // la consigne système. La clé Gemini vit dans le secret Worker
+  // GEMINI_API_KEY : jamais dans une réponse, un log ou une URL.
+  // Limite anti-abus : 30 questions par 10 minutes et par utilisateur
+  // (le limiteur en panne laisse passer, comme pour le journal).
+  if (path === '/api/assistant' && method === 'POST') {
+    const b = await request.json().catch(() => ({}));
+    const question = String(b.question || '').trim();
+    const context = String(b.context || '');
+    if (!question || question.length > 2000) return fail(400, 'Question invalide.');
+    if (context.length > 20000) return fail(400, 'Contexte trop grand.');
+    const rlA = await rlCheck(env, `asst:${me.username}`, 30, 600000);
+    if (rlA.ok && !rlA.allowed) return fail(429, 'Trop de questions, réessayez dans quelques minutes.');
+    try {
+      const answer = await askGemini(env, question, context);
+      return reply({ answer });
+    } catch (e) {
+      if (e && e.status === 503) return fail(503, 'Assistant indisponible pour le moment.');
+      return fail(502, 'Assistant indisponible pour le moment.');
+    }
+  }
 
   // Déconnexion côté serveur (audit 2026-11-27, item 8 ; G2) : la déconnexion
   // ne touche PLUS JAMAIS au tableau des comptes — elle incrémente seulement
